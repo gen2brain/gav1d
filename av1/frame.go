@@ -424,10 +424,7 @@ func setupTile[P pixel, C coef](ts *tileState, f *frameContext[P, C],
 	}
 }
 
-// runTiles decodes every tile of the frame, at most nThreads at a time. Tiles
-// are independent by construction: they reset their contexts, never predict
-// across their own boundary, and write disjoint regions of every frame-level
-// array, so the only ordering this imposes is on error reporting.
+// runTiles decodes every tile of the frame, at most nThreads at a time.
 func (f *frameContext[P, C]) runTiles(
 	fn func(*taskContext[P, C], int, int) error, nRows, nCols int,
 ) error {
@@ -705,3 +702,11 @@ func (f *frameContext[P, C]) saveTmvsSbrow(rt *refmvsTile,
 	saveTmvs(rf.rp, rowStart8*rf.rpStride, rf.rpStride, rt.r, rt.rows[6:],
 		&rf.mfmvSign, colEnd8, rowEnd8, colStart8, rowStart8)
 }
+
+// Pixel layouts reported by Picture.Layout.
+const (
+	LayoutI400 = pixelLayoutI400
+	LayoutI420 = pixelLayoutI420
+	LayoutI422 = pixelLayoutI422
+	LayoutI444 = pixelLayoutI444
+)

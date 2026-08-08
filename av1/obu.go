@@ -38,12 +38,14 @@ type Decoder struct {
 	// Zero means GOMAXPROCS.
 	Threads int
 
+	// OperatingPoint selects a scalable stream's operating point.
+	OperatingPoint int
+
 	seqHdr   *sequenceHeader
 	frameHdr *frameHeader
 	refs     [numRefFrames]refState
 
 	strictStdCompliance bool
-	operatingPoint      int
 	operatingPointIdc   uint
 	nTiles              int
 
@@ -1338,8 +1340,8 @@ func (d *Decoder) parseOBU(data []byte) (int, error) {
 		}
 
 		opIdx := 0
-		if d.operatingPoint < int(seqHdr.numOperatingPoints) {
-			opIdx = d.operatingPoint
+		if d.OperatingPoint < int(seqHdr.numOperatingPoints) {
+			opIdx = d.OperatingPoint
 		}
 		d.operatingPointIdc = uint(seqHdr.operatingPoints[opIdx].idc)
 
