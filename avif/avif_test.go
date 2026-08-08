@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -174,6 +177,35 @@ func comparePlanes(t *testing.T, pic *av1.Picture, ref *y4m) {
 	}
 }
 
+func diffPixels(got, want image.Image) string {
+	gb, wb := got.Bounds(), want.Bounds()
+	if gb != wb {
+		return fmt.Sprintf("bounds %v, want %v", gb, wb)
+	}
+	for y := gb.Min.Y; y < gb.Max.Y; y++ {
+		for x := gb.Min.X; x < gb.Max.X; x++ {
+			r1, g1, b1, a1 := got.At(x, y).RGBA()
+			r2, g2, b2, a2 := want.At(x, y).RGBA()
+			if a1 != a2 {
+				return "alpha differs"
+			}
+			if r1 != r2 || g1 != g2 || b1 != b2 {
+				return "color differs"
+			}
+		}
+	}
+
+	return ""
+}
+
+func comparePixels(t *testing.T, got, want image.Image) {
+	t.Helper()
+
+	if diff := diffPixels(got, want); diff != "" {
+		t.Fatal(diff)
+	}
+}
+
 func avifFiles(t *testing.T, dir string) []string {
 	t.Helper()
 
@@ -202,8 +234,9 @@ func TestConformance(t *testing.T) {
 	}
 	dirs := strings.Split(env, ":")
 
-	var exact, skipped int
+	var exact, skipped, colorExact int
 	fails := map[string]int{}
+	colorFails := map[string]int{}
 
 	for _, dir := range dirs {
 		if _, err := os.Stat(dir); err != nil {
@@ -230,11 +263,48 @@ func TestConformance(t *testing.T) {
 				}
 				comparePlanes(t, pic, ref)
 				exact++
+
+				// avifpng.c copies the Y plane raw for 8-bit monochrome, skipping conversion.
+				if pic.BitDepth == 8 && pic.Layout == av1.LayoutI400 &&
+					f.alphaFor(f.primary().id) == nil &&
+					f.meta.prop(f.primary(), "clap") == nil &&
+					f.meta.prop(f.primary(), "irot") == nil &&
+					f.meta.prop(f.primary(), "imir") == nil {
+					colorFails["avifdec writes the Y plane raw"]++
+
+					return
+				}
+
+				out := filepath.Join(t.TempDir(), "ref.png")
+				cmd := exec.Command(avifdec, "--no-strict", "-u", "nearest", path, out)
+				if _, err := cmd.CombinedOutput(); err != nil {
+					colorFails["avifdec cannot convert"]++
+
+					return
+				}
+				got, err := Decode(bytes.NewReader(data))
+				if errors.Is(err, errUnsupported) {
+					skipped++
+
+					return
+				}
+				if err != nil {
+					colorFails[err.Error()]++
+					t.Skipf("color: %v", err)
+				}
+				if diff := diffPixels(got, decodePNG(t, out)); diff != "" {
+					colorFails[diff]++
+					t.Skipf("color: %s", diff)
+				}
+				colorExact++
 			})
 		}
 	}
 
-	t.Logf("%d bit-exact, %d skipped", exact, skipped)
+	t.Logf("%d planes bit-exact, %d color bit-exact, %d unsupported", exact, colorExact, skipped)
+	for k, n := range colorFails {
+		t.Logf("%4d  color: %s", n, k)
+	}
 	keys := make([]string, 0, len(fails))
 	for k := range fails {
 		keys = append(keys, k)
@@ -340,6 +410,59 @@ func TestDecode(t *testing.T) {
 			if strings.HasPrefix(name, "alpha-") && alpha == nil {
 				t.Fatal("alpha item not found")
 			}
+		})
+	}
+}
+
+func decodePNG(t *testing.T, path string) image.Image {
+	t.Helper()
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	img, err := png.Decode(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return img
+}
+
+// TestColor compares each bundled file's RGB against avifdec, which defaults to
+// bilinear upsampling, so nearest is forced.
+func TestColor(t *testing.T) {
+	if _, err := os.Stat(avifdec); err != nil {
+		t.Skip("avifdec not built")
+	}
+
+	files, err := filepath.Glob(filepath.Join("testdata", "*.avif"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(files)
+
+	for _, path := range files {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "ref.png")
+			cmd := exec.Command(avifdec, "--no-strict", "-u", "nearest", path, out)
+			if b, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("avifdec: %v\n%s", err, b)
+			}
+			want := decodePNG(t, out)
+
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Decode(bytes.NewReader(raw))
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+
+			comparePixels(t, got, want)
 		})
 	}
 }

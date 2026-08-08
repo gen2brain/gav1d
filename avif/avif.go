@@ -148,21 +148,34 @@ func parseGrid(b []byte) (gridInfo, error) {
 }
 
 // decodeGrid decodes a grid item's dimg tiles and stitches them row-major.
-func (f *file) decodeGrid(it *item) (*av1.Picture, error) {
+func (f *file) gridOf(it *item) (gridInfo, []uint32, error) {
 	data, err := f.meta.data(it, f.data)
 	if err != nil {
-		return nil, err
+		return gridInfo{}, nil, err
 	}
 	g, err := parseGrid(data)
 	if err != nil {
+		return gridInfo{}, nil, err
+	}
+	tiles := f.meta.refsTo("dimg", it.id)
+	if len(tiles) != g.rows*g.cols {
+		return gridInfo{}, nil, errInvalid
+	}
+
+	return g, tiles, nil
+}
+
+func (f *file) decodeGrid(it *item) (*av1.Picture, error) {
+	g, tiles, err := f.gridOf(it)
+	if err != nil {
 		return nil, err
 	}
 
-	tiles := f.meta.refsTo("dimg", it.id)
-	if len(tiles) != g.rows*g.cols {
-		return nil, errInvalid
-	}
+	return f.decodeTiles(g, tiles)
+}
 
+func (f *file) decodeTiles(g gridInfo, tiles []uint32) (*av1.Picture, error) {
+	var err error
 	pics := make([]*av1.Picture, len(tiles))
 	for i, id := range tiles {
 		t := f.meta.items[id]
@@ -198,10 +211,14 @@ func stitch(pics []*av1.Picture, g gridInfo, tw, th int) *av1.Picture {
 	}
 
 	out := &av1.Picture{
-		Width:    g.w,
-		Height:   g.h,
-		Layout:   first.Layout,
-		BitDepth: first.BitDepth,
+		Width:          g.w,
+		Height:         g.h,
+		Layout:         first.Layout,
+		BitDepth:       first.BitDepth,
+		ColorPrimaries: first.ColorPrimaries,
+		Transfer:       first.Transfer,
+		MatrixCoeffs:   first.MatrixCoeffs,
+		FullRange:      first.FullRange,
 	}
 	for pl := range 3 {
 		if first.Data[pl] == nil {
@@ -256,6 +273,25 @@ func subsampling(layout int) (int, int) {
 	}
 }
 
+// gridAlpha assembles alpha from items attached to a grid's tiles.
+func (f *file) gridAlpha(it *item) (*av1.Picture, error) {
+	g, tiles, err := f.gridOf(it)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]uint32, len(tiles))
+	for i, id := range tiles {
+		a := f.alphaFor(id)
+		if a == nil {
+			return nil, nil
+		}
+		ids[i] = a.id
+	}
+
+	return f.decodeTiles(g, ids)
+}
+
 func (f *file) decodePrimary() (*av1.Picture, *av1.Picture, error) {
 	it := f.primary()
 	if it == nil {
@@ -292,6 +328,13 @@ func (f *file) decodePrimary() (*av1.Picture, *av1.Picture, error) {
 		if err != nil {
 			return nil, nil, err
 		}
+	} else if it.typ == "grid" {
+		alpha, err = f.gridAlpha(it)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if alpha != nil {
 		if alpha.Width < w || alpha.Height < h {
 			return nil, nil, errInvalid
 		}
@@ -301,7 +344,7 @@ func (f *file) decodePrimary() (*av1.Picture, *av1.Picture, error) {
 	return pic, alpha, nil
 }
 
-// Decode reads an AVIF image. Eight-bit images come back as standard library YCbCr types.
+// Decode reads an AVIF image as *image.NRGBA, or *image.NRGBA64 above 8 bits.
 func Decode(r io.Reader) (image.Image, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -316,7 +359,13 @@ func Decode(r io.Reader) (image.Image, error) {
 		return nil, err
 	}
 
-	return toImage(pic, alpha)
+	it := f.primary()
+	img, err := toImage(f, it, pic, alpha)
+	if err != nil {
+		return nil, err
+	}
+
+	return f.applyTransforms(img, it)
 }
 
 // DecodeConfig reads the dimensions and color model without decoding pixels.

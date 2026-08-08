@@ -518,6 +518,7 @@ func (f *frameContext[P, C]) grainPicture() *Picture {
 		Layout:   f.layout,
 		BitDepth: f.bpc,
 	}
+	f.setColor(p)
 	for pl := range 3 {
 		if dst[pl] == nil {
 			continue

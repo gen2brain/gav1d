@@ -14,6 +14,12 @@ type Picture struct {
 	BitDepth      int
 	Data          [3][]byte
 	Stride        [3]int
+
+	// CICP color description carried by the sequence header.
+	ColorPrimaries int
+	Transfer       int
+	MatrixCoeffs   int
+	FullRange      bool
 }
 
 const picPad = 128
@@ -345,6 +351,7 @@ func (f *frameContext[P, C]) picture() *Picture {
 		Layout:   f.layout,
 		BitDepth: f.bpc,
 	}
+	f.setColor(p)
 
 	for pl := range 3 {
 		if f.srCur[pl] == nil {
@@ -701,6 +708,13 @@ func (f *frameContext[P, C]) saveTmvsSbrow(rt *refmvsTile,
 
 	saveTmvs(rf.rp, rowStart8*rf.rpStride, rf.rpStride, rt.r, rt.rows[6:],
 		&rf.mfmvSign, colEnd8, rowEnd8, colStart8, rowStart8)
+}
+
+func (f *frameContext[P, C]) setColor(p *Picture) {
+	p.ColorPrimaries = f.seqHdr.pri
+	p.Transfer = f.seqHdr.trc
+	p.MatrixCoeffs = f.seqHdr.mtrx
+	p.FullRange = f.seqHdr.colorRange != 0
 }
 
 // Pixel layouts reported by Picture.Layout.
