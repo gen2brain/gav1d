@@ -13,6 +13,8 @@ type file struct {
 	data  []byte
 	meta  *metaBox
 	movie *movie
+
+	frameSizeLimit int
 }
 
 func parse(data []byte) (*file, error) {
@@ -117,6 +119,7 @@ func (f *file) decodeItem(it *item) (*av1.Picture, error) {
 	}
 
 	var d av1.Decoder
+	d.FrameSizeLimit = f.frameSizeLimit
 	if p := f.meta.prop(it, "a1op"); p != nil {
 		d.OperatingPoint = int(p.opIdx)
 	}
@@ -366,6 +369,9 @@ type AVIF struct {
 type Options struct {
 	// AutoRotate applies the clap/irot/imir transforms to the decoded image.
 	AutoRotate bool
+	// FrameSizeLimit bounds a frame's area in pixels. Zero means
+	// av1.DefaultFrameSizeLimit; a negative value removes the limit.
+	FrameSizeLimit int
 }
 
 // Decode reads an AVIF image as *image.NRGBA, or *image.NRGBA64 above 8 bits.
@@ -379,7 +385,10 @@ func Decode(r io.Reader, opts ...Options) (image.Image, error) {
 		return nil, err
 	}
 
-	return f.decodeStill(options(opts))
+	o := options(opts)
+	f.frameSizeLimit = o.FrameSizeLimit
+
+	return f.decodeStill(o)
 }
 
 // DecodeAll reads every frame of an AVIF file. A still image gives one frame.
@@ -393,6 +402,7 @@ func DecodeAll(r io.Reader, opts ...Options) (*AVIF, error) {
 		return nil, err
 	}
 	o := options(opts)
+	f.frameSizeLimit = o.FrameSizeLimit
 
 	if f.movie != nil {
 		if a, err := f.decodeSequence(o); err == nil && a != nil {

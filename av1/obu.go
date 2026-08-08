@@ -7,6 +7,14 @@ import (
 
 var errInvalid = errors.New("av1: invalid bitstream")
 
+// ErrFrameTooLarge is returned when a frame's area exceeds
+// Decoder.FrameSizeLimit.
+var ErrFrameTooLarge = errors.New("av1: frame exceeds size limit")
+
+// DefaultFrameSizeLimit is the frame area, in pixels, accepted when
+// Decoder.FrameSizeLimit is zero.
+const DefaultFrameSizeLimit = 16384 * 16384
+
 var defaultModeRefDeltas = loopfilterModeRefDeltas{
 	modeDelta: [2]int8{0, 0},
 	refDelta:  [totalRefsPerFrame]int8{1, 0, 0, 0, -1, 0, -1, -1},
@@ -40,6 +48,11 @@ type Decoder struct {
 
 	// OperatingPoint selects a scalable stream's operating point.
 	OperatingPoint int
+
+	// FrameSizeLimit bounds a frame's area in pixels, so that a corrupt or
+	// hostile header cannot ask for an unbounded allocation. Zero means
+	// DefaultFrameSizeLimit; a negative value removes the limit.
+	FrameSizeLimit int
 
 	seqHdr   *sequenceHeader
 	frameHdr *frameHeader
@@ -1282,6 +1295,21 @@ func (d *Decoder) parseTileHdr(gb *getBits) (start, end int) {
 	return start, end
 }
 
+func (d *Decoder) checkFrameSize() error {
+	lim := int64(d.FrameSizeLimit)
+	if lim == 0 {
+		lim = DefaultFrameSizeLimit
+	}
+	if lim < 0 {
+		return nil
+	}
+	if int64(d.frameHdr.width[1])*int64(d.frameHdr.height) > lim {
+		return ErrFrameTooLarge
+	}
+
+	return nil
+}
+
 func (d *Decoder) refreshRefs() {
 	for i := range numRefFrames {
 		if d.frameHdr.refreshFrameFlags&(1<<i) != 0 {
@@ -1371,6 +1399,11 @@ func (d *Decoder) parseOBU(data []byte) (int, error) {
 		}
 		d.tiles = d.tiles[:0]
 		if err := d.parseFrameHdr(&gb); err != nil {
+			d.frameHdr = nil
+
+			return 0, err
+		}
+		if err := d.checkFrameSize(); err != nil {
 			d.frameHdr = nil
 
 			return 0, err

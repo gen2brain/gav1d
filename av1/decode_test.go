@@ -6,6 +6,7 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -404,4 +405,31 @@ func firstLine(v any) string {
 	}
 
 	return s
+}
+
+// TestFrameSizeLimit checks the guard that keeps a corrupt header from asking
+// for an unbounded allocation.
+func TestFrameSizeLimit(t *testing.T) {
+	huge := &frameHeader{width: [2]int{100000, 100000}, height: 100000}
+	hd := &frameHeader{width: [2]int{1920, 1920}, height: 1080}
+
+	for _, c := range []struct {
+		name  string
+		limit int
+		hdr   *frameHeader
+		want  error
+	}{
+		{"default rejects huge", 0, huge, ErrFrameTooLarge},
+		{"default allows 1080p", 0, hd, nil},
+		{"negative is unlimited", -1, huge, nil},
+		{"explicit limit", 1000, &frameHeader{width: [2]int{100, 100}, height: 11}, ErrFrameTooLarge},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := Decoder{FrameSizeLimit: c.limit}
+			d.frameHdr = c.hdr
+			if err := d.checkFrameSize(); !errors.Is(err, c.want) {
+				t.Fatalf("got %v, want %v", err, c.want)
+			}
+		})
+	}
 }

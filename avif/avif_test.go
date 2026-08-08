@@ -517,13 +517,14 @@ func FuzzDecode(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		img, err := Decode(bytes.NewReader(data), Options{AutoRotate: true})
+		opt := Options{AutoRotate: true, FrameSizeLimit: 1 << 20}
+		img, err := Decode(bytes.NewReader(data), opt)
 		if err == nil && img == nil {
 			t.Fatal("nil image without error")
 		}
 		if _, err := DecodeConfig(bytes.NewReader(data)); err != nil {
 			return
 		}
-		_, _ = DecodeAll(bytes.NewReader(data))
+		_, _ = DecodeAll(bytes.NewReader(data), opt)
 	})
 }

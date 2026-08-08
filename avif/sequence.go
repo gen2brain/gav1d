@@ -327,10 +327,17 @@ func (f *file) decodeSequence(o Options) (*AVIF, error) {
 
 func (f *file) decodeTrack(t *track) ([]*av1.Picture, error) {
 	var d av1.Decoder
+	d.FrameSizeLimit = f.frameSizeLimit
 	var out []*av1.Picture
 
+	// A sample needs at least one byte, so a table claiming more samples than
+	// the file has bytes is describing data that cannot exist.
+	if len(t.samples) > len(f.data) {
+		return nil, errInvalid
+	}
+
 	for _, s := range t.samples {
-		if s.off > uint64(len(f.data)) || s.len > uint64(len(f.data))-s.off {
+		if s.len == 0 || s.off > uint64(len(f.data)) || s.len > uint64(len(f.data))-s.off {
 			return nil, errInvalid
 		}
 		pics, err := d.DecodeOBUs(f.data[s.off : s.off+s.len])
