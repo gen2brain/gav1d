@@ -1,6 +1,10 @@
 package avif
 
-import "github.com/gen2brain/gav1d/av1"
+import (
+	"encoding/binary"
+
+	"github.com/gen2brain/gav1d/av1"
+)
 
 const (
 	mcIdentity  = 0
@@ -115,8 +119,7 @@ func (s *colorState) sample(data []byte, stride, x, y int) int {
 	if s.depth == 8 {
 		return int(data[y*stride+x])
 	}
-	i := y*stride + x*2
-	v := int(data[i]) | int(data[i+1])<<8
+	v := int(binary.NativeEndian.Uint16(data[y*stride+x*2:]))
 
 	return min(v, s.maxChannel)
 }

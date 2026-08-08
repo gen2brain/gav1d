@@ -12,8 +12,10 @@ type Picture struct {
 	Width, Height int
 	Layout        int
 	BitDepth      int
-	Data          [3][]byte
-	Stride        [3]int
+	// Data holds the planes. Above 8 bits each sample is a native-endian
+	// uint16, and Stride is in bytes.
+	Data   [3][]byte
+	Stride [3]int
 
 	// CICP color description carried by the sequence header.
 	ColorPrimaries int

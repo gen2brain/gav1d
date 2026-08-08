@@ -3,6 +3,7 @@ package avif
 import (
 	"bytes"
 	"crypto/md5"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -332,7 +333,19 @@ func planeMD5(pic *av1.Picture) string {
 			pw, ph = (pw+ssHor)>>ssHor, (ph+ssVer)>>ssVer
 		}
 		for y := range ph {
-			h.Write(pic.Data[pl][y*pic.Stride[pl]:][:pw*bpp])
+			row := pic.Data[pl][y*pic.Stride[pl]:][:pw*bpp]
+			if bpp == 1 {
+				h.Write(row)
+
+				continue
+			}
+			// Hash sample values, not host bytes, so the reference stays valid
+			// on a big-endian build.
+			var le [2]byte
+			for x := range pw {
+				binary.LittleEndian.PutUint16(le[:], binary.NativeEndian.Uint16(row[x*2:]))
+				h.Write(le[:])
+			}
 		}
 	}
 
@@ -527,4 +540,23 @@ func FuzzDecode(f *testing.F) {
 		}
 		_, _ = DecodeAll(bytes.NewReader(data), opt)
 	})
+}
+
+// TestSampleEndianness pins the 16-bit plane read against the host byte order
+// av1 stores planes in, so a big-endian build converts color correctly.
+func TestSampleEndianness(t *testing.T) {
+	pic := &av1.Picture{
+		Width: 1, Height: 1,
+		Layout: av1.LayoutI400, BitDepth: 10,
+		FullRange: true, MatrixCoeffs: 1,
+	}
+	pic.Data[0] = make([]byte, 2)
+	pic.Stride[0] = 2
+	binary.NativeEndian.PutUint16(pic.Data[0], 512)
+
+	cs := newColorState(pic, nil, 8)
+	r, g, b := cs.rgb(pic, 0, 0)
+	if r != 128 || g != 128 || b != 128 {
+		t.Fatalf("got %d,%d,%d, want 128,128,128", r, g, b)
+	}
 }
