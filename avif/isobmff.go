@@ -549,6 +549,9 @@ func (m *metaBox) data(it *item, file []byte) ([]byte, error) {
 }
 
 func (m *metaBox) prop(it *item, typ string) *property {
+	if it == nil {
+		return nil
+	}
 	for _, i := range it.props {
 		if m.props[i].typ == typ {
 			return &m.props[i]

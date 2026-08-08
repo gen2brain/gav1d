@@ -10,8 +10,9 @@ import (
 const alphaURN = "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha"
 
 type file struct {
-	data []byte
-	meta *metaBox
+	data  []byte
+	meta  *metaBox
+	movie *movie
 }
 
 func parse(data []byte) (*file, error) {
@@ -41,6 +42,13 @@ func parse(data []byte) (*file, error) {
 				return err
 			}
 			f.meta = m
+
+		case "moov":
+			mv, err := parseMoov(b)
+			if err != nil {
+				return err
+			}
+			f.movie = mv
 		}
 
 		return nil
@@ -344,8 +352,24 @@ func (f *file) decodePrimary() (*av1.Picture, *av1.Picture, error) {
 	return pic, alpha, nil
 }
 
+// AVIF holds the images of an AVIF file, which may be an image sequence.
+type AVIF struct {
+	// Image holds the decoded frames, *image.NRGBA or *image.NRGBA64.
+	Image []image.Image
+	// Delay holds each frame's duration in seconds.
+	Delay []float64
+	// LoopCount is how many times the animation repeats, zero for forever.
+	LoopCount int
+}
+
+// Options are the decoding parameters.
+type Options struct {
+	// AutoRotate applies the clap/irot/imir transforms to the decoded image.
+	AutoRotate bool
+}
+
 // Decode reads an AVIF image as *image.NRGBA, or *image.NRGBA64 above 8 bits.
-func Decode(r io.Reader) (image.Image, error) {
+func Decode(r io.Reader, opts ...Options) (image.Image, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
@@ -354,18 +378,34 @@ func Decode(r io.Reader) (image.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	pic, alpha, err := f.decodePrimary()
+
+	return f.decodeStill(options(opts))
+}
+
+// DecodeAll reads every frame of an AVIF file. A still image gives one frame.
+func DecodeAll(r io.Reader, opts ...Options) (*AVIF, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	f, err := parse(data)
+	if err != nil {
+		return nil, err
+	}
+	o := options(opts)
+
+	if f.movie != nil {
+		if a, err := f.decodeSequence(o); err == nil && a != nil {
+			return a, nil
+		}
+	}
+
+	img, err := f.decodeStill(o)
 	if err != nil {
 		return nil, err
 	}
 
-	it := f.primary()
-	img, err := toImage(f, it, pic, alpha)
-	if err != nil {
-		return nil, err
-	}
-
-	return f.applyTransforms(img, it)
+	return &AVIF{Image: []image.Image{img}, Delay: []float64{0}}, nil
 }
 
 // DecodeConfig reads the dimensions and color model without decoding pixels.
@@ -387,13 +427,40 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 		return image.Config{}, err
 	}
 
-	cfg := image.Config{Width: w, Height: h, ColorModel: colorModelFor(f, it)}
+	return image.Config{Width: w, Height: h, ColorModel: colorModelFor(f, it)}, nil
+}
 
-	return cfg, nil
+func options(opts []Options) Options {
+	if len(opts) > 0 {
+		return opts[0]
+	}
+
+	return Options{}
+}
+
+func (f *file) decodeStill(o Options) (image.Image, error) {
+	pic, alpha, err := f.decodePrimary()
+	if err != nil {
+		return nil, err
+	}
+	it := f.primary()
+	img, err := toImage(f, it, pic, alpha)
+	if err != nil {
+		return nil, err
+	}
+	if !o.AutoRotate {
+		return img, nil
+	}
+
+	return f.applyTransforms(img, it)
+}
+
+func decodeWrapper(r io.Reader) (image.Image, error) {
+	return Decode(r)
 }
 
 func init() {
-	image.RegisterFormat("avif", "????ftypavif", Decode, DecodeConfig)
-	image.RegisterFormat("avif", "????ftypavis", Decode, DecodeConfig)
-	image.RegisterFormat("avif", "????ftypmif1", Decode, DecodeConfig)
+	image.RegisterFormat("avif", "????ftypavif", decodeWrapper, DecodeConfig)
+	image.RegisterFormat("avif", "????ftypavis", decodeWrapper, DecodeConfig)
+	image.RegisterFormat("avif", "????ftypmif1", decodeWrapper, DecodeConfig)
 }

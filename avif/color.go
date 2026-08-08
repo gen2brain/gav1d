@@ -143,9 +143,7 @@ func (s *colorState) rgb(pic *av1.Picture, x, y int) (uint16, uint16, uint16) {
 		return g, g, g
 	}
 
-	uvX, uvY := x>>s.ssHor, y>>s.ssVer
-	cb := s.tableUV[s.sample(pic.Data[1], pic.Stride[1], uvX, uvY)]
-	cr := s.tableUV[s.sample(pic.Data[2], pic.Stride[2], uvX, uvY)]
+	cb, cr := s.chroma(pic, x, y)
 
 	var r, g, b float32
 	switch s.matrix {
@@ -163,6 +161,43 @@ func (s *colorState) rgb(pic *av1.Picture, x, y int) (uint16, uint16, uint16) {
 	return uint16(0.5 + clampF(r)*s.outMax),
 		uint16(0.5 + clampF(g)*s.outMax),
 		uint16(0.5 + clampF(b)*s.outMax)
+}
+
+// chroma reads Cb and Cr, bilinearly upsampling a subsampled plane from the
+// closest sample, the adjacent column, the adjacent row and the diagonal.
+func (s *colorState) chroma(pic *av1.Picture, x, y int) (float32, float32) {
+	uvX, uvY := x>>s.ssHor, y>>s.ssVer
+	if s.ssHor == 0 {
+		return s.tableUV[s.sample(pic.Data[1], pic.Stride[1], uvX, uvY)],
+			s.tableUV[s.sample(pic.Data[2], pic.Stride[2], uvX, uvY)]
+	}
+
+	adjCol := 0
+	if x != 0 && !(x == pic.Width-1 && x%2 != 0) {
+		if x%2 != 0 {
+			adjCol = 1
+		} else {
+			adjCol = -1
+		}
+	}
+	adjRow := 0
+	if s.ssVer != 0 && y != 0 && !(y == pic.Height-1 && y%2 != 0) {
+		if y%2 != 0 {
+			adjRow = 1
+		} else {
+			adjRow = -1
+		}
+	}
+
+	at := func(pl, dx, dy int) float32 {
+		return s.tableUV[s.sample(pic.Data[pl], pic.Stride[pl], uvX+dx, uvY+dy)]
+	}
+
+	const w0, w1, w2 = 9.0 / 16.0, 3.0 / 16.0, 1.0 / 16.0
+	cb := at(1, 0, 0)*w0 + at(1, adjCol, 0)*w1 + at(1, 0, adjRow)*w1 + at(1, adjCol, adjRow)*w2
+	cr := at(2, 0, 0)*w0 + at(2, adjCol, 0)*w1 + at(2, 0, adjRow)*w1 + at(2, adjCol, adjRow)*w2
+
+	return cb, cr
 }
 
 func (s *colorState) alpha(pic *av1.Picture, x, y int) uint16 {

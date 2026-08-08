@@ -276,13 +276,13 @@ func TestConformance(t *testing.T) {
 				}
 
 				out := filepath.Join(t.TempDir(), "ref.png")
-				cmd := exec.Command(avifdec, "--no-strict", "-u", "nearest", path, out)
+				cmd := exec.Command(avifdec, "--no-strict", path, out)
 				if _, err := cmd.CombinedOutput(); err != nil {
 					colorFails["avifdec cannot convert"]++
 
 					return
 				}
-				got, err := Decode(bytes.NewReader(data))
+				got, err := Decode(bytes.NewReader(data), Options{AutoRotate: true})
 				if errors.Is(err, errUnsupported) {
 					skipped++
 
@@ -414,6 +414,47 @@ func TestDecode(t *testing.T) {
 	}
 }
 
+// TestSequence decodes the bundled animation and compares every frame, and its
+// duration, against avifdec.
+func TestSequence(t *testing.T) {
+	if _, err := os.Stat(avifdec); err != nil {
+		t.Skip("avifdec not built")
+	}
+	const path = "testdata/anim.avif"
+
+	dir := t.TempDir()
+	cmd := exec.Command(avifdec, "--no-strict", "--index", "all", path,
+		filepath.Join(dir, "f.png"))
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("avifdec: %v\n%s", err, b)
+	}
+	refs, err := filepath.Glob(filepath.Join(dir, "f-*.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(refs)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := DecodeAll(bytes.NewReader(data), Options{AutoRotate: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Image) != len(refs) {
+		t.Fatalf("%d frames, want %d", len(a.Image), len(refs))
+	}
+	for i, rp := range refs {
+		if d := diffPixels(a.Image[i], decodePNG(t, rp)); d != "" {
+			t.Fatalf("frame %d: %s", i, d)
+		}
+		if a.Delay[i] != 0.1 {
+			t.Fatalf("frame %d delay = %v, want 0.1", i, a.Delay[i])
+		}
+	}
+}
+
 func decodePNG(t *testing.T, path string) image.Image {
 	t.Helper()
 
@@ -431,8 +472,7 @@ func decodePNG(t *testing.T, path string) image.Image {
 	return img
 }
 
-// TestColor compares each bundled file's RGB against avifdec, which defaults to
-// bilinear upsampling, so nearest is forced.
+// TestColor compares each bundled file's RGB against avifdec.
 func TestColor(t *testing.T) {
 	if _, err := os.Stat(avifdec); err != nil {
 		t.Skip("avifdec not built")
@@ -447,7 +487,7 @@ func TestColor(t *testing.T) {
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			out := filepath.Join(t.TempDir(), "ref.png")
-			cmd := exec.Command(avifdec, "--no-strict", "-u", "nearest", path, out)
+			cmd := exec.Command(avifdec, "--no-strict", path, out)
 			if b, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("avifdec: %v\n%s", err, b)
 			}
@@ -457,7 +497,7 @@ func TestColor(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := Decode(bytes.NewReader(raw))
+			got, err := Decode(bytes.NewReader(raw), Options{AutoRotate: true})
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}
@@ -465,4 +505,25 @@ func TestColor(t *testing.T) {
 			comparePixels(t, got, want)
 		})
 	}
+}
+
+// FuzzDecode requires that no input panics, however malformed.
+func FuzzDecode(f *testing.F) {
+	seeds, _ := filepath.Glob(filepath.Join("testdata", "*.avif"))
+	for _, p := range seeds {
+		if b, err := os.ReadFile(p); err == nil {
+			f.Add(b)
+		}
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		img, err := Decode(bytes.NewReader(data), Options{AutoRotate: true})
+		if err == nil && img == nil {
+			t.Fatal("nil image without error")
+		}
+		if _, err := DecodeConfig(bytes.NewReader(data)); err != nil {
+			return
+		}
+		_, _ = DecodeAll(bytes.NewReader(data))
+	})
 }
