@@ -1,0 +1,207 @@
+package av1
+
+import "math"
+
+type pixel interface{ ~uint8 | ~uint16 }
+
+type coef interface{ ~int16 | ~int32 }
+
+var txfmDimensions = [nRectTxSizes]txfmInfo{
+	tx4x4:    {w: 1, h: 1, lw: 0, lh: 0, min: 0, max: 0, sub: tx4x4, ctx: 0},
+	tx8x8:    {w: 2, h: 2, lw: 1, lh: 1, min: 1, max: 1, sub: tx4x4, ctx: 1},
+	tx16x16:  {w: 4, h: 4, lw: 2, lh: 2, min: 2, max: 2, sub: tx8x8, ctx: 2},
+	tx32x32:  {w: 8, h: 8, lw: 3, lh: 3, min: 3, max: 3, sub: tx16x16, ctx: 3},
+	tx64x64:  {w: 16, h: 16, lw: 4, lh: 4, min: 4, max: 4, sub: tx32x32, ctx: 4},
+	rtx4x8:   {w: 1, h: 2, lw: 0, lh: 1, min: 0, max: 1, sub: tx4x4, ctx: 1},
+	rtx8x4:   {w: 2, h: 1, lw: 1, lh: 0, min: 0, max: 1, sub: tx4x4, ctx: 1},
+	rtx8x16:  {w: 2, h: 4, lw: 1, lh: 2, min: 1, max: 2, sub: tx8x8, ctx: 2},
+	rtx16x8:  {w: 4, h: 2, lw: 2, lh: 1, min: 1, max: 2, sub: tx8x8, ctx: 2},
+	rtx16x32: {w: 4, h: 8, lw: 2, lh: 3, min: 2, max: 3, sub: tx16x16, ctx: 3},
+	rtx32x16: {w: 8, h: 4, lw: 3, lh: 2, min: 2, max: 3, sub: tx16x16, ctx: 3},
+	rtx32x64: {w: 8, h: 16, lw: 3, lh: 4, min: 3, max: 4, sub: tx32x32, ctx: 4},
+	rtx64x32: {w: 16, h: 8, lw: 4, lh: 3, min: 3, max: 4, sub: tx32x32, ctx: 4},
+	rtx4x16:  {w: 1, h: 4, lw: 0, lh: 2, min: 0, max: 2, sub: rtx4x8, ctx: 1},
+	rtx16x4:  {w: 4, h: 1, lw: 2, lh: 0, min: 0, max: 2, sub: rtx8x4, ctx: 1},
+	rtx8x32:  {w: 2, h: 8, lw: 1, lh: 3, min: 1, max: 3, sub: rtx8x16, ctx: 2},
+	rtx32x8:  {w: 8, h: 2, lw: 3, lh: 1, min: 1, max: 3, sub: rtx16x8, ctx: 2},
+	rtx16x64: {w: 4, h: 16, lw: 2, lh: 4, min: 2, max: 4, sub: rtx16x32, ctx: 3},
+	rtx64x16: {w: 16, h: 4, lw: 4, lh: 2, min: 2, max: 4, sub: rtx32x16, ctx: 3},
+}
+
+var itxShift = [nRectTxSizes]int{
+	tx4x4:    0,
+	tx8x8:    1,
+	tx16x16:  2,
+	tx32x32:  2,
+	tx64x64:  2,
+	rtx4x8:   0,
+	rtx8x4:   0,
+	rtx8x16:  1,
+	rtx16x8:  1,
+	rtx16x32: 1,
+	rtx32x16: 1,
+	rtx32x64: 1,
+	rtx64x32: 1,
+	rtx4x16:  1,
+	rtx16x4:  1,
+	rtx8x32:  2,
+	rtx32x8:  2,
+	rtx16x64: 2,
+	rtx64x16: 2,
+}
+
+// itxTxtpSwap reorders a TxfmType from bitstream vertical_horizontal to pass order.
+var itxTxtpSwap = [nTxTypes]uint8{
+	dctDct:           dctDct,
+	adstDct:          dctAdst,
+	dctAdst:          adstDct,
+	adstAdst:         adstAdst,
+	flipadstDct:      dctFlipadst,
+	dctFlipadst:      flipadstDct,
+	flipadstFlipadst: flipadstFlipadst,
+	adstFlipadst:     flipadstAdst,
+	flipadstAdst:     adstFlipadst,
+	idtx:             idtx,
+	vDct:             hDct,
+	hDct:             vDct,
+	vAdst:            hAdst,
+	hAdst:            vAdst,
+	vFlipadst:        hFlipadst,
+	hFlipadst:        vFlipadst,
+}
+
+func invTxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
+	eob, tx, txtp int, bitdepthMax int32,
+) {
+	txtp = int(itxTxtpSwap[txtp])
+	tDim := &txfmDimensions[tx]
+	w, h := 4*int(tDim.w), 4*int(tDim.h)
+	hasDconly := txtp == dctDct
+	shift := itxShift[tx]
+
+	isRect2 := w*2 == h || h*2 == w
+	rnd := int32((1 << shift) >> 1)
+
+	if (hasDconly && eob == 0) || (!hasDconly && eob < 0) {
+		dc := int32(coeff[0])
+		coeff[0] = 0
+		if isRect2 {
+			dc = (dc*181 + 128) >> 8
+		}
+		dc = (dc*181 + 128) >> 8
+		dc = (dc + rnd) >> shift
+		dc = (dc*181 + 128 + 2048) >> 12
+		for y := range h {
+			row := dstOff + y*stride
+			for x := range w {
+				dst[row+x] = P(clip(int32(dst[row+x])+dc, 0, bitdepthMax))
+			}
+		}
+
+		return
+	}
+
+	txtps := &tx1dTypes[txtp]
+	first1d := tx1dFns[tDim.lw][txtps[0]]
+	second1d := tx1dFns[tDim.lh][txtps[1]]
+	sh, sw := min(h, 32), min(w, 32)
+
+	var rowClipMin, colClipMin int32
+	if bitdepthMax == 0xff {
+		rowClipMin, colClipMin = math.MinInt16, math.MinInt16
+	} else {
+		rowClipMin = int32(^uint32(bitdepthMax) << 7)
+		colClipMin = int32(^uint32(bitdepthMax) << 5)
+	}
+	rowClipMax, colClipMax := ^rowClipMin, ^colClipMin
+
+	var tmp [64 * 64]int32
+
+	var lastNonzeroCol int
+	switch {
+	case txtps[1] == tx1dIdentity && txtps[0] != tx1dIdentity:
+		lastNonzeroCol = min(sh-1, eob)
+	case txtps[0] == tx1dIdentity && txtps[1] != tx1dIdentity:
+		lastNonzeroCol = eob >> (tDim.lw + 2)
+	default:
+		lastNonzeroCol = int(lastNonzeroColFromEob[tx][eob])
+	}
+
+	for y := 0; y <= lastNonzeroCol; y++ {
+		c := y * w
+		if isRect2 {
+			for x := range sw {
+				tmp[c+x] = (int32(coeff[y+x*sh])*181 + 128) >> 8
+			}
+		} else {
+			for x := range sw {
+				tmp[c+x] = int32(coeff[y+x*sh])
+			}
+		}
+		first1d(tmp[:], c, 1, rowClipMin, rowClipMax)
+	}
+	if lastNonzeroCol+1 < sh {
+		clearTail := tmp[(lastNonzeroCol+1)*w : sh*w]
+		for i := range clearTail {
+			clearTail[i] = 0
+		}
+	}
+
+	for i := range sw * sh {
+		coeff[i] = 0
+	}
+
+	for i := range w * sh {
+		tmp[i] = clip((tmp[i]+rnd)>>shift, colClipMin, colClipMax)
+	}
+
+	for x := range w {
+		second1d(tmp[:], x, w, colClipMin, colClipMax)
+	}
+
+	for y := range h {
+		row := dstOff + y*stride
+		for x := range w {
+			dst[row+x] = P(clip(int32(dst[row+x])+((tmp[y*w+x]+8)>>4), 0, bitdepthMax))
+		}
+	}
+}
+
+func invTxfmAddWht4x4[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
+	eob int, bitdepthMax int32,
+) {
+	var tmp [4 * 4]int32
+
+	for y := range 4 {
+		c := y * 4
+		for x := range 4 {
+			tmp[c+x] = int32(coeff[y+x*4]) >> 2
+		}
+		invWht41d(tmp[:], c, 1)
+	}
+	for i := range 4 * 4 {
+		coeff[i] = 0
+	}
+
+	for x := range 4 {
+		invWht41d(tmp[:], x, 4)
+	}
+
+	for y := range 4 {
+		row := dstOff + y*stride
+		for x := range 4 {
+			dst[row+x] = P(clip(int32(dst[row+x])+tmp[y*4+x], 0, bitdepthMax))
+		}
+	}
+}
+
+func itxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
+	eob, tx, txtp int, bitdepthMax int32,
+) {
+	if txtp == whtWht {
+		invTxfmAddWht4x4(dst, dstOff, stride, coeff, eob, bitdepthMax)
+
+		return
+	}
+	invTxfmAdd(dst, dstOff, stride, coeff, eob, tx, txtp, bitdepthMax)
+}
