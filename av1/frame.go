@@ -1,6 +1,11 @@
 package av1
 
-import "unsafe"
+import (
+	"errors"
+	"runtime"
+	"sync"
+	"unsafe"
+)
 
 // Picture is a decoded frame.
 type Picture struct {
@@ -57,6 +62,12 @@ func decodeFrame[P pixel, C coef](d *Decoder, inCdf, outCdf *cdfContext, tiles [
 			f.qm[i][2] = qmTbl[frameHdr.quant.qmV][1][i]
 		}
 	}
+
+	f.nThreads = d.Threads
+	if f.nThreads <= 0 {
+		f.nThreads = runtime.GOMAXPROCS(0)
+	}
+	f.nThreads = min(f.nThreads, int(frameHdr.tiling.cols)*int(frameHdr.tiling.rows))
 
 	if err := f.allocPlanes(); err != nil {
 		return nil, err
@@ -123,13 +134,11 @@ func decodeFrame[P pixel, C coef](d *Decoder, inCdf, outCdf *cdfContext, tiles [
 		f.lf.cdefLine[1][2] = off + 6*uvStride
 	}
 
-	t := &taskContext[P, C]{f: f}
-	t.cf = make([]C, 32*32)
-
 	keyframe := isKeyOrIntra(frameHdr)
 
 	nCols := int(frameHdr.tiling.cols)
-	tstates := make([]*tileState, int(frameHdr.tiling.rows)*nCols)
+	nRows := int(frameHdr.tiling.rows)
+	tstates := make([]*tileState, nRows*nCols)
 	for i := range tstates {
 		ts := new(tileState)
 		setupTile(ts, f, tileData[i], i/nCols, i%nCols)
@@ -138,85 +147,92 @@ func decodeFrame[P pixel, C coef](d *Decoder, inCdf, outCdf *cdfContext, tiles [
 
 	inter := isInterOrSwitch(frameHdr) || frameHdr.allowIntrabc != 0
 
-	for tileRow := range int(frameHdr.tiling.rows) {
+	decodeTile := func(t *taskContext[P, C], tileRow, tileCol int) error {
+		ts := tstates[tileRow*nCols+tileCol]
+		t.ts = ts
+		colSb128Start := int(frameHdr.tiling.colStartSb[tileCol]) >> b2i(seqHdr.sb128 == 0)
 		sbhEnd := min(int(frameHdr.tiling.rowStartSb[tileRow+1]), f.sbh)
+
 		for sby := int(frameHdr.tiling.rowStartSb[tileRow]); sby < sbhEnd; sby++ {
 			by := sby << f.sbShift
 			byEnd := (by + f.sbStep) >> 1
+			t.by = by
+
+			if inter {
+				refmvsTileSbrowInit(&t.rt, &f.rf, ts.tiling.colStart,
+					ts.tiling.colEnd, ts.tiling.rowStart, ts.tiling.rowEnd,
+					sby, tileRow)
+			}
 			if frameHdr.useRefFrameMvs != 0 {
-				loadTmvs(&f.rf, tileRow, 0, f.bw>>1, by>>1, byEnd)
+				loadTmvs(&f.rf, tileRow, ts.tiling.colStart>>1,
+					ts.tiling.colEnd>>1, by>>1, byEnd)
 			}
+			resetContext(&t.l, keyframe)
+			clear(t.palSzUv[1][:])
 
-			for tileCol := range nCols {
-				ts := tstates[tileRow*nCols+tileCol]
-				t.ts = ts
-				t.by = by
-				if inter {
-					refmvsTileSbrowInit(&t.rt, &f.rf, ts.tiling.colStart,
-						ts.tiling.colEnd, ts.tiling.rowStart, ts.tiling.rowEnd,
-						sby, tileRow)
-				}
-				resetContext(&t.l, keyframe)
-				clear(t.palSzUv[1][:])
+			sb128y := by >> 5
+			aIdx := colSb128Start + tileRow*f.sb128w
+			for bx := ts.tiling.colStart; bx < ts.tiling.colEnd; bx += f.sbStep {
+				t.bx = bx
+				t.a = &a[aIdx]
 
-				sb128y := by >> 5
-				colSb128Start := int(frameHdr.tiling.colStartSb[tileCol]) >> b2i(seqHdr.sb128 == 0)
-
-				aIdx := colSb128Start + tileRow*f.sb128w
-				for bx := ts.tiling.colStart; bx < ts.tiling.colEnd; bx += f.sbStep {
-					t.bx = bx
-					t.a = &a[aIdx]
-
-					lfIdx := sb128y*f.sb128w + (bx >> 5)
-					t.lfMask = &f.lflvl[lfIdx]
-					if seqHdr.sb128 != 0 {
-						t.curSbCdefIdx = t.lfMask.cdefIdx[:]
-						for i := range 4 {
-							t.curSbCdefIdx[i] = -1
-						}
-					} else {
-						off := (bx&16)>>4 + (by&16)>>3
-						t.curSbCdefIdx = t.lfMask.cdefIdx[off:]
-						t.curSbCdefIdx[0] = -1
+				lfIdx := sb128y*f.sb128w + (bx >> 5)
+				t.lfMask = &f.lflvl[lfIdx]
+				if seqHdr.sb128 != 0 {
+					t.curSbCdefIdx = t.lfMask.cdefIdx[:]
+					for i := range 4 {
+						t.curSbCdefIdx[i] = -1
 					}
-
-					readLrUnits(t)
-
-					rootBl := bl64x64
-					treeIdx := 1
-					if seqHdr.sb128 != 0 {
-						rootBl = bl128x128
-						treeIdx = 0
-					}
-					if err := t.decodeSb(rootBl, intraEdgeTree[treeIdx]); err != nil {
-						return nil, err
-					}
-
-					if bx&16 != 0 || seqHdr.sb128 != 0 {
-						aIdx++
-					}
+				} else {
+					off := (bx&16)>>4 + (by&16)>>3
+					t.curSbCdefIdx = t.lfMask.cdefIdx[off:]
+					t.curSbCdefIdx[0] = -1
 				}
 
-				alignH := (f.bh + 31) &^ 31
-				n := min(f.sbStep, f.bh-by)
-				copy(f.lf.txLpfRightEdge[0][alignH*tileCol+by:][:n],
-					t.l.txLpfY[by&16:])
-				copy(f.lf.txLpfRightEdge[1][(alignH>>f.ssVer)*tileCol+(by>>f.ssVer):][:n>>f.ssVer],
-					t.l.txLpfUv[(by&16)>>f.ssVer:])
+				readLrUnits(t)
 
-				backupIpredEdge(t)
+				rootBl := bl64x64
+				treeIdx := 1
+				if seqHdr.sb128 != 0 {
+					rootBl = bl128x128
+					treeIdx = 0
+				}
+				if err := t.decodeSb(rootBl, intraEdgeTree[treeIdx]); err != nil {
+					return err
+				}
+
+				if bx&16 != 0 || seqHdr.sb128 != 0 {
+					aIdx++
+				}
 			}
+
+			alignH := (f.bh + 31) &^ 31
+			n := min(f.sbStep, f.bh-by)
+			copy(f.lf.txLpfRightEdge[0][alignH*tileCol+by:][:n],
+				t.l.txLpfY[by&16:])
+			copy(f.lf.txLpfRightEdge[1][(alignH>>f.ssVer)*tileCol+(by>>f.ssVer):][:n>>f.ssVer],
+				t.l.txLpfUv[(by&16)>>f.ssVer:])
+
+			backupIpredEdge(t)
 
 			if isInterOrSwitch(frameHdr) {
-				f.saveTmvsSbrow(&t.rt, 0, f.bw>>1, by>>1, byEnd)
+				f.saveTmvsSbrow(&t.rt, ts.tiling.colStart>>1,
+					ts.tiling.colEnd>>1, by>>1, byEnd)
 			}
 		}
+
+		return nil
+	}
+
+	if err := f.runTiles(decodeTile, nRows, nCols); err != nil {
+		return nil, err
 	}
 
 	if frameHdr.refreshContext != 0 {
 		cdfThreadUpdate(frameHdr, outCdf, &tstates[frameHdr.tiling.update].cdf)
 	}
 
+	pt := f.newTaskContext()
 	for sby := range (f.bh + f.sbStep - 1) / f.sbStep {
 		if f.lfEnabled {
 			startOfTileRow := 0
@@ -238,7 +254,7 @@ func decodeFrame[P pixel, C coef](d *Decoder, inCdf, outCdf *cdfContext, tiles [
 			copyLpf(f, &p, sby)
 		}
 		if seqHdr.cdef != 0 {
-			filterSbrowCdef(t, sby)
+			filterSbrowCdef(pt, sby)
 		}
 		if f.resize {
 			filterSbrowResize(f, sby)
@@ -408,6 +424,54 @@ func setupTile[P pixel, C coef](ts *tileState, f *frameContext[P, C],
 	}
 }
 
+// runTiles decodes every tile of the frame, at most nThreads at a time. Tiles
+// are independent by construction: they reset their contexts, never predict
+// across their own boundary, and write disjoint regions of every frame-level
+// array, so the only ordering this imposes is on error reporting.
+func (f *frameContext[P, C]) runTiles(
+	fn func(*taskContext[P, C], int, int) error, nRows, nCols int,
+) error {
+	nTs := nRows * nCols
+	errs := make([]error, nTs)
+
+	if f.nThreads <= 1 {
+		t := f.newTaskContext()
+		for i := range nTs {
+			if errs[i] = fn(t, i/nCols, i%nCols); errs[i] != nil {
+				break
+			}
+		}
+	} else {
+		var wg sync.WaitGroup
+		next := make(chan int, nTs)
+		for i := range nTs {
+			next <- i
+		}
+		close(next)
+
+		for range f.nThreads {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				t := f.newTaskContext()
+				for i := range next {
+					errs[i] = fn(t, i/nCols, i%nCols)
+				}
+			}()
+		}
+		wg.Wait()
+	}
+
+	return errors.Join(errs...)
+}
+
+func (f *frameContext[P, C]) newTaskContext() *taskContext[P, C] {
+	t := &taskContext[P, C]{f: f}
+	t.cf = make([]C, 32*32)
+
+	return t
+}
+
 func backupIpredEdge[P pixel, C coef](t *taskContext[P, C]) {
 	f := t.f
 	ts := t.ts
@@ -519,7 +583,7 @@ func (f *frameContext[P, C]) setupRefmvs(d *Decoder, seqHdr *sequenceHeader) {
 
 	if !isInterOrSwitch(hdr) && hdr.allowIntrabc == 0 {
 		refmvsInitFrame(&f.rf, seqHdr, hdr, &f.refPoc, nil, &f.refRefPoc,
-			&f.refMvs, 1, 1)
+			&f.refMvs, f.nThreads, 1)
 
 		return
 	}
@@ -551,7 +615,7 @@ func (f *frameContext[P, C]) setupRefmvs(d *Decoder, seqHdr *sequenceHeader) {
 	}
 
 	refmvsInitFrame(&f.rf, seqHdr, hdr, &f.refPoc, f.mvs, &f.refRefPoc,
-		&f.refMvs, 1, 1)
+		&f.refMvs, f.nThreads, 1)
 }
 
 func (f *frameContext[P, C]) setupSegMap(d *Decoder) {

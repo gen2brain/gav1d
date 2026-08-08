@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -39,7 +40,7 @@ func planeRows(pic *Picture, w *bytes.Buffer) {
 	}
 }
 
-func decodeIVF(t *testing.T, path string) []byte {
+func decodeIVF(t *testing.T, path string, threads int) []byte {
 	t.Helper()
 
 	data, err := os.ReadFile(path)
@@ -51,7 +52,7 @@ func decodeIVF(t *testing.T, path string) []byte {
 	}
 
 	var out bytes.Buffer
-	var d Decoder
+	d := Decoder{Threads: threads}
 
 	for p := 32; p+12 <= len(data); {
 		n := int(binary.LittleEndian.Uint32(data[p:]))
@@ -93,13 +94,14 @@ func TestDecodeStreams(t *testing.T) {
 		name, want := fields[0], fields[1]
 
 		t.Run(name, func(t *testing.T) {
-			got := decodeIVF(t, filepath.Join(dir, name))
-			sum := md5.Sum(got)
-			if hex.EncodeToString(sum[:]) != want {
-				t.Fatalf("md5 = %s, want %s (%d bytes)",
-					hex.EncodeToString(sum[:]), want, len(got))
+			for _, threads := range []int{1, 0} {
+				got := decodeIVF(t, filepath.Join(dir, name), threads)
+				sum := md5.Sum(got)
+				if hex.EncodeToString(sum[:]) != want {
+					t.Fatalf("threads=%d: md5 = %s, want %s (%d bytes)",
+						threads, hex.EncodeToString(sum[:]), want, len(got))
+				}
 			}
-			t.Logf("%d bytes, md5 %s", len(got), want)
 		})
 		n++
 	}
@@ -117,7 +119,7 @@ func TestDecodeExternal(t *testing.T) {
 		t.Skip("set STREAM_PATH")
 	}
 
-	got := decodeIVF(t, path)
+	got := decodeIVF(t, path, 0)
 	want := dav1dYUV(t, path)
 
 	if len(got) != len(want) {
@@ -350,6 +352,49 @@ func conformanceOne(path string) (res string) {
 	}
 
 	return ""
+}
+
+// BenchmarkDecode decodes a stream at a range of thread counts. Set STREAM_PATH.
+func BenchmarkDecode(b *testing.B) {
+	path := os.Getenv("STREAM_PATH")
+	if path == "" {
+		b.Skip("set STREAM_PATH")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	var chunks [][]byte
+	for p := 32; p+12 <= len(data); {
+		n := int(binary.LittleEndian.Uint32(data[p:]))
+		p += 12
+		chunks = append(chunks, data[p:p+n])
+		p += n
+	}
+
+	for _, n := range []int{1, 2, 4, 8, 0} {
+		name := "threads=" + strconv.Itoa(n)
+		if n == 0 {
+			name = "threads=max"
+		}
+		b.Run(name, func(b *testing.B) {
+			var pixels int64
+			for b.Loop() {
+				d := Decoder{Threads: n}
+				for _, chunk := range chunks {
+					pics, err := d.DecodeOBUs(chunk)
+					if err != nil {
+						b.Fatal(err)
+					}
+					for _, pic := range pics {
+						pixels += int64(pic.Width * pic.Height)
+					}
+				}
+			}
+			b.ReportMetric(float64(pixels)/b.Elapsed().Seconds()/1e6, "Mpixel/s")
+		})
+	}
 }
 
 func firstLine(v any) string {

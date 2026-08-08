@@ -34,6 +34,10 @@ type refState struct {
 }
 
 type Decoder struct {
+	// Threads bounds the goroutines used to decode a frame's tiles.
+	// Zero means GOMAXPROCS.
+	Threads int
+
 	seqHdr   *sequenceHeader
 	frameHdr *frameHeader
 	refs     [numRefFrames]refState

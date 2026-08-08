@@ -148,6 +148,7 @@ type frameContext[P pixel, C coef] struct {
 	mvs        []refmvsTemporalBlock
 	prevSegMap []uint8
 
+	nThreads  int
 	lfEnabled bool
 
 	a      []blockContext
