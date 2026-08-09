@@ -189,3 +189,70 @@ loop3:
 
 	VZEROUPPER
 	RET
+
+// BOXV folds one more row into the running sums.
+#define BOXV(RSQ, RSUM)         \
+	VMOVDQU (RSQ)(DX*4), Y1; \
+	VPADDD  Y1, Y0, Y0;     \
+	VMOVDQU (RSUM)(DX*2), X3; \
+	VPADDW  X3, X2, X2
+
+// func sgrBoxV3AVX2(sq0, sq1, sq2 *int32, s0, s1, s2 *int16, sqOut *int32, sOut *int16, n int)
+TEXT ·sgrBoxV3AVX2(SB), NOSPLIT, $0-72
+	MOVQ sq0+0(FP), R8
+	MOVQ sq1+8(FP), R9
+	MOVQ sq2+16(FP), R10
+	MOVQ s0+24(FP), R11
+	MOVQ s1+32(FP), R12
+	MOVQ s2+40(FP), R13
+	MOVQ sqOut+48(FP), DI
+	MOVQ sOut+56(FP), SI
+	MOVQ n+64(FP), CX
+	XORQ DX, DX
+
+boxv3:
+	VMOVDQU (R8)(DX*4), Y0
+	VMOVDQU (R11)(DX*2), X2
+	BOXV(R9, R12)
+	BOXV(R10, R13)
+	VMOVDQU Y0, (DI)(DX*4)
+	VMOVDQU X2, (SI)(DX*2)
+	ADDQ    $8, DX
+	SUBQ    $8, CX
+	JNZ     boxv3
+
+	VZEROUPPER
+	RET
+
+// func sgrBoxV5AVX2(sq0, sq1, sq2, sq3, sq4 *int32, s0, s1, s2, s3, s4 *int16, sqOut *int32, sOut *int16, n int)
+TEXT ·sgrBoxV5AVX2(SB), NOSPLIT, $0-104
+	MOVQ sq0+0(FP), R8
+	MOVQ sq1+8(FP), R9
+	MOVQ sq2+16(FP), R10
+	MOVQ s0+40(FP), R11
+	MOVQ s1+48(FP), R12
+	MOVQ s2+56(FP), R13
+	MOVQ sqOut+80(FP), DI
+	MOVQ sOut+88(FP), SI
+	MOVQ n+96(FP), CX
+	XORQ DX, DX
+
+boxv5:
+	VMOVDQU (R8)(DX*4), Y0
+	VMOVDQU (R11)(DX*2), X2
+	BOXV(R9, R12)
+	BOXV(R10, R13)
+	MOVQ    sq3+24(FP), AX
+	MOVQ    s3+64(FP), BX
+	BOXV(AX, BX)
+	MOVQ    sq4+32(FP), AX
+	MOVQ    s4+72(FP), BX
+	BOXV(AX, BX)
+	VMOVDQU Y0, (DI)(DX*4)
+	VMOVDQU X2, (SI)(DX*2)
+	ADDQ    $8, DX
+	SUBQ    $8, CX
+	JNZ     boxv5
+
+	VZEROUPPER
+	RET

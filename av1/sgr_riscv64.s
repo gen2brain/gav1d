@@ -217,3 +217,94 @@ loop3:
 	BNE  X0, X13, loop3
 
 	RET
+
+// BOXV folds one more row into the running sums.
+#define BOXV(RSQ, RSUM)              \
+	VSETVLI X13, E32, M2, TA, MA, X10; \
+	VLE32V  (RSQ), V4;           \
+	VADDVV  V4, V0, V0;          \
+	VSETVLI X13, E16, M1, TA, MA, X10; \
+	VLE16V  (RSUM), V6;          \
+	VADDVV  V6, V2, V2;          \
+	SLLI    $2, X10, X6;         \
+	ADD     X6, RSQ, RSQ;        \
+	SLLI    $1, X10, X6;         \
+	ADD     X6, RSUM, RSUM
+
+// func sgrBoxV3RVV(sq0, sq1, sq2 *int32, s0, s1, s2 *int16, sqOut *int32, sOut *int16, n int)
+TEXT ·sgrBoxV3RVV(SB), NOSPLIT, $0-72
+	MOV sq0+0(FP), X18
+	MOV sq1+8(FP), X19
+	MOV sq2+16(FP), X20
+	MOV s0+24(FP), X21
+	MOV s1+32(FP), X22
+	MOV s2+40(FP), X23
+	MOV sqOut+48(FP), X11
+	MOV sOut+56(FP), X12
+	MOV n+64(FP), X13
+
+boxv3:
+	VSETVLI X13, E32, M2, TA, MA, X10
+	VLE32V  (X18), V0
+	VSETVLI X13, E16, M1, TA, MA, X10
+	VLE16V  (X21), V2
+	SLLI    $2, X10, X6
+	ADD     X6, X18, X18
+	SLLI    $1, X10, X6
+	ADD     X6, X21, X21
+	BOXV(X19, X22)
+	BOXV(X20, X23)
+	VSETVLI X13, E32, M2, TA, MA, X10
+	VSE32V  V0, (X11)
+	VSETVLI X13, E16, M1, TA, MA, X10
+	VSE16V  V2, (X12)
+	SLLI    $2, X10, X6
+	ADD     X6, X11, X11
+	SLLI    $1, X10, X6
+	ADD     X6, X12, X12
+	SUB     X10, X13, X13
+	BNE     X0, X13, boxv3
+
+	RET
+
+// func sgrBoxV5RVV(sq0, sq1, sq2, sq3, sq4 *int32, s0, s1, s2, s3, s4 *int16, sqOut *int32, sOut *int16, n int)
+TEXT ·sgrBoxV5RVV(SB), NOSPLIT, $0-104
+	MOV sq0+0(FP), X18
+	MOV sq1+8(FP), X19
+	MOV sq2+16(FP), X20
+	MOV sq3+24(FP), X24
+	MOV sq4+32(FP), X25
+	MOV s0+40(FP), X21
+	MOV s1+48(FP), X22
+	MOV s2+56(FP), X23
+	MOV s3+64(FP), X26
+	MOV s4+72(FP), X28
+	MOV sqOut+80(FP), X11
+	MOV sOut+88(FP), X12
+	MOV n+96(FP), X13
+
+boxv5:
+	VSETVLI X13, E32, M2, TA, MA, X10
+	VLE32V  (X18), V0
+	VSETVLI X13, E16, M1, TA, MA, X10
+	VLE16V  (X21), V2
+	SLLI    $2, X10, X6
+	ADD     X6, X18, X18
+	SLLI    $1, X10, X6
+	ADD     X6, X21, X21
+	BOXV(X19, X22)
+	BOXV(X20, X23)
+	BOXV(X24, X26)
+	BOXV(X25, X28)
+	VSETVLI X13, E32, M2, TA, MA, X10
+	VSE32V  V0, (X11)
+	VSETVLI X13, E16, M1, TA, MA, X10
+	VSE16V  V2, (X12)
+	SLLI    $2, X10, X6
+	ADD     X6, X11, X11
+	SLLI    $1, X10, X6
+	ADD     X6, X12, X12
+	SUB     X10, X13, X13
+	BNE     X0, X13, boxv5
+
+	RET

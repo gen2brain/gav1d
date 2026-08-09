@@ -60,3 +60,45 @@ func sgrFinish2AVX2Row(tmp []int16, tmpOff int, src []uint8, srcOff, srcStride i
 			a, aPtrs[1]+1+n, b, bPtrs[1]+1+n, w-n)
 	}
 }
+
+//go:noescape
+func sgrBoxV3AVX2(sq0, sq1, sq2 *int32, s0, s1, s2 *int16, sqOut *int32, sOut *int16, n int)
+
+//go:noescape
+func sgrBoxV5AVX2(sq0, sq1, sq2, sq3, sq4 *int32, s0, s1, s2, s3, s4 *int16,
+	sqOut *int32, sOut *int16, n int)
+
+func sgrBoxV3AVX2Row(sumsq []int32, sumsqPtrs []int, sum []int16, sumPtrs []int,
+	sumsqOut []int32, sumsqOutOff int, sumOut []int16, sumOutOff, w int,
+) {
+	n := (w + 2) &^ 7
+	if n > 0 {
+		sgrBoxV3AVX2(&sumsq[sumsqPtrs[0]], &sumsq[sumsqPtrs[1]], &sumsq[sumsqPtrs[2]],
+			&sum[sumPtrs[0]], &sum[sumPtrs[1]], &sum[sumPtrs[2]],
+			&sumsqOut[sumsqOutOff], &sumOut[sumOutOff], n)
+	}
+	for x := n; x < w+2; x++ {
+		sumsqOut[sumsqOutOff+x] = sumsq[sumsqPtrs[0]+x] + sumsq[sumsqPtrs[1]+x] +
+			sumsq[sumsqPtrs[2]+x]
+		sumOut[sumOutOff+x] = sum[sumPtrs[0]+x] + sum[sumPtrs[1]+x] + sum[sumPtrs[2]+x]
+	}
+}
+
+func sgrBoxV5AVX2Row(sumsq []int32, sumsqPtrs []int, sum []int16, sumPtrs []int,
+	sumsqOut []int32, sumsqOutOff int, sumOut []int16, sumOutOff, w int,
+) {
+	n := (w + 2) &^ 7
+	if n > 0 {
+		sgrBoxV5AVX2(&sumsq[sumsqPtrs[0]], &sumsq[sumsqPtrs[1]], &sumsq[sumsqPtrs[2]],
+			&sumsq[sumsqPtrs[3]], &sumsq[sumsqPtrs[4]],
+			&sum[sumPtrs[0]], &sum[sumPtrs[1]], &sum[sumPtrs[2]],
+			&sum[sumPtrs[3]], &sum[sumPtrs[4]],
+			&sumsqOut[sumsqOutOff], &sumOut[sumOutOff], n)
+	}
+	for x := n; x < w+2; x++ {
+		sumsqOut[sumsqOutOff+x] = sumsq[sumsqPtrs[0]+x] + sumsq[sumsqPtrs[1]+x] +
+			sumsq[sumsqPtrs[2]+x] + sumsq[sumsqPtrs[3]+x] + sumsq[sumsqPtrs[4]+x]
+		sumOut[sumOutOff+x] = sum[sumPtrs[0]+x] + sum[sumPtrs[1]+x] + sum[sumPtrs[2]+x] +
+			sum[sumPtrs[3]+x] + sum[sumPtrs[4]+x]
+	}
+}

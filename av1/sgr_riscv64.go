@@ -38,3 +38,34 @@ func sgrFinish2RVVRow(tmp []int16, tmpOff int, src []uint8, srcOff, srcStride in
 	sgrFinish2MidRVV(&tmp[tmpOff+filterOutStride], &src[srcOff+srcStride],
 		&a[aPtrs[1]], &b[bPtrs[1]], w)
 }
+
+//go:noescape
+func sgrBoxV3RVV(sq0, sq1, sq2 *int32, s0, s1, s2 *int16, sqOut *int32, sOut *int16, n int)
+
+//go:noescape
+func sgrBoxV5RVV(sq0, sq1, sq2, sq3, sq4 *int32, s0, s1, s2, s3, s4 *int16,
+	sqOut *int32, sOut *int16, n int)
+
+func sgrBoxV3RVVRow(sumsq []int32, sumsqPtrs []int, sum []int16, sumPtrs []int,
+	sumsqOut []int32, sumsqOutOff int, sumOut []int16, sumOutOff, w int,
+) {
+	n := w + 2
+	if n > 0 {
+		sgrBoxV3RVV(&sumsq[sumsqPtrs[0]], &sumsq[sumsqPtrs[1]], &sumsq[sumsqPtrs[2]],
+			&sum[sumPtrs[0]], &sum[sumPtrs[1]], &sum[sumPtrs[2]],
+			&sumsqOut[sumsqOutOff], &sumOut[sumOutOff], n)
+	}
+}
+
+func sgrBoxV5RVVRow(sumsq []int32, sumsqPtrs []int, sum []int16, sumPtrs []int,
+	sumsqOut []int32, sumsqOutOff int, sumOut []int16, sumOutOff, w int,
+) {
+	n := w + 2
+	if n > 0 {
+		sgrBoxV5RVV(&sumsq[sumsqPtrs[0]], &sumsq[sumsqPtrs[1]], &sumsq[sumsqPtrs[2]],
+			&sumsq[sumsqPtrs[3]], &sumsq[sumsqPtrs[4]],
+			&sum[sumPtrs[0]], &sum[sumPtrs[1]], &sum[sumPtrs[2]],
+			&sum[sumPtrs[3]], &sum[sumPtrs[4]],
+			&sumsqOut[sumsqOutOff], &sumOut[sumOutOff], n)
+	}
+}

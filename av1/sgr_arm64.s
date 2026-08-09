@@ -188,3 +188,75 @@ loop3:
 	BNE loop3
 
 	RET
+
+// BOXV folds one more row into the running sums.
+#define BOXV(RSQ, RSUM)              \
+	VLD1 (RSQ), [V4.S4, V5.S4];  \
+	VADD V4.S4, V0.S4, V0.S4;    \
+	VADD V5.S4, V1.S4, V1.S4;    \
+	VLD1 (RSUM), [V6.H8];        \
+	VADD V6.H8, V2.H8, V2.H8;    \
+	ADD  $32, RSQ, RSQ;          \
+	ADD  $16, RSUM, RSUM
+
+// func sgrBoxV3NEON(sq0, sq1, sq2 *int32, s0, s1, s2 *int16, sqOut *int32, sOut *int16, n int)
+TEXT ·sgrBoxV3NEON(SB), NOSPLIT, $0-72
+	MOVD sq0+0(FP), R2
+	MOVD sq1+8(FP), R3
+	MOVD sq2+16(FP), R4
+	MOVD s0+24(FP), R5
+	MOVD s1+32(FP), R6
+	MOVD s2+40(FP), R7
+	MOVD sqOut+48(FP), R0
+	MOVD sOut+56(FP), R1
+	MOVD n+64(FP), R10
+
+boxv3:
+	VLD1 (R2), [V0.S4, V1.S4]
+	VLD1 (R5), [V2.H8]
+	ADD  $32, R2, R2
+	ADD  $16, R5, R5
+	BOXV(R3, R6)
+	BOXV(R4, R7)
+	VST1 [V0.S4, V1.S4], (R0)
+	VST1 [V2.H8], (R1)
+	ADD  $32, R0, R0
+	ADD  $16, R1, R1
+	SUBS $8, R10, R10
+	BNE  boxv3
+
+	RET
+
+// func sgrBoxV5NEON(sq0, sq1, sq2, sq3, sq4 *int32, s0, s1, s2, s3, s4 *int16, sqOut *int32, sOut *int16, n int)
+TEXT ·sgrBoxV5NEON(SB), NOSPLIT, $0-104
+	MOVD sq0+0(FP), R2
+	MOVD sq1+8(FP), R3
+	MOVD sq2+16(FP), R4
+	MOVD sq3+24(FP), R11
+	MOVD sq4+32(FP), R12
+	MOVD s0+40(FP), R5
+	MOVD s1+48(FP), R6
+	MOVD s2+56(FP), R7
+	MOVD s3+64(FP), R13
+	MOVD s4+72(FP), R14
+	MOVD sqOut+80(FP), R0
+	MOVD sOut+88(FP), R1
+	MOVD n+96(FP), R10
+
+boxv5:
+	VLD1 (R2), [V0.S4, V1.S4]
+	VLD1 (R5), [V2.H8]
+	ADD  $32, R2, R2
+	ADD  $16, R5, R5
+	BOXV(R3, R6)
+	BOXV(R4, R7)
+	BOXV(R11, R13)
+	BOXV(R12, R14)
+	VST1 [V0.S4, V1.S4], (R0)
+	VST1 [V2.H8], (R1)
+	ADD  $32, R0, R0
+	ADD  $16, R1, R1
+	SUBS $8, R10, R10
+	BNE  boxv5
+
+	RET
