@@ -12,6 +12,9 @@ func itxColDct8AVX2(tmp *int32, lanes, stride int, lo, hi int32)
 func itxColDct16AVX2(tmp *int32, lanes, stride int, lo, hi int32)
 
 //go:noescape
+func itxColDct32AVX2(tmp *int32, lanes, stride int, lo, hi int32)
+
+//go:noescape
 func itxIdentityAVX2(tmp *int32, count, stride, n int, p *[4]int32)
 
 func itxIdentityVec(tmp []int32, lanes, stride, n int) bool {
@@ -47,6 +50,9 @@ func itxColVec(tmp []int32, lanes, stride, n, txtp int, lo, hi int32) bool {
 		itxColDct8AVX2(&tmp[0], lanes, stride, lo, hi)
 	case 16:
 		itxColDct16AVX2(&tmp[0], lanes, stride, lo, hi)
+	case 32:
+		itxColDct16AVX2(&tmp[0], lanes, stride*2, lo, hi)
+		itxColDct32AVX2(&tmp[0], lanes, stride, lo, hi)
 	default:
 		return false
 	}

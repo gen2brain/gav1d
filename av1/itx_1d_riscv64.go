@@ -12,6 +12,9 @@ func itxColDct8RVV(tmp *int32, lanes, stride int, lo, hi int32)
 func itxColDct16RVV(tmp *int32, lanes, stride int, lo, hi int32)
 
 //go:noescape
+func itxColDct32RVV(tmp *int32, lanes, stride int, lo, hi int32)
+
+//go:noescape
 func itxIdentityRVV(tmp *int32, count, stride, n int, p *[4]int32)
 
 func itxIdentityVec(tmp []int32, lanes, stride, n int) bool {
@@ -44,6 +47,9 @@ func itxColVec(tmp []int32, lanes, stride, n, txtp int, lo, hi int32) bool {
 		itxColDct8RVV(&tmp[0], lanes, stride, lo, hi)
 	case 16:
 		itxColDct16RVV(&tmp[0], lanes, stride, lo, hi)
+	case 32:
+		itxColDct16RVV(&tmp[0], lanes, stride*2, lo, hi)
+		itxColDct32RVV(&tmp[0], lanes, stride, lo, hi)
 	default:
 		return false
 	}

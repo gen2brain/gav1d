@@ -268,3 +268,41 @@ func TestItxColAsm(t *testing.T) {
 	}
 	t.Logf("%d cases", cases)
 }
+
+func BenchmarkItx(b *testing.B) {
+	cases := []struct {
+		name     string
+		tx, txtp int
+	}{
+		{"8x8-dct", tx8x8, dctDct},
+		{"16x16-dct", tx16x16, dctDct},
+		{"32x32-dct", tx32x32, dctDct},
+		{"64x64-dct", tx64x64, dctDct},
+		{"16x16-adst", tx16x16, adstAdst},
+		{"16x16-idtx", tx16x16, idtx},
+		{"32x8-dct", rtx32x8, dctDct},
+	}
+
+	d := newDsp[uint8]()
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			tDim := &txfmDimensions[c.tx]
+			w, h := 4*int(tDim.w), 4*int(tDim.h)
+			sw, sh := min(w, 32), min(h, 32)
+
+			src := make([]int16, sw*sh)
+			for i := range src {
+				src[i] = int16(i*7&511) - 256
+			}
+			coeff := make([]int16, sw*sh)
+			tmp := make([]int32, itxScratchLen)
+			dst := make([]uint8, 128*(h+2))
+
+			for b.Loop() {
+				copy(coeff, src)
+				invTxfmAdd(d, dst, 0, 128, coeff, tmp, sw*sh-1, c.tx, c.txtp, 255)
+			}
+			b.ReportMetric(float64(w*h)*float64(b.N)/b.Elapsed().Seconds()/1e6, "Mpixel/s")
+		})
+	}
+}
