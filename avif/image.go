@@ -109,6 +109,10 @@ func toImage(f *file, it *item, pic, alpha *av1.Picture, ycbcr bool) (image.Imag
 	w := pic.Width
 
 	cs.prepare(w)
+	if cs.fastRow(outDepth) {
+		cs.consts = cs.rowConsts()
+		cs.row = rowFn()
+	}
 	rgb := make([]uint16, 3*w)
 
 	aRow := make([]uint16, w)
@@ -122,6 +126,26 @@ func toImage(f *file, it *item, pic, alpha *av1.Picture, ycbcr bool) (image.Imag
 
 	if outDepth == 8 {
 		dst := image.NewNRGBA(rect)
+		if cs.row != nil {
+			ab := make([]uint8, w)
+			for i := range ab {
+				ab[i] = 0xff
+			}
+			for y := range pic.Height {
+				if as != nil {
+					as.alphaRow(alpha, y, w, aRow)
+					for x, v := range aRow {
+						ab[x] = uint8(v)
+					}
+				}
+				u0, u1, v0, v1 := cs.rowPlanes(pic, y, w)
+				cs.row(dst.Pix[y*dst.Stride:], cs.lumaRow(pic, y, w),
+					u0, u1, v0, v1, ab, w, &cs.consts)
+			}
+
+			return dst, nil
+		}
+
 		for y := range pic.Height {
 			cs.rgbRow(pic, y, rgb)
 			if as != nil {

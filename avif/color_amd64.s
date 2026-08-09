@@ -1,0 +1,118 @@
+//go:build amd64 && !noasm
+
+#include "textflag.h"
+
+// The closest chroma sample of an output pair and its neighbour, as lane
+// selections over the padded row: eight outputs read six samples.
+DATA rowPermC<>+0(SB)/8, $0x0000000100000001
+DATA rowPermC<>+8(SB)/8, $0x0000000200000002
+DATA rowPermC<>+16(SB)/8, $0x0000000300000003
+DATA rowPermC<>+24(SB)/8, $0x0000000400000004
+GLOBL rowPermC<>(SB), RODATA|NOPTR, $32
+
+DATA rowPermN<>+0(SB)/8, $0x0000000200000000
+DATA rowPermN<>+8(SB)/8, $0x0000000300000001
+DATA rowPermN<>+16(SB)/8, $0x0000000400000002
+DATA rowPermN<>+24(SB)/8, $0x0000000500000003
+GLOBL rowPermN<>(SB), RODATA|NOPTR, $32
+
+DATA rowShuf<>+0(SB)/8, $0x0d0905010c080400
+DATA rowShuf<>+8(SB)/8, $0x0f0b07030e0a0602
+GLOBL rowShuf<>(SB), RODATA|NOPTR, $16
+
+// CHROMA folds the four taps of one plane. The multiply and the add stay
+// separate because the scalar path rounds between them.
+#define CHROMA(P0, P1, OUT)          \
+	VMOVUPS  (P0), Y3;           \
+	VPERMPS  Y3, Y13, Y4;        \
+	VPERMPS  Y3, Y14, Y5;        \
+	VMULPS   Y8, Y4, OUT;        \
+	VMULPS   Y9, Y5, Y5;         \
+	VADDPS   Y5, OUT, OUT;       \
+	VMOVUPS  (P1), Y3;           \
+	VPERMPS  Y3, Y13, Y4;        \
+	VPERMPS  Y3, Y14, Y5;        \
+	VMULPS   Y9, Y4, Y4;         \
+	VADDPS   Y4, OUT, OUT;       \
+	VMULPS   Y10, Y5, Y5;        \
+	VADDPS   Y5, OUT, OUT
+
+// PIXEL clamps one channel to the pixel range and rounds it the way the scalar
+// path does, leaving the result as dwords.
+#define PIXEL(V)                     \
+	VMAXPS Y1, V, V;             \
+	VMINPS Y2, V, V;             \
+	VMULPS Y6, V, V;             \
+	VADDPS Y7, V, V;             \
+	VCVTTPS2DQ V, V
+
+// func convertRow8AVX2(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint8, n int, c *rowConsts)
+TEXT ·convertRow8AVX2(SB), NOSPLIT, $0-72
+	MOVQ dst+0(FP), DI
+	MOVQ yf+8(FP), SI
+	MOVQ u0+16(FP), R8
+	MOVQ u1+24(FP), R9
+	MOVQ v0+32(FP), R10
+	MOVQ v1+40(FP), R11
+	MOVQ a+48(FP), R12
+	MOVQ n+56(FP), DX
+	MOVQ c+64(FP), CX
+
+	VBROADCASTSS   0(CX), Y8
+	VBROADCASTSS   4(CX), Y9
+	VBROADCASTSS   8(CX), Y10
+	VBROADCASTSS   12(CX), Y11
+	VBROADCASTSS   16(CX), Y12
+	VMOVDQU        rowPermC<>(SB), Y13
+	VMOVDQU        rowPermN<>(SB), Y14
+	VBROADCASTI128 rowShuf<>(SB), Y15
+
+loop:
+	VMOVUPS (SI), Y0
+	CHROMA(R8, R9, Y1)
+	CHROMA(R10, R11, Y2)
+
+	VMULPS Y11, Y2, Y3
+	VADDPS Y3, Y0, Y3
+
+	VMULPS Y12, Y1, Y4
+	VADDPS Y4, Y0, Y4
+
+	VBROADCASTSS 20(CX), Y5
+	VMULPS       Y5, Y2, Y5
+	VBROADCASTSS 24(CX), Y6
+	VMULPS       Y6, Y1, Y6
+	VADDPS       Y6, Y5, Y5
+	VADDPS       Y5, Y5, Y5
+	VBROADCASTSS 28(CX), Y6
+	VDIVPS       Y6, Y5, Y5
+	VSUBPS       Y5, Y0, Y5
+
+	VPXOR        Y1, Y1, Y1
+	VBROADCASTSS 36(CX), Y2
+	VBROADCASTSS 32(CX), Y6
+	VBROADCASTSS 40(CX), Y7
+	PIXEL(Y3)
+	PIXEL(Y5)
+	PIXEL(Y4)
+
+	VPMOVZXBD (R12), Y1
+
+	VPACKUSDW Y5, Y3, Y3
+	VPACKUSDW Y1, Y4, Y4
+	VPACKUSWB Y4, Y3, Y3
+	VPSHUFB   Y15, Y3, Y3
+	VMOVDQU   Y3, (DI)
+
+	ADDQ $32, SI
+	ADDQ $16, R8
+	ADDQ $16, R9
+	ADDQ $16, R10
+	ADDQ $16, R11
+	ADDQ $8, R12
+	ADDQ $32, DI
+	SUBQ $8, DX
+	JNZ  loop
+
+	VZEROUPPER
+	RET

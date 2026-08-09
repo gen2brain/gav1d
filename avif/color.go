@@ -56,6 +56,10 @@ type colorState struct {
 	unsupportedSpace bool
 
 	uvIdx, uvAdj []int32
+	uPad, vPad   [2][]float32
+	yf           []float32
+	row          convertRow
+	consts       rowConsts
 	yRow         []uint16
 	uRow, vRow   [2][]uint16
 	cbRow, crRow []float32
@@ -163,6 +167,12 @@ func (s *colorState) prepare(w int) {
 	}
 	s.cbRow = make([]float32, w)
 	s.crRow = make([]float32, w)
+
+	for i := range s.uPad {
+		s.uPad[i] = make([]float32, uw+8)
+		s.vPad[i] = make([]float32, uw+8)
+	}
+	s.yf = make([]float32, w)
 
 	s.uvIdx = make([]int32, w)
 	s.uvAdj = make([]int32, w)
