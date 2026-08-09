@@ -65,16 +65,35 @@ type colorState struct {
 	cbRow, crRow []float32
 }
 
-// newColorState resolves the color description, preferring nclx over the sequence header.
-func newColorState(pic *av1.Picture, nclx *colorInfo, outDepth int) *colorState {
-	s := &colorState{
-		matrix:    pic.MatrixCoeffs,
-		fullRange: pic.FullRange,
-		depth:     pic.BitDepth,
+// colorInfo resolves the description the same way the conversion does.
+func (f *file) colorInfo(it *item, pic *av1.Picture) ColorInfo {
+	ci := ColorInfo{
+		Primaries: uint16(pic.ColorPrimaries),
+		Transfer:  uint16(pic.Transfer),
+		Matrix:    uint16(pic.MatrixCoeffs),
+		FullRange: pic.FullRange,
 	}
-	if nclx != nil && nclx.hasNCLX {
-		s.matrix = int(nclx.matrix)
-		s.fullRange = nclx.fullRange
+
+	p := f.meta.prop(it, "colr")
+	if p == nil || p.colr == nil {
+		return ci
+	}
+	if p.colr.hasNCLX {
+		ci.Primaries = p.colr.primaries
+		ci.Transfer = p.colr.transfer
+		ci.Matrix = p.colr.matrix
+		ci.FullRange = p.colr.fullRange
+	}
+	ci.ICCP = p.colr.icc
+
+	return ci
+}
+
+func newColorState(pic *av1.Picture, ci ColorInfo, outDepth int) *colorState {
+	s := &colorState{
+		matrix:    int(ci.Matrix),
+		fullRange: ci.FullRange,
+		depth:     pic.BitDepth,
 	}
 	if s.matrix == mcUnspec {
 		s.matrix = mcBT601

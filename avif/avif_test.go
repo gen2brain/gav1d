@@ -554,7 +554,7 @@ func TestSampleEndianness(t *testing.T) {
 	pic.Stride[0] = 2
 	binary.NativeEndian.PutUint16(pic.Data[0], 512)
 
-	cs := newColorState(pic, nil, 8)
+	cs := newColorState(pic, ColorInfo{Matrix: 1, FullRange: true}, 8)
 	cs.prepare(1)
 	rgb := make([]uint16, 3)
 	cs.rgbRow(pic, 0, rgb)
@@ -618,4 +618,102 @@ func TestYCbCr(t *testing.T) {
 		t.Fatal("no file took the planar path")
 	}
 	t.Logf("%d of %d files planar", planar, len(files))
+}
+
+// jfifModel reports whether Go's fixed YCbCr model is the right one for this
+// description: it is full-range BT.601 and nothing else.
+func jfifModel(ci ColorInfo) bool {
+	return ci.FullRange &&
+		(ci.Matrix == mcBT601 || ci.Matrix == mcBT470BG || ci.Matrix == mcUnspec)
+}
+
+func ycbcrPlanes(img image.Image) (*image.YCbCr, bool) {
+	switch v := img.(type) {
+	case *image.YCbCr:
+		return v, true
+	case *image.NYCbCrA:
+		return &v.YCbCr, true
+	}
+
+	return nil, false
+}
+
+// TestColorInfo checks that DecodeColor reports the description the conversion
+// ran on, and measures how far image.YCbCr's fixed model lands from it. Only
+// 4:4:4 is compared, since the model reads chroma nearest-neighbour where the
+// conversion upsamples it, and that difference would swamp the matrix. A
+// full-range BT.601 file has to agree there; anything else is free not to.
+func TestColorInfo(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("testdata", "*.avif"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(files)
+
+	matched, differed := 0, 0
+	for _, path := range files {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, ci, err := DecodeColor(bytes.NewReader(raw), Options{ToYCbCr: true})
+			if err != nil {
+				t.Fatalf("ycbcr: %v", err)
+			}
+			yc, ok := ycbcrPlanes(got)
+			if !ok || yc.SubsampleRatio != image.YCbCrSubsampleRatio444 {
+				return
+			}
+			want, err := Decode(bytes.NewReader(raw))
+			if err != nil {
+				t.Fatalf("rgb: %v", err)
+			}
+			ref, ok := want.(*image.NRGBA)
+			if !ok {
+				return
+			}
+
+			worst := 0
+			b := yc.Bounds()
+			for y := b.Min.Y; y < b.Max.Y; y++ {
+				for x := b.Min.X; x < b.Max.X; x++ {
+					gr, gg, gb, _ := yc.At(x, y).RGBA()
+					c := ref.NRGBAAt(x, y)
+					for _, d := range [3]int{
+						abs(int(gr>>8) - int(c.R)),
+						abs(int(gg>>8) - int(c.G)),
+						abs(int(gb>>8) - int(c.B)),
+					} {
+						worst = max(worst, d)
+					}
+				}
+			}
+
+			t.Logf("matrix=%d full=%v: off by %d levels", ci.Matrix, ci.FullRange, worst)
+			if !jfifModel(ci) {
+				differed++
+
+				return
+			}
+			matched++
+			if worst > 2 {
+				t.Fatalf("matrix=%d full=%v: off by %d levels, want the model to fit",
+					ci.Matrix, ci.FullRange, worst)
+			}
+		})
+	}
+
+	if matched == 0 || differed == 0 {
+		t.Fatalf("%d files fit Go's model, %d did not, want both", matched, differed)
+	}
+	t.Logf("%d fit Go's model, %d did not", matched, differed)
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+
+	return v
 }

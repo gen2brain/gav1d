@@ -20,7 +20,15 @@ img, err := avif.Decode(r)
 
 `ToYCbCr` skips the conversion and hands back the planes the bitstream carries — `*image.YCbCr`,
 `*image.NYCbCrA` with alpha, `*image.Gray` for monochrome. Note that `image.YCbCr` reads them as
-full-range BT.601 whatever the file signals.
+full-range BT.601 whatever the file signals, so `DecodeColor` reports what they actually are:
+
+```go
+img, ci, err := avif.DecodeColor(r, avif.Options{ToYCbCr: true})
+```
+
+`ColorInfo` carries the CICP code points and the range flag, plus the ICC profile when the file
+has one. `Matrix` and `FullRange` are what the conversion to RGB uses; `Primaries` and `Transfer`
+are reported but not applied, so RGB output stays in the file's own color space.
 
 ```go
 opts := avif.Options{

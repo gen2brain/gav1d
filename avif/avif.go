@@ -355,6 +355,23 @@ func (f *file) decodePrimary() (*av1.Picture, *av1.Picture, error) {
 	return pic, alpha, nil
 }
 
+// ColorInfo is a file's color description, as the code points of
+// ISO/IEC 23091-2. An nclx box replaces the sequence header's description
+// whole, which is how it is resolved here.
+//
+// Only Matrix and FullRange take part in the conversion to RGB. Primaries and
+// Transfer are reported but not applied, so RGB output stays in the file's own
+// color space, and ICCP is carried rather than honored.
+type ColorInfo struct {
+	Primaries uint16
+	Transfer  uint16
+	Matrix    uint16
+	FullRange bool
+	// ICCP is the embedded ICC profile, for files that carry one in place of
+	// an nclx description. It aliases the input, so it is not a copy.
+	ICCP []byte
+}
+
 // AVIF holds the images of an AVIF file, which may be an image sequence.
 type AVIF struct {
 	// Image holds the decoded frames, *image.NRGBA or *image.NRGBA64.
@@ -363,6 +380,8 @@ type AVIF struct {
 	Delay []float64
 	// LoopCount is how many times the animation repeats, zero for forever.
 	LoopCount int
+	// Color describes the color space the frames were decoded from.
+	Color ColorInfo
 }
 
 // Options are the decoding parameters.
@@ -378,6 +397,7 @@ type Options struct {
 	// the image is monochrome. Above 8 bits NRGBA64 is returned anyway.
 	// image.YCbCr reads the planes as full-range BT.601 whatever the file
 	// signals, so this is for reaching the samples, not for display.
+	// DecodeColor reports what the samples actually are.
 	ToYCbCr bool
 }
 
@@ -390,6 +410,26 @@ func Decode(r io.Reader, opts ...Options) (image.Image, error) {
 	f, err := parse(data)
 	if err != nil {
 		return nil, err
+	}
+
+	o := options(opts)
+	f.frameSizeLimit = o.FrameSizeLimit
+
+	img, _, err := f.decodeStill(o)
+
+	return img, err
+}
+
+// DecodeColor reads an AVIF image and reports the color space it came from,
+// which is what the native planes of Options.ToYCbCr need to be read against.
+func DecodeColor(r io.Reader, opts ...Options) (image.Image, ColorInfo, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, ColorInfo{}, err
+	}
+	f, err := parse(data)
+	if err != nil {
+		return nil, ColorInfo{}, err
 	}
 
 	o := options(opts)
@@ -417,12 +457,12 @@ func DecodeAll(r io.Reader, opts ...Options) (*AVIF, error) {
 		}
 	}
 
-	img, err := f.decodeStill(o)
+	img, ci, err := f.decodeStill(o)
 	if err != nil {
 		return nil, err
 	}
 
-	return &AVIF{Image: []image.Image{img}, Delay: []float64{0}}, nil
+	return &AVIF{Image: []image.Image{img}, Delay: []float64{0}, Color: ci}, nil
 }
 
 // DecodeConfig reads the dimensions and color model without decoding pixels.
@@ -460,21 +500,26 @@ func options(opts []Options) Options {
 	return Options{}
 }
 
-func (f *file) decodeStill(o Options) (image.Image, error) {
+func (f *file) decodeStill(o Options) (image.Image, ColorInfo, error) {
 	pic, alpha, err := f.decodePrimary()
 	if err != nil {
-		return nil, err
+		return nil, ColorInfo{}, err
 	}
 	it := f.primary()
+	ci := f.colorInfo(it, pic)
 	img, err := toImage(f, it, pic, alpha, o.ycbcrFor(f, it))
 	if err != nil {
-		return nil, err
+		return nil, ColorInfo{}, err
 	}
 	if !o.AutoRotate {
-		return img, nil
+		return img, ci, nil
+	}
+	img, err = f.applyTransforms(img, it)
+	if err != nil {
+		return nil, ColorInfo{}, err
 	}
 
-	return f.applyTransforms(img, it)
+	return img, ci, nil
 }
 
 func decodeWrapper(r io.Reader) (image.Image, error) {

@@ -296,6 +296,9 @@ func (f *file) decodeSequence(o Options) (*AVIF, error) {
 	}
 
 	out := &AVIF{}
+	if len(colors) > 0 {
+		out.Color = f.colorInfo(f.primary(), colors[0])
+	}
 	for i, pic := range colors {
 		var alpha *av1.Picture
 		if i < len(alphas) {

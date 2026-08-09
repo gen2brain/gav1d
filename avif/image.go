@@ -88,11 +88,7 @@ func toImage(f *file, it *item, pic, alpha *av1.Picture, ycbcr bool) (image.Imag
 		outDepth = 16
 	}
 
-	var nclx *colorInfo
-	if p := f.meta.prop(it, "colr"); p != nil {
-		nclx = p.colr
-	}
-	cs := newColorState(pic, nclx, outDepth)
+	cs := newColorState(pic, f.colorInfo(it, pic), outDepth)
 	if cs.unsupportedSpace {
 		return nil, errUnsupported
 	}
