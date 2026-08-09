@@ -186,6 +186,7 @@ func (s *colorState) prepare(w int) {
 func (s *colorState) fillIdx(data []byte, stride, y, n int, dst []uint16) {
 	if s.depth == 8 {
 		row := data[y*stride : y*stride+n]
+		dst = dst[:n]
 		for i, v := range row {
 			dst[i] = uint16(v)
 		}
@@ -210,11 +211,14 @@ func (s *colorState) chromaRow(pic *av1.Picture, y, w int) {
 	s.fillIdx(pic.Data[1], pic.Stride[1], uvY, uw, s.uRow[0])
 	s.fillIdx(pic.Data[2], pic.Stride[2], uvY, uw, s.vRow[0])
 
+	tab := s.tableUV
+	cbRow, crRow := s.cbRow[:w], s.crRow[:w]
+
 	if s.ssHor == 0 {
-		u, v := s.uRow[0], s.vRow[0]
-		for x := range w {
-			s.cbRow[x] = s.tableUV[u[x]]
-			s.crRow[x] = s.tableUV[v[x]]
+		u, v := s.uRow[0][:w], s.vRow[0][:w]
+		for x := range cbRow {
+			cbRow[x] = tab[u[x]]
+			crRow[x] = tab[v[x]]
 		}
 
 		return
@@ -237,10 +241,12 @@ func (s *colorState) chromaRow(pic *av1.Picture, y, w int) {
 		u1, v1 = s.uRow[1], s.vRow[1]
 	}
 
-	for x := range w {
-		i, j := s.uvIdx[x], s.uvAdj[x]
-		s.cbRow[x] = s.tw0[u0[i]] + s.tw1[u0[j]] + s.tw1[u1[i]] + s.tw2[u1[j]]
-		s.crRow[x] = s.tw0[v0[i]] + s.tw1[v0[j]] + s.tw1[v1[i]] + s.tw2[v1[j]]
+	tw0, tw1, tw2 := s.tw0, s.tw1, s.tw2
+	uvIdx, uvAdj := s.uvIdx[:w], s.uvAdj[:w]
+	for x := range cbRow {
+		i, j := uvIdx[x], uvAdj[x]
+		cbRow[x] = tw0[u0[i]] + tw1[u0[j]] + tw1[u1[i]] + tw2[u1[j]]
+		crRow[x] = tw0[v0[i]] + tw1[v0[j]] + tw1[v1[i]] + tw2[v1[j]]
 	}
 }
 
@@ -260,9 +266,15 @@ func (s *colorState) rgbRow(pic *av1.Picture, y int, dst []uint16) {
 
 	s.chromaRow(pic, y, w)
 
-	for x := range w {
-		yy := s.tableY[s.yRow[x]]
-		cb, cr := s.cbRow[x], s.crRow[x]
+	tabY := s.tableY
+	yRow := s.yRow[:w]
+	cbRow, crRow := s.cbRow[:w], s.crRow[:w]
+	dst = dst[:3*w]
+	outMax := s.outMax
+
+	for x, iy := range yRow {
+		yy := tabY[iy]
+		cb, cr := cbRow[x], crRow[x]
 
 		var r, g, b float32
 		switch s.matrix {
@@ -277,9 +289,10 @@ func (s *colorState) rgbRow(pic *av1.Picture, y int, dst []uint16) {
 			g = yy - (2*((s.gcr*cr)+(s.gcb*cb)))/s.kg
 		}
 
-		dst[3*x] = uint16(0.5 + clampF(r)*s.outMax)
-		dst[3*x+1] = uint16(0.5 + clampF(g)*s.outMax)
-		dst[3*x+2] = uint16(0.5 + clampF(b)*s.outMax)
+		o := dst[3*x : 3*x+3 : 3*x+3]
+		o[0] = uint16(0.5 + clampF(r)*outMax)
+		o[1] = uint16(0.5 + clampF(g)*outMax)
+		o[2] = uint16(0.5 + clampF(b)*outMax)
 	}
 }
 
