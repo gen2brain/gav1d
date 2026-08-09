@@ -84,20 +84,20 @@
 	MOVD $1189, R8;      \
 	VDUP R8, V30.S4
 
-#define SETUP              \
-	MOVD tmp+0(FP), R0; \
-	MOVD w+8(FP), R2;   \
-	MOVW lo+16(FP), R8; \
-	VDUP R8, V14.S4;    \
-	MOVW hi+20(FP), R8; \
-	VDUP R8, V15.S4;    \
-	MOVD R2, R1;        \
-	LSL  $2, R1, R1;    \
-	ADD  R1, R1, R9;    \
-	ADD  R1, R9, R3;    \
-	ADD  R9, R9, R11;   \
-	ADD  R11, R11, R12; \
-	ADD  R11, R12, R13; \
+#define SETUP                   \
+	MOVD tmp+0(FP), R0;     \
+	MOVD lanes+8(FP), R2;   \
+	MOVD stride+16(FP), R1; \
+	MOVW lo+24(FP), R8;     \
+	VDUP R8, V14.S4;        \
+	MOVW hi+28(FP), R8;     \
+	VDUP R8, V15.S4;        \
+	LSL  $2, R1, R1;        \
+	ADD  R1, R1, R9;        \
+	ADD  R1, R9, R3;        \
+	ADD  R9, R9, R11;       \
+	ADD  R11, R11, R12;     \
+	ADD  R11, R12, R13;     \
 	KONST
 
 #define LD(BASE, OFF, V)  \
@@ -108,8 +108,8 @@
 	ADD OFF, BASE, R10; \
 	VST1 [V], (R10)
 
-// func itxColDct4NEON(tmp *int32, w int, lo, hi int32)
-TEXT ·itxColDct4NEON(SB), NOSPLIT, $0-24
+// func itxColDct4NEON(tmp *int32, lanes, stride int, lo, hi int32)
+TEXT ·itxColDct4NEON(SB), NOSPLIT, $0-32
 	SETUP
 
 col4:
@@ -150,8 +150,8 @@ col4:
 	R181(8, 6, 5, SUBS);                \
 	R181(9, 6, 5, ADDS)
 
-// func itxColDct8NEON(tmp *int32, w int, lo, hi int32)
-TEXT ·itxColDct8NEON(SB), NOSPLIT, $0-24
+// func itxColDct8NEON(tmp *int32, lanes, stride int, lo, hi int32)
+TEXT ·itxColDct8NEON(SB), NOSPLIT, $0-32
 	SETUP
 
 col8:
@@ -201,8 +201,8 @@ col8:
 
 	RET
 
-// func itxColDct16NEON(tmp *int32, w int, lo, hi int32)
-TEXT ·itxColDct16NEON(SB), NOSPLIT, $0-24
+// func itxColDct16NEON(tmp *int32, lanes, stride int, lo, hi int32)
+TEXT ·itxColDct16NEON(SB), NOSPLIT, $0-32
 	SETUP
 	VEOR V31.B16, V31.B16, V31.B16
 
@@ -402,3 +402,5 @@ col16:
 	CBNZ R2, col16
 
 	RET
+
+#define SSHLS(Vd, Vn, Vm) WORD $(0x4EA04400 | ((Vm) << 16) | ((Vn) << 5) | (Vd))

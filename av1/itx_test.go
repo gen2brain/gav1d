@@ -84,7 +84,7 @@ func TestItx(t *testing.T) {
 			if txtp == whtWht {
 				invTxfmAddWht4x4(dst, 0, stride, coeff, eob, bitdepthMax)
 			} else {
-				invTxfmAdd(newDspGo[uint8](), dst, 0, stride, coeff, make([]int32, 64*64), eob, tx, txtp, bitdepthMax)
+				invTxfmAdd(newDspGo[uint8](), dst, 0, stride, coeff, make([]int32, itxScratchLen), eob, tx, txtp, bitdepthMax)
 			}
 			check(func(y, x int) int { return int(dst[y*stride+x]) },
 				func(i int) int { return int(coeff[i]) })
@@ -102,7 +102,7 @@ func TestItx(t *testing.T) {
 			if txtp == whtWht {
 				invTxfmAddWht4x4(dst, 0, stride, coeff, eob, bitdepthMax)
 			} else {
-				invTxfmAdd(newDspGo[uint16](), dst, 0, stride, coeff, make([]int32, 64*64), eob, tx, txtp, bitdepthMax)
+				invTxfmAdd(newDspGo[uint16](), dst, 0, stride, coeff, make([]int32, itxScratchLen), eob, tx, txtp, bitdepthMax)
 			}
 			check(func(y, x int) int { return int(dst[y*stride+x]) },
 				func(i int) int { return int(coeff[i]) })
@@ -195,8 +195,7 @@ func itxTailCase[P pixel](t *testing.T, d *dspContext[P], iter, w, h int,
 	return 1
 }
 
-// TestItxColAsm checks the vectorized column pass against the pure Go one-
-// dimensional transforms, over every width it accepts and each column height.
+// TestItxColAsm checks the one-dimensional pass against the pure Go transforms.
 func TestItxColAsm(t *testing.T) {
 	d := newDsp[uint8]()
 	if d.itxCol == nil {
@@ -205,33 +204,42 @@ func TestItxColAsm(t *testing.T) {
 	cases := 0
 
 	for iter := range 4 {
-		for _, w := range []int{8, 16, 32, 64} {
-			for _, h := range []int{4, 8, 16, 32} {
-				for _, txtp := range []int{tx1dDct, tx1dAdst, tx1dIdentity} {
-					lo, hi := int32(math.MinInt16), int32(math.MaxInt16)
-					ref := make([]int32, w*h)
-					got := make([]int32, w*h)
-					for i := range ref {
-						v := uint32(i)*2654435761 + uint32(iter)*3266489917
-						v ^= v >> 15
-						ref[i] = int32(v*2654435761)>>18 | 1
-						got[i] = ref[i]
-					}
-
-					if !d.itxCol(got, w, h, txtp, lo, hi) {
-						continue
-					}
-					fn := tx1dFns[ulog2(uint32(h))-2][txtp]
-					for x := range w {
-						fn(ref, x, w, lo, hi)
-					}
-					for i := range ref {
-						if got[i] != ref[i] {
-							t.Fatalf("w=%d h=%d txtp=%d: [%d,%d] = %d, want %d",
-								w, h, txtp, i/w, i%w, got[i], ref[i])
+		for _, stride := range []int{8, 16, 32, 64} {
+			for _, lanes := range []int{4, 8, stride} {
+				if lanes > stride {
+					continue
+				}
+				for _, n := range []int{4, 8, 16, 32, 64} {
+					for _, txtp := range []int{tx1dDct, tx1dAdst, tx1dIdentity, tx1dFlipadst} {
+						lo, hi := int32(math.MinInt16), int32(math.MaxInt16)
+						ref := make([]int32, n*stride)
+						got := make([]int32, n*stride)
+						for i := range ref {
+							v := uint32(i)*2654435761 + uint32(iter)*3266489917
+							v ^= v >> 15
+							ref[i] = int32(v*2654435761)>>18 | 1
+							got[i] = ref[i]
 						}
+
+						if !d.itxCol(got, lanes, stride, n, txtp, lo, hi) {
+							continue
+						}
+						fn := tx1dFns[ulog2(uint32(n))-2][txtp]
+						if fn == nil {
+							t.Fatalf("n=%d txtp=%d: kernel took a transform Go has not",
+								n, txtp)
+						}
+						for i := range lanes {
+							fn(ref, i, stride, lo, hi)
+						}
+						for i := range ref {
+							if got[i] != ref[i] {
+								t.Fatalf("lanes=%d stride=%d n=%d txtp=%d: [%d,%d] = %d, want %d",
+									lanes, stride, n, txtp, i/stride, i%stride, got[i], ref[i])
+							}
+						}
+						cases++
 					}
-					cases++
 				}
 			}
 		}

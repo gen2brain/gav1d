@@ -132,17 +132,17 @@ GLOBL itxc<>(SB), RODATA|NOPTR, $576
 	CLIP(T);              \
 	VMOVDQU T, HI
 
-// SETUP takes the row pointers the four bases and the stride address rows with.
+// SETUP takes the lane count, the tap stride and the clip bounds.
 #define SETUP                     \
 	MOVQ tmp+0(FP), SI;       \
-	MOVQ w+8(FP), BX;         \
-	MOVL lo+16(FP), AX;       \
+	MOVQ lanes+8(FP), BX;     \
+	MOVQ stride+16(FP), DX;   \
+	MOVL lo+24(FP), AX;       \
 	VMOVD AX, X14;            \
 	VPBROADCASTD X14, Y14;    \
-	MOVL hi+20(FP), AX;       \
+	MOVL hi+28(FP), AX;       \
 	VMOVD AX, X15;            \
 	VPBROADCASTD X15, Y15;    \
-	MOVQ BX, DX;              \
 	SHLQ $2, DX;              \
 	LEAQ (DX)(DX*2), R9
 
@@ -163,8 +163,8 @@ GLOBL itxc<>(SB), RODATA|NOPTR, $576
 	VPSUBD A3, T0, A3;        \
 	CLIP(A3)
 
-// func itxColDct4AVX2(tmp *int32, w int, lo, hi int32)
-TEXT ·itxColDct4AVX2(SB), NOSPLIT, $0-24
+// func itxColDct4AVX2(tmp *int32, lanes, stride int, lo, hi int32)
+TEXT ·itxColDct4AVX2(SB), NOSPLIT, $0-32
 	SETUP
 
 col4:
@@ -185,8 +185,8 @@ col4:
 	VZEROUPPER
 	RET
 
-// func itxColDct8AVX2(tmp *int32, w int, lo, hi int32)
-TEXT ·itxColDct8AVX2(SB), NOSPLIT, $0-24
+// func itxColDct8AVX2(tmp *int32, lanes, stride int, lo, hi int32)
+TEXT ·itxColDct8AVX2(SB), NOSPLIT, $0-32
 	SETUP
 
 col8:
@@ -234,8 +234,8 @@ col8:
 	VZEROUPPER
 	RET
 
-// func itxColDct16AVX2(tmp *int32, w int, lo, hi int32)
-TEXT ·itxColDct16AVX2(SB), NOSPLIT, $256-24
+// func itxColDct16AVX2(tmp *int32, lanes, stride int, lo, hi int32)
+TEXT ·itxColDct16AVX2(SB), NOSPLIT, $256-32
 	SETUP
 	VPXOR Y11, Y11, Y11
 

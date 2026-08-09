@@ -61,13 +61,13 @@
 	MOV $176, X20; \
 	MOV $1189, X21
 
-#define SETUP               \
-	MOV tmp+0(FP), X10; \
-	MOV w+8(FP), X22;   \
-	MOVW lo+16(FP), X28; \
-	MOVW hi+20(FP), X29; \
-	MOV X22, X23;       \
-	SLLI $2, X23, X23;  \
+#define SETUP                   \
+	MOV tmp+0(FP), X10;     \
+	MOV lanes+8(FP), X22;   \
+	MOV stride+16(FP), X23; \
+	MOVW lo+24(FP), X28;    \
+	MOVW hi+28(FP), X29;    \
+	SLLI $2, X23, X23;      \
 	KONST
 
 // LOADN and STOREN walk the rows, so the butterfly never addresses memory.
@@ -113,8 +113,8 @@
 	CLIP(A);        \
 	VMVVV  S, B
 
-// func itxColDct4RVV(tmp *int32, w int, lo, hi int32)
-TEXT ·itxColDct4RVV(SB), NOSPLIT, $0-24
+// func itxColDct4RVV(tmp *int32, lanes, stride int, lo, hi int32)
+TEXT ·itxColDct4RVV(SB), NOSPLIT, $0-32
 	SETUP
 
 col4:
@@ -136,8 +136,8 @@ col4:
 
 	RET
 
-// func itxColDct8RVV(tmp *int32, w int, lo, hi int32)
-TEXT ·itxColDct8RVV(SB), NOSPLIT, $0-24
+// func itxColDct8RVV(tmp *int32, lanes, stride int, lo, hi int32)
+TEXT ·itxColDct8RVV(SB), NOSPLIT, $0-32
 	SETUP
 
 col8:
@@ -169,8 +169,8 @@ col8:
 
 	RET
 
-// func itxColDct16RVV(tmp *int32, w int, lo, hi int32)
-TEXT ·itxColDct16RVV(SB), NOSPLIT, $0-24
+// func itxColDct16RVV(tmp *int32, lanes, stride int, lo, hi int32)
+TEXT ·itxColDct16RVV(SB), NOSPLIT, $0-32
 	SETUP
 
 col16:

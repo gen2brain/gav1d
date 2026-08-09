@@ -93,7 +93,7 @@ type scratch[P pixel] struct {
 	segMask    [128 * 128]uint8
 	interintra [64 * 64]P
 	txtpMap    [32 * 32]uint8
-	itx        [64 * 64]int32
+	itx        [itxScratchLen]int32
 	cdefLrBak  [2][3][16]P
 	lrBorder   [2][(128 + 8) * 4]P
 	lrParams   looprestorationParams

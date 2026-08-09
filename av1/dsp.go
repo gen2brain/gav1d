@@ -27,7 +27,9 @@ type dspContext[P pixel] struct {
 
 	itxClip func(tmp []int32, rnd int32, shift int, lo, hi int32)
 	itxAdd  func(dst []P, dstOff, stride int, tmp []int32, w, h int, bitdepthMax int32)
-	itxCol  func(tmp []int32, w, h, txtp int, lo, hi int32) bool
+	itxCol  func(tmp []int32, lanes, stride, n, txtp int, lo, hi int32) bool
+
+	itxTranspose func(wide, tmp []int32, w, sh, n int)
 
 	// Converting a generic function to a func value allocates a closure for
 	// the dictionary, so the predictors are resolved once per frame here
@@ -50,6 +52,7 @@ func newDspGo[P pixel]() *dspContext[P] {
 		put8tap:      put8tap[P],
 		itxClip:      itxClipGo,
 		itxAdd:       itxAddGo[P],
+		itxTranspose: itxTransposeGo,
 	}
 	// Bound once here, since cdefFilterBlock reaches the padding copy
 	// through the table.
