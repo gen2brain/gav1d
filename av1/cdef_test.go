@@ -64,7 +64,26 @@ func runCdefFilter[P pixel](t *testing.T, b, iter, w, h, edges, pri, sec, dir, d
 // one across every block shape, edge combination, direction and strength pair.
 // The whole buffer is compared, so a kernel that writes outside the block fails.
 func TestCdefAsm(t *testing.T) {
-	d := newDsp[uint8]()
+	cases := 0
+	for _, bpc := range []int{8, 10, 12} {
+		bitdepthMax := int32(1<<bpc - 1)
+		if bpc == 8 {
+			cases += cdefAsmDepth(t, newDsp[uint8](), bitdepthMax)
+
+			continue
+		}
+		cases += cdefAsmDepth(t, newDsp[uint16](), bitdepthMax)
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+func cdefAsmDepth[P pixel](t *testing.T, d *dspContext[P], bitdepthMax int32) int {
+	t.Helper()
+
+	// The strengths are the encoded levels scaled by the bit depth, the way
+	// cdefBrow derives them.
+	min8 := bitdepthFromMax(bitdepthMax) - 8
 	shapes := [3][2]int{{8, 8}, {4, 4}, {4, 8}}
 	cases := 0
 
@@ -73,20 +92,20 @@ func TestCdefAsm(t *testing.T) {
 			for _, s := range shapes {
 				w, h := s[0], s[1]
 				for edges := range 16 {
-					for _, pri := range []int{0, 1, 5, 15} {
-						for _, sec := range []int{0, 1, 2, 4} {
+					for _, pri := range []int{0, 1 << min8, 5 << min8, 15 << min8} {
+						for _, sec := range []int{0, 1 << min8, 2 << min8, 4 << min8} {
 							for dir := range 8 {
-								for _, damping := range []int{3, 6} {
+								for _, damping := range []int{3 + min8, 6 + min8} {
 									ref, got := cdefAsmCase(d, iter, w, h, edges,
-										pri, sec, dir, damping, flat)
+										pri, sec, dir, damping, flat, bitdepthMax)
 									for i := range ref {
 										if got[i] == ref[i] {
 											continue
 										}
-										t.Fatalf("%dx%d flat=%v edges=%d pri=%d sec=%d dir=%d damping=%d: "+
+										t.Fatalf("bpc=%d %dx%d flat=%v edges=%d pri=%d sec=%d dir=%d damping=%d: "+
 											"buf[%d] = %d, want %d",
-											w, h, flat, edges, pri, sec, dir, damping,
-											i, got[i], ref[i])
+											bitdepthFromMax(bitdepthMax), w, h, flat, edges,
+											pri, sec, dir, damping, i, got[i], ref[i])
 									}
 									cases++
 								}
@@ -98,33 +117,32 @@ func TestCdefAsm(t *testing.T) {
 		}
 	}
 
-	t.Logf("%d cases", cases)
+	return cases
 }
 
 // cdefAsmCase builds one block. The flat variant keeps the neighbourhood tight,
 // which is what makes the clip to its range actually bind.
-func cdefAsmCase(d *dspContext[uint8], iter, w, h, edges, pri, sec, dir, damping int, flat bool,
-) (ref, got []uint8) {
-	const bitdepthMax = 255
-
-	gen := func(kind, i int) uint8 {
+func cdefAsmCase[P pixel](d *dspContext[P], iter, w, h, edges, pri, sec, dir, damping int,
+	flat bool, bitdepthMax int32,
+) (ref, got []P) {
+	gen := func(kind, i int) P {
 		v := cdefGen(iter, kind, i)
 		if flat {
-			return uint8(128 + v&7)
+			return P(int32(128<<(bitdepthFromMax(bitdepthMax)-8)) + int32(v&7))
 		}
 
-		return uint8(v & bitdepthMax)
+		return P(int32(v) & bitdepthMax)
 	}
 
-	got = make([]uint8, cdefRows*cdefStride)
+	got = make([]P, cdefRows*cdefStride)
 	for i := range got {
 		got[i] = gen(0, i)
 	}
-	left := make([]uint8, 16)
+	left := make([]P, 16)
 	for i := range left {
 		left[i] = gen(1, i)
 	}
-	ref = append([]uint8(nil), got...)
+	ref = append([]P(nil), got...)
 
 	base := cdefPad*cdefStride + cdefPad
 	cdefFilterBlock(ref, base, cdefStride, left, 0,

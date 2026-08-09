@@ -55,6 +55,37 @@ GLOBL cdefRound<>(SB), RODATA|NOPTR, $16
 	VPSRAW  $4, X1, X1;            \
 	VPADDW  X0, X1, X1
 
+// TAPS runs the four primary and eight secondary neighbours through T.
+#define TAPS(T)                    \
+	VPBROADCASTW 40(BX), X13;  \
+	T(R8, X8, X10, X13);       \
+	NEGQ R8;                   \
+	T(R8, X8, X10, X13);       \
+	NEGQ R8;                   \
+	VPBROADCASTW 44(BX), X13;  \
+	T(R9, X8, X10, X13);       \
+	NEGQ R9;                   \
+	T(R9, X8, X10, X13);       \
+	NEGQ R9;                   \
+	VPBROADCASTW 48(BX), X13;  \
+	T(R10, X9, X11, X13);      \
+	NEGQ R10;                  \
+	T(R10, X9, X11, X13);      \
+	NEGQ R10;                  \
+	T(R12, X9, X11, X13);      \
+	NEGQ R12;                  \
+	T(R12, X9, X11, X13);      \
+	NEGQ R12;                  \
+	VPBROADCASTW 52(BX), X13;  \
+	T(R11, X9, X11, X13);      \
+	NEGQ R11;                  \
+	T(R11, X9, X11, X13);      \
+	NEGQ R11;                  \
+	T(R13, X9, X11, X13);      \
+	NEGQ R13;                  \
+	T(R13, X9, X11, X13);      \
+	NEGQ R13
+
 // func cdefFilterAVX2(dst *uint8, dstStride int, tmp *int16, p *cdefParams)
 TEXT ·cdefFilterAVX2(SB), NOSPLIT, $0-32
 	SETUP
@@ -63,37 +94,7 @@ loop:
 	VPMOVZXBW (DI), X0
 	VPXOR     X1, X1, X1
 
-	VPBROADCASTW 40(BX), X13
-	TAP(R8, X8, X10, X13)
-	NEGQ R8
-	TAP(R8, X8, X10, X13)
-	NEGQ R8
-
-	VPBROADCASTW 44(BX), X13
-	TAP(R9, X8, X10, X13)
-	NEGQ R9
-	TAP(R9, X8, X10, X13)
-	NEGQ R9
-
-	VPBROADCASTW 48(BX), X13
-	TAP(R10, X9, X11, X13)
-	NEGQ R10
-	TAP(R10, X9, X11, X13)
-	NEGQ R10
-	TAP(R12, X9, X11, X13)
-	NEGQ R12
-	TAP(R12, X9, X11, X13)
-	NEGQ R12
-
-	VPBROADCASTW 52(BX), X13
-	TAP(R11, X9, X11, X13)
-	NEGQ R11
-	TAP(R11, X9, X11, X13)
-	NEGQ R11
-	TAP(R13, X9, X11, X13)
-	NEGQ R13
-	TAP(R13, X9, X11, X13)
-	NEGQ R13
+	TAPS(TAP)
 
 	ROUND
 	VPACKUSWB X1, X1, X1
@@ -125,37 +126,7 @@ loopc:
 	VMOVDQU   X0, X2
 	VMOVDQU   X0, X3
 
-	VPBROADCASTW 40(BX), X13
-	TAPC(R8, X8, X10, X13)
-	NEGQ R8
-	TAPC(R8, X8, X10, X13)
-	NEGQ R8
-
-	VPBROADCASTW 44(BX), X13
-	TAPC(R9, X8, X10, X13)
-	NEGQ R9
-	TAPC(R9, X8, X10, X13)
-	NEGQ R9
-
-	VPBROADCASTW 48(BX), X13
-	TAPC(R10, X9, X11, X13)
-	NEGQ R10
-	TAPC(R10, X9, X11, X13)
-	NEGQ R10
-	TAPC(R12, X9, X11, X13)
-	NEGQ R12
-	TAPC(R12, X9, X11, X13)
-	NEGQ R12
-
-	VPBROADCASTW 52(BX), X13
-	TAPC(R11, X9, X11, X13)
-	NEGQ R11
-	TAPC(R11, X9, X11, X13)
-	NEGQ R11
-	TAPC(R13, X9, X11, X13)
-	NEGQ R13
-	TAPC(R13, X9, X11, X13)
-	NEGQ R13
+	TAPS(TAPC)
 
 	ROUND
 	VPMAXSW X3, X1, X1
@@ -175,6 +146,72 @@ storedc:
 	ADDQ $24, SI
 	DECQ CX
 	JNZ  loopc
+
+	VZEROUPPER
+	RET
+
+// The 16-bit pixel needs no widening, and the store clips explicitly where
+// VPACKUSWB did it for free at eight bits.
+// func cdefFilter16AVX2(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
+TEXT ·cdefFilter16AVX2(SB), NOSPLIT, $0-32
+	SETUP
+	SHLQ         $1, DX
+	VPBROADCASTW 64(BX), X15
+	VPXOR        X2, X2, X2
+
+loop16:
+	VMOVDQU (DI), X0
+	VPXOR   X1, X1, X1
+	TAPS(TAP)
+	ROUND
+	VPMAXSW X2, X1, X1
+	VPMINSW X15, X1, X1
+
+	CMPQ    AX, $8
+	JNE     store416
+	VMOVDQU X1, (DI)
+	JMP     stored16
+
+store416:
+	VMOVQ X1, (DI)
+
+stored16:
+	ADDQ DX, DI
+	ADDQ $24, SI
+	DECQ CX
+	JNZ  loop16
+
+	VZEROUPPER
+	RET
+
+// func cdefFilterClip16AVX2(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
+TEXT ·cdefFilterClip16AVX2(SB), NOSPLIT, $0-32
+	SETUP
+	SHLQ $1, DX
+
+loopc16:
+	VMOVDQU (DI), X0
+	VPXOR   X1, X1, X1
+	VMOVDQU X0, X2
+	VMOVDQU X0, X3
+	TAPS(TAPC)
+	ROUND
+	VPMAXSW X3, X1, X1
+	VPMINSW X2, X1, X1
+
+	CMPQ    AX, $8
+	JNE     store4c16
+	VMOVDQU X1, (DI)
+	JMP     storedc16
+
+store4c16:
+	VMOVQ X1, (DI)
+
+storedc16:
+	ADDQ DX, DI
+	ADDQ $24, SI
+	DECQ CX
+	JNZ  loopc16
 
 	VZEROUPPER
 	RET
