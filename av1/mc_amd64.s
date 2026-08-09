@@ -20,11 +20,17 @@ GLOBL pw34<>(SB), RODATA|NOPTR, $4
 DATA pw512<>+0(SB)/4, $0x02000200
 GLOBL pw512<>(SB), RODATA|NOPTR, $4
 
+DATA pw2<>+0(SB)/4, $0x00020002
+GLOBL pw2<>(SB), RODATA|NOPTR, $4
+
+DATA pd512<>+0(SB)/4, $0x00000200
+GLOBL pd512<>(SB), RODATA|NOPTR, $4
+
 // HFILT spreads the row so that every dword holds four consecutive pixels, then
 // pairs them with the filter halves. shufB serves twice: taps 4-7 of the low
 // four outputs and taps 0-3 of the high four. Coefficients sum to 64 and the
 // positive ones to at most 92, so 255*92 keeps every partial sum in a word.
-#define HFILT(V0, V1, V2, V3, RND, SA, SB, SC, F03, F47) \
+#define HTAPS(V0, V1, V2, V3, RND, SA, SB, SC, F03, F47) \
 	VPSHUFB    SB, V0, V1;   \
 	VPSHUFB    SC, V0, V2;   \
 	VPSHUFB    SA, V0, V0;   \
@@ -35,8 +41,7 @@ GLOBL pw512<>(SB), RODATA|NOPTR, $4
 	VPADDW     V3, V2, V2;   \
 	VPADDW     V1, V0, V0;   \
 	VPHADDW    V2, V0, V0;   \
-	VPADDW     RND, V0, V0;  \
-	VPSRAW     $6, V0, V0
+	VPADDW     RND, V0, V0
 
 // func put8tapHAVX2(dst *uint8, dstStride int, src *uint8, srcStride int, f *[8]int8, w, h int)
 TEXT ·put8tapHAVX2(SB), NOSPLIT, $0-56
@@ -64,7 +69,8 @@ hrow16:
 hcol16:
 	VMOVDQU     (SI)(CX*1), X0
 	VINSERTI128 $1, 8(SI)(CX*1), Y0, Y0
-	HFILT(Y0, Y1, Y2, Y3, Y5, Y6, Y7, Y8, Y9, Y10)
+	HTAPS(Y0, Y1, Y2, Y3, Y5, Y6, Y7, Y8, Y9, Y10)
+	VPSRAW      $6, Y0, Y0
 	VPACKUSWB   Y0, Y0, Y0
 	VPERMQ      $0x08, Y0, Y0
 	VMOVDQU     X0, (DI)(CX*1)
@@ -82,7 +88,8 @@ hcol16:
 
 hrow8:
 	VMOVDQU   (SI), X0
-	HFILT(X0, X1, X2, X3, X5, X6, X7, X8, X9, X10)
+	HTAPS(X0, X1, X2, X3, X5, X6, X7, X8, X9, X10)
+	VPSRAW    $6, X0, X0
 	VPACKUSWB X0, X0, X0
 	VMOVQ     X0, (DI)
 
@@ -94,10 +101,9 @@ hrow8:
 	VZEROUPPER
 	RET
 
-// VSETUP loads the seven rows above the first output and pairs them up. Each
-// register holds two rows interleaved for all sixteen columns: a broadcast puts
-// a row in both lanes, VSHUFPD picks one half of each of two rows, and then the
-// low and high unpack yield two pairings from one pass.
+// VSETUP loads the seven rows above the first output, one register per row
+// pairing over all sixteen columns. Broadcasting a row to both lanes and
+// picking halves with VSHUFPD gets two pairings out of one unpack.
 #define VSETUP                       \
 	VBROADCASTI128 (SI), Y4;     \
 	VBROADCASTI128 (SI)(R9*1), Y5; \
@@ -119,9 +125,8 @@ hrow8:
 	VPUNPCKLBW     Y0, Y6, Y3;   \
 	VPUNPCKHBW     Y0, Y6, Y6
 
-// VBODY filters two output rows and slides the window down by two. Y13 ends
-// holding both rows packed, the first in the low lane. Multiplying by 512 and
-// taking the rounded high half is the rounding shift by six.
+// VBODY filters two output rows into Y13, the first in the low lane, and slides
+// the window down by two. A rounding multiply-high by 512 is the shift by six.
 #define VBODY                        \
 	VBROADCASTI128 (R10)(R9*1), Y12; \
 	LEAQ           (R10)(R9*2), R10; \
@@ -208,6 +213,142 @@ vrow8:
 	LEAQ         (R11)(R8*2), R11
 	SUBQ         $2, R13
 	JG           vrow8
+
+	VZEROUPPER
+	RET
+
+// VTAPS filters eight scratch rows. The scratch is too wide for word products,
+// so taps pair through VPMADDWD, which splits the columns over two dword
+// accumulators; VPACKSSDW puts them back in order.
+#define VTAPS(A, B, ACC0, ACC1, T, F0, F1, F2, F3, RND) \
+	VMOVDQU    0(R12), A;     \
+	VMOVDQU    32(R12), B;    \
+	VPUNPCKLWD B, A, ACC0;    \
+	VPUNPCKHWD B, A, ACC1;    \
+	VPMADDWD   F0, ACC0, ACC0; \
+	VPMADDWD   F0, ACC1, ACC1; \
+	VMOVDQU    64(R12), A;    \
+	VMOVDQU    96(R12), B;    \
+	VPUNPCKLWD B, A, T;       \
+	VPMADDWD   F1, T, T;      \
+	VPADDD     T, ACC0, ACC0; \
+	VPUNPCKHWD B, A, T;       \
+	VPMADDWD   F1, T, T;      \
+	VPADDD     T, ACC1, ACC1; \
+	VMOVDQU    128(R12), A;   \
+	VMOVDQU    160(R12), B;   \
+	VPUNPCKLWD B, A, T;       \
+	VPMADDWD   F2, T, T;      \
+	VPADDD     T, ACC0, ACC0; \
+	VPUNPCKHWD B, A, T;       \
+	VPMADDWD   F2, T, T;      \
+	VPADDD     T, ACC1, ACC1; \
+	VMOVDQU    192(R12), A;   \
+	VMOVDQU    224(R12), B;   \
+	VPUNPCKLWD B, A, T;       \
+	VPMADDWD   F3, T, T;      \
+	VPADDD     T, ACC0, ACC0; \
+	VPUNPCKHWD B, A, T;       \
+	VPMADDWD   F3, T, T;      \
+	VPADDD     T, ACC1, ACC1; \
+	VPADDD     RND, ACC0, ACC0; \
+	VPADDD     RND, ACC1, ACC1; \
+	VPSRAD     $10, ACC0, ACC0; \
+	VPSRAD     $10, ACC1, ACC1; \
+	VPACKSSDW  ACC1, ACC0, ACC0
+
+// func put8tapHVAVX2(dst *uint8, dstStride int, src *uint8, srcStride int, mid *int16, fh *[8]int8, fv *[8]int16, w, h int)
+TEXT ·put8tapHVAVX2(SB), NOSPLIT, $0-72
+	MOVQ dst+0(FP), DI
+	MOVQ dstStride+8(FP), R8
+	MOVQ src+16(FP), SI
+	MOVQ srcStride+24(FP), R9
+	MOVQ mid+32(FP), BX
+	MOVQ w+56(FP), DX
+
+	MOVQ           fh+40(FP), AX
+	VBROADCASTI128 subpelShufA<>(SB), Y6
+	VBROADCASTI128 subpelShufB<>(SB), Y7
+	VBROADCASTI128 subpelShufC<>(SB), Y8
+	VPBROADCASTD   (AX), Y9
+	VPBROADCASTD   4(AX), Y10
+	VPBROADCASTD   pw2<>(SB), Y5
+
+	MOVQ         fv+48(FP), AX
+	VPBROADCASTD (AX), Y11
+	VPBROADCASTD 4(AX), Y12
+	VPBROADCASTD 8(AX), Y13
+	VPBROADCASTD 12(AX), Y14
+	VPBROADCASTD pd512<>(SB), Y15
+
+	CMPQ DX, $8
+	JEQ  hvh8
+
+hvh16:
+	MOVQ SI, R10
+	MOVQ BX, R12
+	MOVQ h+64(FP), R13
+	ADDQ $7, R13
+
+hvhrow16:
+	VMOVDQU     (R10), X0
+	VINSERTI128 $1, 8(R10), Y0, Y0
+	HTAPS(Y0, Y1, Y2, Y3, Y5, Y6, Y7, Y8, Y9, Y10)
+	VPSRAW      $2, Y0, Y0
+	VMOVDQU     Y0, (R12)
+	ADDQ        R9, R10
+	ADDQ        $32, R12
+	DECQ        R13
+	JNZ         hvhrow16
+
+	MOVQ BX, R12
+	MOVQ DI, R11
+	MOVQ h+64(FP), R13
+
+hvvrow16:
+	VTAPS(Y0, Y1, Y2, Y3, Y4, Y11, Y12, Y13, Y14, Y15)
+	VPACKUSWB Y2, Y2, Y2
+	VPERMQ    $0x08, Y2, Y2
+	VMOVDQU   X2, (R11)
+	ADDQ      R8, R11
+	ADDQ      $32, R12
+	DECQ      R13
+	JNZ       hvvrow16
+
+	ADDQ $16, SI
+	ADDQ $16, DI
+	SUBQ $16, DX
+	JG   hvh16
+
+	VZEROUPPER
+	RET
+
+hvh8:
+	MOVQ BX, R12
+	MOVQ h+64(FP), R13
+	ADDQ $7, R13
+
+hvhrow8:
+	VMOVDQU (SI), X0
+	HTAPS(X0, X1, X2, X3, X5, X6, X7, X8, X9, X10)
+	VPSRAW  $2, X0, X0
+	VMOVDQU X0, (R12)
+	ADDQ    R9, SI
+	ADDQ    $32, R12
+	DECQ    R13
+	JNZ     hvhrow8
+
+	MOVQ BX, R12
+	MOVQ h+64(FP), R13
+
+hvvrow8:
+	VTAPS(X0, X1, X2, X3, X4, X11, X12, X13, X14, X15)
+	VPACKUSWB X2, X2, X2
+	VMOVQ     X2, (DI)
+	ADDQ      R8, DI
+	ADDQ      $32, R12
+	DECQ      R13
+	JNZ       hvvrow8
 
 	VZEROUPPER
 	RET
