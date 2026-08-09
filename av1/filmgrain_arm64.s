@@ -174,3 +174,147 @@ uvloop:
 
 uvdone:
 	RET
+
+#define SSHLS(Vd, Vn, Vm)  WORD $(0x4EA04400 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define SMAXS4(Vd, Vn, Vm) WORD $(0x4EA06400 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define SMINS4(Vd, Vn, Vm) WORD $(0x4EA06C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define MULS4(Vd, Vn, Vm)  WORD $(0x4EA09C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define SSHLL4(Vd, Vn)     WORD $(0x0F10A400 | ((Vn) << 5) | (Vd))
+#define SSHR6(Vd, Vn)      WORD $(0x4F000400 | ((64 - 6) << 16) | ((Vn) << 5) | (Vd))
+#define XTN4(Vd, Vn)       WORD $(0x0E612800 | ((Vn) << 5) | (Vd))
+
+// GATHER4 reads four scaling entries, which NEON has no instruction for.
+#define GATHER4                \
+	VMOV  V2.S[0], R11;    \
+	MOVBU (R3)(R11), R12;  \
+	VMOV  R12, V4.S[0];    \
+	VMOV  V2.S[1], R11;    \
+	MOVBU (R3)(R11), R12;  \
+	VMOV  R12, V4.S[1];    \
+	VMOV  V2.S[2], R11;    \
+	MOVBU (R3)(R11), R12;  \
+	VMOV  R12, V4.S[2];    \
+	VMOV  V2.S[3], R11;    \
+	MOVBU (R3)(R11), R12;  \
+	VMOV  R12, V4.S[3]
+
+// NOISE16 turns the gathered scaling and the grain into the output sample.
+#define NOISE16                    \
+	VLD1  (R4), [V5.H4];       \
+	SSHLL4(5, 5);              \
+	MULS4(4, 4, 5);            \
+	VADD  V25.S4, V4.S4, V4.S4; \
+	SSHLS(4, 4, 24);           \
+	VADD  V1.S4, V4.S4, V4.S4; \
+	SMAXS4(4, 4, 26);          \
+	SMINS4(4, 4, 27);          \
+	XTN4(4, 4);                \
+	VST1  [V4.D1], (R0);       \
+	ADD   $8, R0, R0;          \
+	ADD   $8, R1, R1;          \
+	ADD   $8, R4, R4;          \
+	SUBS  $4, R2, R2
+
+// func fgApplyRow16NEON(dst, src *uint16, scaling *uint8, grain *int16, n, shift, minValue, maxValue int)
+TEXT ·fgApplyRow16NEON(SB), NOSPLIT, $0-64
+	MOVD  dst+0(FP), R0
+	MOVD  src+8(FP), R1
+	MOVD  scaling+16(FP), R3
+	MOVD  grain+24(FP), R4
+	MOVD  n+32(FP), R2
+	MOVD  shift+40(FP), R5
+	MOVD  $1, R6
+	LSL   R5, R6, R6
+	LSR   $1, R6, R6
+	VDUP  R6, V25.S4
+	NEG   R5, R5
+	VDUP  R5, V24.S4
+	MOVD  minValue+48(FP), R6
+	VDUP  R6, V26.S4
+	MOVD  maxValue+56(FP), R6
+	VDUP  R6, V27.S4
+
+fgrow16:
+	VLD1   (R1), [V1.H4]
+	VUSHLL $0, V1.H4, V1.S4
+	VMOV   V1.B16, V2.B16
+	GATHER4
+	NOISE16
+	BNE    fgrow16
+
+	RET
+
+// func fguvApplyRow16NEON(dst, src, luma *uint16, scaling *uint8, grain *int16, p *fguv16Params)
+TEXT ·fguvApplyRow16NEON(SB), NOSPLIT, $0-48
+	MOVD  dst+0(FP), R0
+	MOVD  src+8(FP), R1
+	MOVD  luma+16(FP), R7
+	MOVD  scaling+24(FP), R3
+	MOVD  grain+32(FP), R4
+	MOVD  p+40(FP), R8
+	MOVD  0(R8), R2
+	MOVD  8(R8), R5
+	MOVD  $1, R6
+	LSL   R5, R6, R6
+	LSR   $1, R6, R6
+	VDUP  R6, V25.S4
+	NEG   R5, R5
+	VDUP  R5, V24.S4
+	MOVD  16(R8), R6
+	VDUP  R6, V26.S4
+	MOVD  24(R8), R6
+	VDUP  R6, V27.S4
+	MOVD  32(R8), R9
+	MOVD  40(R8), R6
+	VDUP  R6, V28.S4
+	MOVD  48(R8), R6
+	VDUP  R6, V29.S4
+	MOVD  56(R8), R6
+	VDUP  R6, V30.S4
+	MOVD  64(R8), R6
+	VDUP  R6, V31.S4
+	MOVD  72(R8), R10
+	VMOVI $0, V23.B16
+	MOVD  $1, R6
+	NEG   R6, R6
+	VDUP  R6, V22.S4
+
+fguvrow16:
+	CBZ    R10, nosubx
+	VLD1   (R7), [V6.H8]
+	VUZP1  V6.H8, V6.H8, V7.H8
+	VUZP2  V6.H8, V6.H8, V8.H8
+	VUSHLL $0, V7.H4, V7.S4
+	VUSHLL $0, V8.H4, V8.S4
+	VADD   V8.S4, V7.S4, V2.S4
+	VSUB   V22.S4, V2.S4, V2.S4
+	VUSHR  $1, V2.S4, V2.S4
+	B      havelum
+
+nosubx:
+	VLD1   (R7), [V2.H4]
+	VUSHLL $0, V2.H4, V2.S4
+
+havelum:
+	VLD1   (R1), [V1.H4]
+	VUSHLL $0, V1.H4, V1.S4
+	CBNZ   R9, idxdone
+	MULS4(2, 2, 28)
+	MULS4(10, 1, 29)
+	VADD   V10.S4, V2.S4, V2.S4
+	SSHR6(2, 2)
+	VADD   V30.S4, V2.S4, V2.S4
+	SMAXS4(2, 2, 23)
+	SMINS4(2, 2, 31)
+
+idxdone:
+	GATHER4
+	NOISE16
+	ADD    $8, R7, R7
+	CBZ    R10, nostep
+	ADD    $8, R7, R7
+
+nostep:
+	BNE    fguvrow16
+
+	RET

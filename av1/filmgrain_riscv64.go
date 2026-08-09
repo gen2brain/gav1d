@@ -39,3 +39,38 @@ func fguvApplyRow8RVV(dst []uint8, dstOff int, src []uint8, srcOff int,
 	fguvApplyRowRVV(&dst[dstOff], &src[srcOff], &luma[lumaOff], &scaling[0],
 		&grain[0], n, 15-shift, minValue, maxValue, &p)
 }
+
+//go:noescape
+func fgApplyRow16RVV(dst, src *uint16, scaling *uint8, grain *int16,
+	n, shift, minValue, maxValue int)
+
+// The vector length setting clamps itself to what is left, so this needs no
+// scalar tail.
+func fgApplyRow16RVVRow(dst []uint16, dstOff int, src []uint16, srcOff int,
+	scaling []uint8, grain []int16, n, shift, minValue, maxValue int,
+) {
+	if n > 0 {
+		fgApplyRow16RVV(&dst[dstOff], &src[srcOff], &scaling[0], &grain[0],
+			n, shift, minValue, maxValue)
+	}
+}
+
+//go:noescape
+func fguvApplyRow16RVV(dst, src, luma *uint16, scaling *uint8, grain *int16, p *fguv16Params)
+
+func fguvApplyRow16RVVRow(dst []uint16, dstOff int, src []uint16, srcOff int,
+	luma []uint16, lumaOff int, scaling []uint8, grain []int16,
+	n, shift, minValue, maxValue int, sx, lumaMult, mult, offset, pixelMax int, csfl bool,
+) {
+	if n <= 0 {
+		return
+	}
+
+	p := fguv16Params{
+		n: n, shift: shift, minValue: minValue, maxValue: maxValue,
+		csfl: b2i(csfl), lumaMult: lumaMult, mult: mult, offset: offset,
+		pixelMax: pixelMax, sx: sx,
+	}
+	fguvApplyRow16RVV(&dst[dstOff], &src[srcOff], &luma[lumaOff],
+		&scaling[0], &grain[0], &p)
+}

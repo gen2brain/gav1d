@@ -70,15 +70,6 @@ func fgApplyRow16AVX2Row(dst []uint16, dstOff int, src []uint16, srcOff int,
 	}
 }
 
-// fguv16Params carries what the chroma row needs beyond its pointers.
-type fguv16Params struct {
-	n, shift, minValue, maxValue int
-	csfl                         int
-	lumaMult, mult, offset       int
-	pixelMax                     int
-	sx                           int
-}
-
 //go:noescape
 func fguvApplyRow16AVX2(dst, src, luma *uint16, scaling *uint8, grain *int16, p *fguv16Params)
 
