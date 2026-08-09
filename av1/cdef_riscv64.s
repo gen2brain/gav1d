@@ -60,6 +60,30 @@
 	VZEXTVF2 V14, V1;         \
 	VMVVX    X0, V2
 
+// LOADPX16 needs no widening, and SETUP16 adds the pixel maximum the narrowing
+// store used to clamp to, plus the stride in bytes.
+#define LOADPX16                  \
+	VLE16V (X10), V1;         \
+	VMVVX  X0, V2
+
+#define SETUP16                   \
+	SETUP;                    \
+	SLLI $1, X11, X11;        \
+	MOVW 64(X13), X24
+
+#define FINISH16                  \
+	VSRAVI $15, V2, V11;      \
+	VADDVV V11, V2, V2;       \
+	VADDVI $8, V2, V2;        \
+	VSRAVI $4, V2, V2;        \
+	VADDVV V1, V2, V2
+
+#define STORE16                   \
+	VSE16V V2, (X10);         \
+	ADD    X11, X10;          \
+	ADDI   $24, X12;          \
+	ADDI   $-1, X7
+
 #define FINISH                    \
 	VSRAVI   $15, V2, V11;    \
 	VADDVV   V11, V2, V2;     \
@@ -146,5 +170,73 @@ loopc:
 	ADDI    $24, X12
 	ADDI    $-1, X7
 	BNEZ    X7, loopc
+
+	RET
+
+// func cdefFilter16RVV(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
+TEXT ·cdefFilter16RVV(SB), NOSPLIT, $0-32
+	SETUP16
+
+loop16:
+	LOADPX16
+
+	MOVW 40(X13), X15
+	TAP(ADD, X18, V12, X8, X15)
+	TAP(SUB, X18, V12, X8, X15)
+	MOVW 44(X13), X15
+	TAP(ADD, X19, V12, X8, X15)
+	TAP(SUB, X19, V12, X8, X15)
+
+	MOVW 48(X13), X15
+	TAP(ADD, X20, V13, X9, X15)
+	TAP(SUB, X20, V13, X9, X15)
+	TAP(ADD, X22, V13, X9, X15)
+	TAP(SUB, X22, V13, X9, X15)
+	MOVW 52(X13), X15
+	TAP(ADD, X21, V13, X9, X15)
+	TAP(SUB, X21, V13, X9, X15)
+	TAP(ADD, X23, V13, X9, X15)
+	TAP(SUB, X23, V13, X9, X15)
+
+	FINISH16
+	VMAXVX X0, V2, V2
+	VMINVX X24, V2, V2
+	STORE16
+	BNEZ X7, loop16
+
+	RET
+
+// func cdefFilterClip16RVV(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
+TEXT ·cdefFilterClip16RVV(SB), NOSPLIT, $0-32
+	SETUP16
+
+loopc16:
+	LOADPX16
+	VMVVV V1, V3
+	VMVVV V1, V4
+
+	MOVW 40(X13), X15
+	TAPC(ADD, X18, V12, X8, X15)
+	TAPC(SUB, X18, V12, X8, X15)
+	MOVW 44(X13), X15
+	TAPC(ADD, X19, V12, X8, X15)
+	TAPC(SUB, X19, V12, X8, X15)
+
+	MOVW 48(X13), X15
+	TAPC(ADD, X20, V13, X9, X15)
+	TAPC(SUB, X20, V13, X9, X15)
+	TAPC(ADD, X22, V13, X9, X15)
+	TAPC(SUB, X22, V13, X9, X15)
+	MOVW 52(X13), X15
+	TAPC(ADD, X21, V13, X9, X15)
+	TAPC(SUB, X21, V13, X9, X15)
+	TAPC(ADD, X23, V13, X9, X15)
+	TAPC(SUB, X23, V13, X9, X15)
+
+	FINISH16
+	VMAXVV V4, V2, V2
+	VMINVV V3, V2, V2
+	STORE16
+	BNEZ X7, loopc16
 
 	RET
