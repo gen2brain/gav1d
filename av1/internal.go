@@ -152,6 +152,7 @@ type frameContext[P pixel, C coef] struct {
 	lfEnabled bool
 	progress  *frameProgress
 	tileData  [][]byte
+	dsp       *dspContext[P]
 
 	a      []blockContext
 	lflvl  []av1Filter

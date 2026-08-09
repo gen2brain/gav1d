@@ -150,7 +150,7 @@ func cdefBrow[P pixel, C coef](t *taskContext[P, C], p *[3]int, lflvl []av1Filte
 						dir := 0
 						var variance uint32
 						if yPriLvl != 0 || uvPriLvl != 0 {
-							dir, variance = cdefFindDir(f.cur[0], bptrs[0], yStride, f.bitdepthMax)
+							dir, variance = f.dsp.cdefDir(f.cur[0], bptrs[0], yStride, f.bitdepthMax)
 						}
 
 						topOff := f.lf.cdefLine[tf][0] + bx*4
@@ -158,13 +158,13 @@ func cdefBrow[P pixel, C coef](t *taskContext[P, C], p *[3]int, lflvl []av1Filte
 						if yPriLvl != 0 {
 							adjYPriLvl := adjustStrength(yPriLvl, variance)
 							if adjYPriLvl != 0 || ySecLvl != 0 {
-								cdefFilterBlock(f.cur[0], bptrs[0], yStride,
+								f.dsp.cdefFilter(f.cur[0], bptrs[0], yStride,
 									lrBak[bit][0][:], 0, f.lf.cdefLineBuf, topOff,
 									f.cur[0], botOff, adjYPriLvl, ySecLvl, dir,
 									damping, 8, 8, edges, f.bitdepthMax)
 							}
 						} else if ySecLvl != 0 {
-							cdefFilterBlock(f.cur[0], bptrs[0], yStride,
+							f.dsp.cdefFilter(f.cur[0], bptrs[0], yStride,
 								lrBak[bit][0][:], 0, f.lf.cdefLineBuf, topOff,
 								f.cur[0], botOff, 0, ySecLvl, 0,
 								damping, 8, 8, edges, f.bitdepthMax)
@@ -178,7 +178,7 @@ func cdefBrow[P pixel, C coef](t *taskContext[P, C], p *[3]int, lflvl []av1Filte
 							for pl := 1; pl <= 2; pl++ {
 								topOff := f.lf.cdefLine[tf][pl] + (bx * 4 >> ssHor)
 								botOff := bptrs[pl] + uvH*uvStride
-								cdefFilterBlock(f.cur[pl], bptrs[pl], uvStride,
+								f.dsp.cdefFilter(f.cur[pl], bptrs[pl], uvStride,
 									lrBak[bit][pl][:], 0, f.lf.cdefLineBuf, topOff,
 									f.cur[pl], botOff, uvPriLvl, uvSecLvl, uvdir,
 									damping-1, uvW, uvH, edges, f.bitdepthMax)

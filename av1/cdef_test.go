@@ -60,6 +60,70 @@ func runCdefFilter[P pixel](t *testing.T, b, iter, w, h, edges, pri, sec, dir, d
 	return out
 }
 
+// TestCdefAsm checks the architecture-specific CDEF filter against the pure Go
+// one across every block shape, edge combination, direction and strength pair.
+// The whole buffer is compared, so a kernel that writes outside the block fails.
+func TestCdefAsm(t *testing.T) {
+	d := newDsp[uint8]()
+	shapes := [3][2]int{{8, 8}, {4, 4}, {4, 8}}
+	cases := 0
+
+	for iter := range 4 {
+		for _, s := range shapes {
+			w, h := s[0], s[1]
+			for edges := range 16 {
+				for _, pri := range []int{0, 1, 5, 15} {
+					for _, sec := range []int{0, 1, 2, 4} {
+						for dir := range 8 {
+							for _, damping := range []int{3, 6} {
+								ref, got := cdefAsmCase(d, iter, w, h, edges,
+									pri, sec, dir, damping)
+								for i := range ref {
+									if got[i] == ref[i] {
+										continue
+									}
+									t.Fatalf("%dx%d edges=%d pri=%d sec=%d dir=%d damping=%d: "+
+										"buf[%d] = %d, want %d",
+										w, h, edges, pri, sec, dir, damping,
+										i, got[i], ref[i])
+								}
+								cases++
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+func cdefAsmCase(d *dspContext[uint8], iter, w, h, edges, pri, sec, dir, damping int,
+) (ref, got []uint8) {
+	const bitdepthMax = 255
+
+	got = make([]uint8, cdefRows*cdefStride)
+	for i := range got {
+		got[i] = uint8(cdefGen(iter, 0, i) & bitdepthMax)
+	}
+	left := make([]uint8, 16)
+	for i := range left {
+		left[i] = uint8(cdefGen(iter, 1, i) & bitdepthMax)
+	}
+	ref = append([]uint8(nil), got...)
+
+	base := cdefPad*cdefStride + cdefPad
+	cdefFilterBlock(ref, base, cdefStride, left, 0,
+		ref, base-2*cdefStride, ref, base+h*cdefStride,
+		pri, sec, dir, damping, w, h, edges, bitdepthMax)
+	d.cdefFilter(got, base, cdefStride, left, 0,
+		got, base-2*cdefStride, got, base+h*cdefStride,
+		pri, sec, dir, damping, w, h, edges, bitdepthMax)
+
+	return ref, got
+}
+
 func TestCdef(t *testing.T) {
 	sc, closeFixture := openFixture(t, "cdef.txt")
 	defer closeFixture()
