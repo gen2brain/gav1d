@@ -4,7 +4,10 @@
 
 [AV1](https://en.wikipedia.org/wiki/AV1) video and [AVIF](https://en.wikipedia.org/wiki/AVIF) image decoder in pure Go.
 
-A port of [dav1d](https://code.videolan.org/videolan/dav1d), bit-exact against it. No CGo, no assembly.
+A port of [dav1d](https://code.videolan.org/videolan/dav1d), bit-exact against it. No CGo, no dependencies.
+
+SIMD kernels are written in Go assembly for amd64 (AVX2), arm64 (NEON) and riscv64 (RVV, with
+`GORISCV64=rva23u64`). Build with `-tags noasm` for pure Go everywhere.
 
 ### Decoding
 
