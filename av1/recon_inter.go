@@ -329,7 +329,7 @@ func (t *taskContext[P, C]) interIntraPred(b *av1Block, bs, pl int,
 		0, dst, dstOff, stride, topSbEdge, topSbEdgeOff, m, &angle,
 		w4, h4, false, edge, 32, f.bitdepthMax)
 
-	intraPredFn[P](m)(tmp, 0, w4*4, edge, 32, w4*4, h4*4, 0, 0, 0, f.bitdepthMax)
+	f.dsp.ipred[m](tmp, 0, w4*4, edge, 32, w4*4, h4*4, 0, 0, 0, f.bitdepthMax)
 	mcBlend(dst, dstOff, stride, tmp, w4*4, h4*4, iiMask(b, cIdx, bs))
 }
 

@@ -18,18 +18,32 @@ type dspContext[P pixel] struct {
 
 	put8tap func(dst []P, dstOff, dstStride int, src []P, srcOff, srcStride,
 		w, h, mx, my, filterType int, bitdepthMax int32)
+
+	// Converting a generic function to a func value allocates a closure for
+	// the dictionary, so the predictors are resolved once per frame here
+	// rather than once per block.
+	ipred [nIntraPredModes + 1]func(dst []P, dstOff, stride int, tl []P, tlOff,
+		w, h, angle, maxW, maxH int, bitdepthMax int32)
+	cflPred [nIntraPredModes + 1]func(dst []P, dstOff, stride int, tl []P, tlOff,
+		w, h int, ac []int16, alpha int32, bitdepthMax int32)
 }
 
 // newDspGo builds the table with no assembly, which is both the starting point
 // for newDsp and the reference the assembly is tested against.
 func newDspGo[P pixel]() *dspContext[P] {
-	return &dspContext[P]{
+	d := &dspContext[P]{
 		cdefFilter:   cdefFilterBlock[P],
 		cdefDir:      cdefFindDir[P],
 		fgApplyRow:   fgApplyRow[P],
 		fguvApplyRow: fguvApplyRow[P],
 		put8tap:      put8tap[P],
 	}
+	for m := range d.ipred {
+		d.ipred[m] = intraPredFn[P](m)
+		d.cflPred[m] = cflPredFn[P](m)
+	}
+
+	return d
 }
 
 func newDsp[P pixel]() *dspContext[P] {

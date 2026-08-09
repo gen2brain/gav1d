@@ -117,7 +117,7 @@ func reconBIntra[P pixel, C coef](t *taskContext[P, C], bs int,
 							int(tDim.w), int(tDim.h), f.seqHdr.intraEdgeFilter != 0,
 							edge, edgeOff, f.bitdepthMax)
 
-						intraPredFn[P](m)(f.cur[0], dstOff, f.stride[0], edge, edgeOff,
+						f.dsp.ipred[m](f.cur[0], dstOff, f.stride[0], edge, edgeOff,
 							int(tDim.w)*4, int(tDim.h)*4, angle|intraFlags,
 							4*f.bw-4*t.bx, 4*f.bh-4*t.by, f.bitdepthMax)
 					}
@@ -182,7 +182,7 @@ func reconBIntra[P pixel, C coef](t *taskContext[P, C], bs int,
 						dcPred, &angle, int(uvTDim.w), int(uvTDim.h), false,
 						edge, edgeOff, f.bitdepthMax)
 
-					cflPredFn[P](m)(f.cur[1+pl], uvOff, stride, edge, edgeOff,
+					f.dsp.cflPred[m](f.cur[1+pl], uvOff, stride, edge, edgeOff,
 						int(uvTDim.w)*4, int(uvTDim.h)*4, ac, int32(b.cflAlpha[pl]),
 						f.bitdepthMax)
 				}
@@ -259,7 +259,7 @@ func reconBIntra[P pixel, C coef](t *taskContext[P, C], bs int,
 								f.seqHdr.intraEdgeFilter != 0, edge, edgeOff, f.bitdepthMax)
 
 							angle |= intraEdgeFilterFlag
-							intraPredFn[P](m)(f.cur[1+pl], dstOff, stride, edge, edgeOff,
+							f.dsp.ipred[m](f.cur[1+pl], dstOff, stride, edge, edgeOff,
 								int(uvTDim.w)*4, int(uvTDim.h)*4, angle|smUvFl,
 								(4*f.bw+ssHor-4*(t.bx & ^ssHor))>>ssHor,
 								(4*f.bh+ssVer-4*(t.by & ^ssVer))>>ssVer, f.bitdepthMax)

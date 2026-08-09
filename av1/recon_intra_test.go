@@ -112,6 +112,7 @@ func TestReconBIntra(t *testing.T) {
 			frameHdr.segmentation.qidx[i] = uint8(qidx)
 		}
 
+		f.dsp = newDspGo[uint8]()
 		f.seqHdr = &seqHdr
 		f.frameHdr = &frameHdr
 		f.bw, f.bh = 16, 16
