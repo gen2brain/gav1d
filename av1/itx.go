@@ -70,8 +70,8 @@ var itxTxtpSwap = [nTxTypes]uint8{
 	hFlipadst:        vFlipadst,
 }
 
-func invTxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C, tmp []int32,
-	eob, tx, txtp int, bitdepthMax int32,
+func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
+	coeff []C, tmp []int32, eob, tx, txtp int, bitdepthMax int32,
 ) {
 	txtp = int(itxTxtpSwap[txtp])
 	tDim := &txfmDimensions[tx]
@@ -142,33 +142,19 @@ func invTxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C, tmp []i
 		first1d(tmp, c, 1, rowClipMin, rowClipMax)
 	}
 	if lastNonzeroCol+1 < sh {
-		clearTail := tmp[(lastNonzeroCol+1)*w : sh*w]
-		for i := range clearTail {
-			clearTail[i] = 0
-		}
+		clear(tmp[(lastNonzeroCol+1)*w : sh*w])
 	}
 
-	for i := range sw * sh {
-		coeff[i] = 0
-	}
+	clear(coeff[:sw*sh])
 
-	for i := range w * sh {
-		tmp[i] = clip((tmp[i]+rnd)>>shift, colClipMin, colClipMax)
-	}
-	for i := sh * w; i < h*w; i++ {
-		tmp[i] = 0
-	}
+	dsp.itxClip(tmp[:w*sh], rnd, shift, colClipMin, colClipMax)
+	clear(tmp[sh*w : h*w])
 
 	for x := range w {
 		second1d(tmp, x, w, colClipMin, colClipMax)
 	}
 
-	for y := range h {
-		row := dstOff + y*stride
-		for x := range w {
-			dst[row+x] = P(clip(int32(dst[row+x])+((tmp[y*w+x]+8)>>4), 0, bitdepthMax))
-		}
-	}
+	dsp.itxAdd(dst, dstOff, stride, tmp, w, h, bitdepthMax)
 }
 
 func invTxfmAddWht4x4[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
@@ -199,13 +185,31 @@ func invTxfmAddWht4x4[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
 	}
 }
 
-func itxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C, tmp []int32,
-	eob, tx, txtp int, bitdepthMax int32,
+func itxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
+	coeff []C, tmp []int32, eob, tx, txtp int, bitdepthMax int32,
 ) {
 	if txtp == whtWht {
 		invTxfmAddWht4x4(dst, dstOff, stride, coeff, eob, bitdepthMax)
 
 		return
 	}
-	invTxfmAdd(dst, dstOff, stride, coeff, tmp, eob, tx, txtp, bitdepthMax)
+	invTxfmAdd(dsp, dst, dstOff, stride, coeff, tmp, eob, tx, txtp, bitdepthMax)
+}
+
+func itxClipGo(tmp []int32, rnd int32, shift int, lo, hi int32) {
+	for i, v := range tmp {
+		tmp[i] = clip((v+rnd)>>shift, lo, hi)
+	}
+}
+
+func itxAddGo[P pixel](dst []P, dstOff, stride int, tmp []int32, w, h int,
+	bitdepthMax int32,
+) {
+	for y := range h {
+		row := dst[dstOff+y*stride:][:w]
+		src := tmp[y*w:][:w]
+		for x, v := range src {
+			row[x] = P(clip(int32(row[x])+((v+8)>>4), 0, bitdepthMax))
+		}
+	}
 }

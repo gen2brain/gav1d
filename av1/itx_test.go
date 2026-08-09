@@ -83,7 +83,7 @@ func TestItx(t *testing.T) {
 			if txtp == whtWht {
 				invTxfmAddWht4x4(dst, 0, stride, coeff, eob, bitdepthMax)
 			} else {
-				invTxfmAdd(dst, 0, stride, coeff, make([]int32, 64*64), eob, tx, txtp, bitdepthMax)
+				invTxfmAdd(newDspGo[uint8](), dst, 0, stride, coeff, make([]int32, 64*64), eob, tx, txtp, bitdepthMax)
 			}
 			check(func(y, x int) int { return int(dst[y*stride+x]) },
 				func(i int) int { return int(coeff[i]) })
@@ -101,7 +101,7 @@ func TestItx(t *testing.T) {
 			if txtp == whtWht {
 				invTxfmAddWht4x4(dst, 0, stride, coeff, eob, bitdepthMax)
 			} else {
-				invTxfmAdd(dst, 0, stride, coeff, make([]int32, 64*64), eob, tx, txtp, bitdepthMax)
+				invTxfmAdd(newDspGo[uint16](), dst, 0, stride, coeff, make([]int32, 64*64), eob, tx, txtp, bitdepthMax)
 			}
 			check(func(y, x int) int { return int(dst[y*stride+x]) },
 				func(i int) int { return int(coeff[i]) })
@@ -119,4 +119,77 @@ func TestItx(t *testing.T) {
 	}
 
 	t.Logf("%d cases", cases)
+}
+
+// TestItxTailAsm checks the architecture-specific transform tails against the
+// pure Go ones over every block shape, comparing the whole buffer so a kernel
+// that writes outside the block fails.
+func TestItxTailAsm(t *testing.T) {
+	sizes := []int{4, 8, 16, 32, 64}
+	cases := 0
+
+	for _, bpc := range []int{8, 10, 12} {
+		bitdepthMax := int32(1<<bpc - 1)
+		for _, w := range sizes {
+			for _, h := range sizes {
+				for iter := range 3 {
+					if bpc == 8 {
+						cases += itxTailCase[uint8](t, newDsp[uint8](), iter, w, h, bitdepthMax)
+
+						continue
+					}
+					cases += itxTailCase[uint16](t, newDsp[uint16](), iter, w, h, bitdepthMax)
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+func itxTailCase[P pixel](t *testing.T, d *dspContext[P], iter, w, h int,
+	bitdepthMax int32,
+) int {
+	t.Helper()
+
+	const stride = 128
+	gen := func(kind, i int) uint32 {
+		v := uint32(i)*2654435761 + uint32(kind)*2246822519 + uint32(iter)*3266489917
+		v ^= v >> 15
+
+		return v * 2654435761
+	}
+
+	ref := make([]int32, w*h)
+	got := make([]int32, w*h)
+	for i := range ref {
+		ref[i] = int32(gen(0, i)) >> 8
+		got[i] = ref[i]
+	}
+	lo, hi := int32(-(1 << 20)), int32(1<<20-1)
+	itxClipGo(ref, 8, 4, lo, hi)
+	d.itxClip(got, 8, 4, lo, hi)
+	for i := range ref {
+		if got[i] != ref[i] {
+			t.Fatalf("bpc=%d %dx%d clip[%d] = %d, want %d",
+				bitdepthFromMax(bitdepthMax), w, h, i, got[i], ref[i])
+		}
+	}
+
+	dref := make([]P, stride*(h+2))
+	dgot := make([]P, stride*(h+2))
+	for i := range dref {
+		dref[i] = P(int32(gen(1, i)) & bitdepthMax)
+		dgot[i] = dref[i]
+	}
+	itxAddGo(dref, stride, stride, ref, w, h, bitdepthMax)
+	d.itxAdd(dgot, stride, stride, got, w, h, bitdepthMax)
+	for i := range dref {
+		if dgot[i] != dref[i] {
+			t.Fatalf("bpc=%d %dx%d add buf[%d] = %d, want %d",
+				bitdepthFromMax(bitdepthMax), w, h, i, dgot[i], dref[i])
+		}
+	}
+
+	return 1
 }

@@ -21,6 +21,9 @@ type dspContext[P pixel] struct {
 	put8tap func(dst []P, dstOff, dstStride int, src []P, srcOff, srcStride,
 		w, h, mx, my, filterType int, bitdepthMax int32)
 
+	itxClip func(tmp []int32, rnd int32, shift int, lo, hi int32)
+	itxAdd  func(dst []P, dstOff, stride int, tmp []int32, w, h int, bitdepthMax int32)
+
 	// Converting a generic function to a func value allocates a closure for
 	// the dictionary, so the predictors are resolved once per frame here
 	// rather than once per block.
@@ -39,6 +42,8 @@ func newDspGo[P pixel]() *dspContext[P] {
 		fgApplyRow:   fgApplyRow[P],
 		fguvApplyRow: fguvApplyRow[P],
 		put8tap:      put8tap[P],
+		itxClip:      itxClipGo,
+		itxAdd:       itxAddGo[P],
 	}
 	for m := range d.ipred {
 		d.ipred[m] = intraPredFn[P](m)

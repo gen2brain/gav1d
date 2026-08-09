@@ -129,7 +129,7 @@ func reconBIntra[P pixel, C coef](t *taskContext[P, C], bs int,
 						memset(t.a.lcoef[bx4+x:bx4+x+min(int(tDim.w), f.bw-t.bx)], cfCtx)
 						memset(t.l.lcoef[by4+y:by4+y+min(int(tDim.h), f.bh-t.by)], cfCtx)
 						if eob >= 0 {
-							itxfmAdd(f.cur[0], dstOff, f.stride[0], cf, t.scratch.itx[:], eob,
+							itxfmAdd(f.dsp, f.cur[0], dstOff, f.stride[0], cf, t.scratch.itx[:], eob,
 								int(b.tx), txtp, f.bitdepthMax)
 						}
 					} else {
@@ -274,7 +274,7 @@ func reconBIntra[P pixel, C coef](t *taskContext[P, C], bs int,
 							memset(t.a.ccoef[pl][cbx4+x:cbx4+x+ctw], cfCtx)
 							memset(t.l.ccoef[pl][cby4+y:cby4+y+cth], cfCtx)
 							if eob >= 0 {
-								itxfmAdd(f.cur[1+pl], dstOff, stride, cf, t.scratch.itx[:], eob,
+								itxfmAdd(f.dsp, f.cur[1+pl], dstOff, stride, cf, t.scratch.itx[:], eob,
 									int(b.uvtx), txtp, f.bitdepthMax)
 							}
 						} else {

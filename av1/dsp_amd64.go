@@ -14,8 +14,11 @@ func dspInit[P pixel](d *dspContext[P]) {
 		return
 	}
 
+	d.itxClip = itxClipVec
+
 	if d16, ok := any(d).(*dspContext[uint16]); ok {
 		d16.cdefFilter = cdefFilterBlock16AVX2
+		d16.itxAdd = itxAdd16Vec
 	}
 
 	if d8, ok := any(d).(*dspContext[uint8]); ok {
@@ -23,5 +26,6 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.fgApplyRow = fgApplyRow8AVX2
 		d8.fguvApplyRow = fguvApplyRow8AVX2
 		d8.put8tap = put8tap8AVX2
+		d8.itxAdd = itxAdd8Vec
 	}
 }

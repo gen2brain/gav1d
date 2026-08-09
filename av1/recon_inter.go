@@ -287,7 +287,7 @@ func readCoefTree[P pixel, C coef](t *taskContext[P, C], bs int, b *av1Block,
 	}
 
 	if eob >= 0 {
-		itxfmAdd(dst, dstOff, f.stride[0], cf, t.scratch.itx[:], eob, ytx, txtp, f.bitdepthMax)
+		itxfmAdd(f.dsp, dst, dstOff, f.stride[0], cf, t.scratch.itx[:], eob, ytx, txtp, f.bitdepthMax)
 	}
 }
 
@@ -557,7 +557,7 @@ func reconBInter[P pixel, C coef](t *taskContext[P, C], bs int, b *av1Block) err
 						memset(t.a.ccoef[pl][cbx4+x:cbx4+x+ctw], cfCtx)
 						memset(t.l.ccoef[pl][cby4+y:cby4+y+cth], cfCtx)
 						if eob >= 0 {
-							itxfmAdd(f.cur[1+pl], uvDst+4*x, f.stride[1], cf, t.scratch.itx[:],
+							itxfmAdd(f.dsp, f.cur[1+pl], uvDst+4*x, f.stride[1], cf, t.scratch.itx[:],
 								eob, int(b.uvtx), txtp, f.bitdepthMax)
 						}
 						t.bx += int(uvtx.w) << ssHor
