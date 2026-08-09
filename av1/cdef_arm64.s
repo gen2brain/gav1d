@@ -74,6 +74,19 @@
 	VUSHLL $0, V0.B8, V1.H8;    \
 	VEOR   V2.B16, V2.B16, V2.B16
 
+// LOADPX16 needs no widening; the pixel is already a halfword.
+#define LOADPX16                    \
+	VLD1 (R0), [V1.H8];         \
+	VEOR V2.B16, V2.B16, V2.B16
+
+// SETUP16 adds the pixel maximum the byte store used to clamp to for free, and
+// takes the stride to bytes.
+#define SETUP16                     \
+	SETUP;                      \
+	LSL  $1, R1, R1;            \
+	MOVW 64(R3), R9;            \
+	VDUP R9, V17.H8
+
 // ROUND is px + ((sum - (sum<0) + 8) >> 4). The bias makes the shift logical,
 // which the assembler has, rather than arithmetic, which it does not.
 #define ROUND                       \
@@ -182,5 +195,105 @@ storedc:
 	ADD  $24, R2
 	SUB  $1, R12
 	CBNZ R12, loopc
+
+	RET
+
+// func cdefFilter16NEON(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
+TEXT ·cdefFilter16NEON(SB), NOSPLIT, $0-32
+	SETUP16
+
+loop16:
+	LOADPX16
+
+	MOVW 40(R3), R9
+	VDUP R9, V16.H8
+	TAP(ADD, R4, 12, 14, 16)
+	TAP(SUB, R4, 12, 14, 16)
+	MOVW 44(R3), R9
+	VDUP R9, V16.H8
+	TAP(ADD, R5, 12, 14, 16)
+	TAP(SUB, R5, 12, 14, 16)
+
+	MOVW 48(R3), R9
+	VDUP R9, V16.H8
+	TAP(ADD, R6, 13, 15, 16)
+	TAP(SUB, R6, 13, 15, 16)
+	TAP(ADD, R8, 13, 15, 16)
+	TAP(SUB, R8, 13, 15, 16)
+	MOVW 52(R3), R9
+	VDUP R9, V16.H8
+	TAP(ADD, R7, 13, 15, 16)
+	TAP(SUB, R7, 13, 15, 16)
+	TAP(ADD, R10, 13, 15, 16)
+	TAP(SUB, R10, 13, 15, 16)
+
+	ROUND
+	SMAX(2, 2, 31)
+	SMIN(2, 2, 17)
+	CMP  $8, R11
+	BNE  store416
+	VST1 [V2.H8], (R0)
+	B    stored16
+
+store416:
+	VMOV V2.D[0], R9
+	MOVD R9, (R0)
+
+stored16:
+	ADD  R1, R0
+	ADD  $24, R2
+	SUB  $1, R12
+	CBNZ R12, loop16
+
+	RET
+
+// func cdefFilterClip16NEON(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
+TEXT ·cdefFilterClip16NEON(SB), NOSPLIT, $0-32
+	SETUP16
+
+loopc16:
+	LOADPX16
+	VMOV V1.B16, V3.B16
+	VMOV V1.B16, V4.B16
+
+	MOVW 40(R3), R9
+	VDUP R9, V16.H8
+	TAPC(ADD, R4, 12, 14, 16)
+	TAPC(SUB, R4, 12, 14, 16)
+	MOVW 44(R3), R9
+	VDUP R9, V16.H8
+	TAPC(ADD, R5, 12, 14, 16)
+	TAPC(SUB, R5, 12, 14, 16)
+
+	MOVW 48(R3), R9
+	VDUP R9, V16.H8
+	TAPC(ADD, R6, 13, 15, 16)
+	TAPC(SUB, R6, 13, 15, 16)
+	TAPC(ADD, R8, 13, 15, 16)
+	TAPC(SUB, R8, 13, 15, 16)
+	MOVW 52(R3), R9
+	VDUP R9, V16.H8
+	TAPC(ADD, R7, 13, 15, 16)
+	TAPC(SUB, R7, 13, 15, 16)
+	TAPC(ADD, R10, 13, 15, 16)
+	TAPC(SUB, R10, 13, 15, 16)
+
+	ROUND
+	SMAX(2, 2, 4)
+	SMIN(2, 2, 3)
+	CMP  $8, R11
+	BNE  store4c16
+	VST1 [V2.H8], (R0)
+	B    storedc16
+
+store4c16:
+	VMOV V2.D[0], R9
+	MOVD R9, (R0)
+
+storedc16:
+	ADD  R1, R0
+	ADD  $24, R2
+	SUB  $1, R12
+	CBNZ R12, loopc16
 
 	RET
