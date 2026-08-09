@@ -404,3 +404,45 @@ col16:
 	RET
 
 #define SSHLS(Vd, Vn, Vm) WORD $(0x4EA04400 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+
+// func itxIdentityNEON(tmp *int32, count, stride, n int, p *[4]int32)
+TEXT ·itxIdentityNEON(SB), NOSPLIT, $0-40
+	MOVD tmp+0(FP), R0
+	MOVD count+8(FP), R1
+	MOVD stride+16(FP), R2
+	MOVD n+24(FP), R3
+	MOVD p+32(FP), R4
+
+	MOVW (R4), R5
+	VDUP R5, V1.S4
+	MOVW 4(R4), R5
+	VDUP R5, V2.S4
+	MOVW 8(R4), R5
+	VDUP R5, V3.S4
+	MOVW 12(R4), R5
+	NEG  R5, R5
+	VDUP R5, V4.S4
+	LSL  $2, R2, R2
+
+idtap:
+	MOVD R0, R6
+	MOVD R1, R7
+
+idlane:
+	VLD1 (R6), [V0.S4]
+	MULS(5, 0, 1)
+	MULS(0, 0, 2)
+	ADDS(0, 0, 3)
+	SSHLS(0, 0, 4)
+	ADDS(0, 0, 5)
+	VST1 [V0.S4], (R6)
+
+	ADD  $16, R6
+	SUB  $4, R7
+	CBNZ R7, idlane
+
+	ADD  R2, R0
+	SUB  $1, R3
+	CBNZ R3, idtap
+
+	RET

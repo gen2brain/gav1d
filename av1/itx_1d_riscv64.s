@@ -301,3 +301,41 @@ col16:
 	BNEZ X22, col16
 
 	RET
+
+// func itxIdentityRVV(tmp *int32, count, stride, n int, p *[4]int32)
+TEXT ·itxIdentityRVV(SB), NOSPLIT, $0-40
+	MOV  tmp+0(FP), X10
+	MOV  count+8(FP), X11
+	MOV  stride+16(FP), X12
+	MOV  n+24(FP), X13
+	MOV  p+32(FP), X14
+	MOVW (X14), X15
+	MOVW 4(X14), X16
+	MOVW 8(X14), X17
+	MOVW 12(X14), X18
+	SLLI $2, X12, X12
+
+idtap:
+	MOV X10, X24
+	MOV X11, X25
+
+idlane:
+	VSETVLI X25, E32, M1, TA, MA, X5
+	VLE32V  (X24), V0
+	VMULVX  X15, V0, V1
+	VMULVX  X16, V0, V0
+	VADDVX  X17, V0, V0
+	VSRAVX  X18, V0, V0
+	VADDVV  V1, V0, V0
+	VSE32V  V0, (X24)
+
+	SLLI $2, X5, X26
+	ADD  X26, X24
+	SUB  X5, X25
+	BNEZ X25, idlane
+
+	ADD  X12, X10
+	SUB  $1, X13
+	BNEZ X13, idtap
+
+	RET

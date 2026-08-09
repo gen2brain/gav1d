@@ -836,6 +836,13 @@ func invIdentity321d(c []int32, cOff, stride int, min, max int32) {
 	}
 }
 
+var itxIdentityParams = [4][4]int32{
+	{1, 1697, 2048, 12},
+	{2, 0, 0, 12},
+	{2, 1697, 1024, 11},
+	{4, 0, 0, 12},
+}
+
 func invAdst41d(c []int32, cOff, stride int, min, max int32) {
 	invAdst41dInternal(c, cOff, stride, min, max, c, cOff, stride)
 }

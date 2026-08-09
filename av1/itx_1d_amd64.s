@@ -402,3 +402,40 @@ col16:
 
 	VZEROUPPER
 	RET
+
+// func itxIdentityAVX2(tmp *int32, count, stride, n int, p *[4]int32)
+TEXT ·itxIdentityAVX2(SB), NOSPLIT, $0-40
+	MOVQ         tmp+0(FP), SI
+	MOVQ         count+8(FP), CX
+	MOVQ         stride+16(FP), DX
+	MOVQ         n+24(FP), BX
+	MOVQ         p+32(FP), AX
+	VPBROADCASTD (AX), Y1
+	VPBROADCASTD 4(AX), Y2
+	VPBROADCASTD 8(AX), Y3
+	VMOVD        12(AX), X5
+	SHLQ         $2, DX
+
+idtap:
+	MOVQ SI, DI
+	MOVQ CX, R8
+
+idlane:
+	VMOVDQU (DI), Y0
+	VPMULLD Y1, Y0, Y4
+	VPMULLD Y2, Y0, Y0
+	VPADDD  Y3, Y0, Y0
+	VPSRAD  X5, Y0, Y0
+	VPADDD  Y4, Y0, Y0
+	VMOVDQU Y0, (DI)
+
+	ADDQ $32, DI
+	SUBQ $8, R8
+	JNZ  idlane
+
+	ADDQ DX, SI
+	SUBQ $1, BX
+	JNZ  idtap
+
+	VZEROUPPER
+	RET
