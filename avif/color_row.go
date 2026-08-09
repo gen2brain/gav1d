@@ -11,6 +11,7 @@ type rowConsts struct {
 	gcr, gcb, kg   float32
 	outMax         float32
 	one, half      float32
+	zero           float32
 }
 
 // convertRow is a whole output row. The samples arrive already normalized,
