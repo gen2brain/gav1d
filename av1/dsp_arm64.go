@@ -7,5 +7,6 @@ package av1
 func dspInit[P pixel](d *dspContext[P]) {
 	if d8, ok := any(d).(*dspContext[uint8]); ok {
 		d8.fgApplyRow = fgApplyRow8NEON
+		d8.fguvApplyRow = fguvApplyRow8NEON
 	}
 }
