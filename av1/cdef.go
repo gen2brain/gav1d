@@ -17,14 +17,36 @@ func cdefConstrain(diff, threshold, shift int32) int32 {
 
 func cdefFill(tmp []int16, off, stride, w, h int) {
 	for range h {
-		for x := range w {
-			tmp[off+x] = math.MinInt16
+		row := tmp[off : off+w]
+		for i := range row {
+			row[i] = math.MinInt16
 		}
 		off += stride
 	}
 }
 
-func cdefPadding[P pixel](tmp []int16, tmpOff, tmpStride int,
+func cdefCopyRow[P pixel](tmp []int16, tmpOff int, src []P, srcOff, n int) {
+	dst := tmp[tmpOff : tmpOff+n]
+	row := src[srcOff : srcOff+n]
+	for i := range dst {
+		dst[i] = int16(row[i])
+	}
+}
+
+func cdefCopyRows[P pixel](tmp []int16, tmpOff, tmpStride int,
+	src []P, srcOff, srcStride, n, h int,
+) {
+	for range h {
+		cdefCopyRow(tmp, tmpOff, src, srcOff, n)
+		tmpOff += tmpStride
+		srcOff += srcStride
+	}
+}
+
+type cdefCopyFn[P pixel] func(tmp []int16, tmpOff, tmpStride int,
+	src []P, srcOff, srcStride, n, h int)
+
+func cdefPadding[P pixel](copyRows cdefCopyFn[P], tmp []int16, tmpOff, tmpStride int,
 	src []P, srcOff, srcStride int, left []P, leftOff int,
 	top []P, topOff int, bottom []P, bottomOff int, w, h, edges int,
 ) {
@@ -47,34 +69,24 @@ func cdefPadding[P pixel](tmp []int16, tmpOff, tmpStride int,
 		xEnd -= 2
 	}
 
-	for y := yStart; y < 0; y++ {
-		for x := xStart; x < xEnd; x++ {
-			tmp[tmpOff+x+y*tmpStride] = int16(top[topOff+x])
-		}
-		topOff += srcStride
+	n := xEnd - xStart
+
+	if yStart < 0 {
+		copyRows(tmp, tmpOff+xStart+yStart*tmpStride, tmpStride,
+			top, topOff+xStart, srcStride, n, -yStart)
 	}
-	for y := range h {
-		for x := xStart; x < 0; x++ {
-			tmp[tmpOff+x+y*tmpStride] = int16(left[leftOff+y*2+2+x])
-		}
+	if xStart < 0 {
+		copyRows(tmp, tmpOff+xStart, tmpStride, left, leftOff+2+xStart, 2, -xStart, h)
 	}
-	for range h {
-		for x := 0; x < xEnd; x++ {
-			tmp[tmpOff+x] = int16(src[srcOff+x])
-		}
-		srcOff += srcStride
-		tmpOff += tmpStride
-	}
-	for y := h; y < yEnd; y++ {
-		for x := xStart; x < xEnd; x++ {
-			tmp[tmpOff+x] = int16(bottom[bottomOff+x])
-		}
-		bottomOff += srcStride
-		tmpOff += tmpStride
+	copyRows(tmp, tmpOff, tmpStride, src, srcOff, srcStride, xEnd, h)
+	tmpOff += h * tmpStride
+	if yEnd > h {
+		copyRows(tmp, tmpOff+xStart, tmpStride,
+			bottom, bottomOff+xStart, srcStride, n, yEnd-h)
 	}
 }
 
-func cdefFilterBlock[P pixel](dst []P, dstOff, dstStride int,
+func cdefFilterBlock[P pixel](dsp *dspContext[P], dst []P, dstOff, dstStride int,
 	left []P, leftOff int, top []P, topOff int, bottom []P, bottomOff int,
 	priStrength, secStrength, dir, damping, w, h, edges int, bitdepthMax int32,
 ) {
@@ -83,7 +95,7 @@ func cdefFilterBlock[P pixel](dst []P, dstOff, dstStride int,
 	tmp := tmpBuf[:]
 	tmpOff := 2*tmpStride + 2
 
-	cdefPadding(tmp, tmpOff, tmpStride, dst, dstOff, dstStride,
+	cdefPadding(dsp.cdefCopy, tmp, tmpOff, tmpStride, dst, dstOff, dstStride,
 		left, leftOff, top, topOff, bottom, bottomOff, w, h, edges)
 
 	dirs := &cdefDirections
@@ -192,56 +204,62 @@ func cdefFilterBlock[P pixel](dst []P, dstOff, dstStride int,
 
 var cdefDivTable = [7]uint32{840, 420, 280, 210, 168, 140, 120}
 
-func cdefFindDir[P pixel](img []P, imgOff, stride int, bitdepthMax int32) (int, uint32) {
-	bitdepthMin8 := bitdepthFromMax(bitdepthMax) - 8
-	var partialSumHv [2][8]int32
-	var partialSumDiag [2][15]int32
-	var partialSumAlt [4][11]int32
+// cdefSums holds the eight directional partial sums over one 8x8 block. The
+// diagonal and alternating rows are padded to a vector so a kernel can add a
+// whole row at an unaligned offset.
+type cdefSums struct {
+	hv   [2][8]int32
+	diag [2][16]int32
+	alt  [4][16]int32
+}
 
+func cdefBlockSums[P pixel](s *cdefSums, img []P, imgOff, stride int, bitdepthMin8 int) {
 	for y := range 8 {
 		for x := range 8 {
 			px := int32(img[imgOff+x]>>bitdepthMin8) - 128
 
-			partialSumDiag[0][y+x] += px
-			partialSumAlt[0][y+(x>>1)] += px
-			partialSumHv[0][y] += px
-			partialSumAlt[1][3+y-(x>>1)] += px
-			partialSumDiag[1][7+y-x] += px
-			partialSumAlt[2][3-(y>>1)+x] += px
-			partialSumHv[1][x] += px
-			partialSumAlt[3][(y>>1)+x] += px
+			s.diag[0][y+x] += px
+			s.alt[0][y+(x>>1)] += px
+			s.hv[0][y] += px
+			s.alt[1][3+y-(x>>1)] += px
+			s.diag[1][7+y-x] += px
+			s.alt[2][3-(y>>1)+x] += px
+			s.hv[1][x] += px
+			s.alt[3][(y>>1)+x] += px
 		}
 		imgOff += stride
 	}
+}
 
+func cdefDirCost(s *cdefSums) (int, uint32) {
 	var cost [8]uint32
 	for n := range 8 {
-		cost[2] += uint32(partialSumHv[0][n] * partialSumHv[0][n])
-		cost[6] += uint32(partialSumHv[1][n] * partialSumHv[1][n])
+		cost[2] += uint32(s.hv[0][n] * s.hv[0][n])
+		cost[6] += uint32(s.hv[1][n] * s.hv[1][n])
 	}
 	cost[2] *= 105
 	cost[6] *= 105
 
 	for n := range 7 {
 		d := cdefDivTable[n]
-		cost[0] += uint32(partialSumDiag[0][n]*partialSumDiag[0][n]+
-			partialSumDiag[0][14-n]*partialSumDiag[0][14-n]) * d
-		cost[4] += uint32(partialSumDiag[1][n]*partialSumDiag[1][n]+
-			partialSumDiag[1][14-n]*partialSumDiag[1][14-n]) * d
+		cost[0] += uint32(s.diag[0][n]*s.diag[0][n]+
+			s.diag[0][14-n]*s.diag[0][14-n]) * d
+		cost[4] += uint32(s.diag[1][n]*s.diag[1][n]+
+			s.diag[1][14-n]*s.diag[1][14-n]) * d
 	}
-	cost[0] += uint32(partialSumDiag[0][7]*partialSumDiag[0][7]) * 105
-	cost[4] += uint32(partialSumDiag[1][7]*partialSumDiag[1][7]) * 105
+	cost[0] += uint32(s.diag[0][7]*s.diag[0][7]) * 105
+	cost[4] += uint32(s.diag[1][7]*s.diag[1][7]) * 105
 
 	for n := range 4 {
 		c := &cost[n*2+1]
 		for m := range 5 {
-			*c += uint32(partialSumAlt[n][3+m] * partialSumAlt[n][3+m])
+			*c += uint32(s.alt[n][3+m] * s.alt[n][3+m])
 		}
 		*c *= 105
 		for m := range 3 {
 			d := cdefDivTable[2*m+1]
-			*c += uint32(partialSumAlt[n][m]*partialSumAlt[n][m]+
-				partialSumAlt[n][10-m]*partialSumAlt[n][10-m]) * d
+			*c += uint32(s.alt[n][m]*s.alt[n][m]+
+				s.alt[n][10-m]*s.alt[n][10-m]) * d
 		}
 	}
 
@@ -255,6 +273,13 @@ func cdefFindDir[P pixel](img []P, imgOff, stride int, bitdepthMax int32) (int, 
 	}
 
 	return bestDir, (bestCost - cost[bestDir^4]) >> 10
+}
+
+func cdefFindDir[P pixel](img []P, imgOff, stride int, bitdepthMax int32) (int, uint32) {
+	var s cdefSums
+	cdefBlockSums(&s, img, imgOff, stride, bitdepthFromMax(bitdepthMax)-8)
+
+	return cdefDirCost(&s)
 }
 
 func b2i32(v bool) int32 {

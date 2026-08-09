@@ -22,7 +22,7 @@ func cdefFilterBlockNEON(dst []uint8, dstOff, dstStride int,
 	var tmpBuf [144]int16
 	tmpOff := 2*tmpStride + 2
 
-	cdefPadding(tmpBuf[:], tmpOff, tmpStride, dst, dstOff, dstStride,
+	cdefPadding(cdefCopy8NEONRows, tmpBuf[:], tmpOff, tmpStride, dst, dstOff, dstStride,
 		left, leftOff, top, topOff, bottom, bottomOff, w, h, edges)
 
 	p := cdefParamsFor(priStrength, secStrength, dir, damping, w, h, bitdepthMax)
@@ -44,7 +44,7 @@ func cdefFilterBlock16NEON(dst []uint16, dstOff, dstStride int,
 	var tmpBuf [144]int16
 	tmpOff := 2*tmpStride + 2
 
-	cdefPadding(tmpBuf[:], tmpOff, tmpStride, dst, dstOff, dstStride,
+	cdefPadding(cdefCopy16NEONRows, tmpBuf[:], tmpOff, tmpStride, dst, dstOff, dstStride,
 		left, leftOff, top, topOff, bottom, bottomOff, w, h, edges)
 
 	p := cdefParamsFor(priStrength, secStrength, dir, damping, w, h, bitdepthMax)

@@ -46,7 +46,7 @@ func runCdefFilter[P pixel](t *testing.T, b, iter, w, h, edges, pri, sec, dir, d
 	}
 
 	base := cdefPad*cdefStride + cdefPad
-	cdefFilterBlock(buf, base, cdefStride, left, 0,
+	cdefFilterBlock(newDspGo[P](), buf, base, cdefStride, left, 0,
 		buf, base-2*cdefStride, buf, base+h*cdefStride,
 		pri, sec, dir, damping, w, h, edges, bitdepthMax)
 
@@ -145,7 +145,7 @@ func cdefAsmCase[P pixel](d *dspContext[P], iter, w, h, edges, pri, sec, dir, da
 	ref = append([]P(nil), got...)
 
 	base := cdefPad*cdefStride + cdefPad
-	cdefFilterBlock(ref, base, cdefStride, left, 0,
+	cdefFilterBlock(newDspGo[P](), ref, base, cdefStride, left, 0,
 		ref, base-2*cdefStride, ref, base+h*cdefStride,
 		pri, sec, dir, damping, w, h, edges, bitdepthMax)
 	d.cdefFilter(got, base, cdefStride, left, 0,
@@ -239,4 +239,60 @@ func TestCdef(t *testing.T) {
 	}
 
 	t.Logf("%d cases", cases)
+}
+
+// TestCdefDirAsm checks the architecture-specific direction search against the
+// pure Go one over blocks that are flat, noisy and strongly directional, since
+// the winning cost is what the result turns on.
+func TestCdefDirAsm(t *testing.T) {
+	cases := 0
+	for _, bpc := range []int{8, 10, 12} {
+		bitdepthMax := int32(1<<bpc - 1)
+		if bpc == 8 {
+			cases += cdefDirAsmDepth[uint8](t, bitdepthMax)
+
+			continue
+		}
+		cases += cdefDirAsmDepth[uint16](t, bitdepthMax)
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+func cdefDirAsmDepth[P pixel](t *testing.T, bitdepthMax int32) int {
+	t.Helper()
+
+	ref, got := newDspGo[P](), newDsp[P]()
+	cases := 0
+
+	for iter := range 64 {
+		for kind := range 4 {
+			img := make([]P, 8*cdefStride)
+			for i := range img {
+				y, x := i/cdefStride, i%cdefStride
+				var v uint16
+				switch kind {
+				case 0:
+					v = cdefGen(iter, kind, i)
+				case 1:
+					v = uint16(128 + (x+y)*3 + int(cdefGen(iter, kind, i)&3))
+				case 2:
+					v = uint16(128 + (x-y)*5 + int(cdefGen(iter, kind, i)&1))
+				default:
+					v = uint16(128 + y*7)
+				}
+				img[i] = P(v & uint16(bitdepthMax))
+			}
+
+			wantDir, wantVar := ref.cdefDir(img, 0, cdefStride, bitdepthMax)
+			gotDir, gotVar := got.cdefDir(img, 0, cdefStride, bitdepthMax)
+			if gotDir != wantDir || gotVar != wantVar {
+				t.Fatalf("bpc=%d iter=%d kind=%d: dir,var = %d,%d, want %d,%d",
+					bitdepthFromMax(bitdepthMax), iter, kind, gotDir, gotVar, wantDir, wantVar)
+			}
+			cases++
+		}
+	}
+
+	return cases
 }

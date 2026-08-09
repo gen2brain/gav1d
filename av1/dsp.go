@@ -9,7 +9,8 @@ type dspContext[P pixel] struct {
 	cdefFilter func(dst []P, dstOff, dstStride int,
 		left []P, leftOff int, top []P, topOff int, bottom []P, bottomOff int,
 		priStrength, secStrength, dir, damping, w, h, edges int, bitdepthMax int32)
-	cdefDir func(img []P, imgOff, stride int, bitdepthMax int32) (int, uint32)
+	cdefDir  func(img []P, imgOff, stride int, bitdepthMax int32) (int, uint32)
+	cdefCopy cdefCopyFn[P]
 
 	fgApplyRow func(dst []P, dstOff int, src []P, srcOff int,
 		scaling []uint8, grain []int16, n, shift, minValue, maxValue int)
@@ -43,8 +44,8 @@ type dspContext[P pixel] struct {
 // for newDsp and the reference the assembly is tested against.
 func newDspGo[P pixel]() *dspContext[P] {
 	d := &dspContext[P]{
-		cdefFilter:   cdefFilterBlock[P],
 		cdefDir:      cdefFindDir[P],
+		cdefCopy:     cdefCopyRows[P],
 		fgApplyRow:   fgApplyRow[P],
 		fguvApplyRow: fguvApplyRow[P],
 		put8tap:      put8tap[P],
@@ -53,6 +54,17 @@ func newDspGo[P pixel]() *dspContext[P] {
 		itxClip:      itxClipGo,
 		itxAdd:       itxAddGo[P],
 	}
+	// Bound once here, since cdefFilterBlock reaches the padding copy
+	// through the table.
+	d.cdefFilter = func(dst []P, dstOff, dstStride int,
+		left []P, leftOff int, top []P, topOff int, bottom []P, bottomOff int,
+		priStrength, secStrength, dir, damping, w, h, edges int, bitdepthMax int32,
+	) {
+		cdefFilterBlock(d, dst, dstOff, dstStride, left, leftOff, top, topOff,
+			bottom, bottomOff, priStrength, secStrength, dir, damping, w, h,
+			edges, bitdepthMax)
+	}
+
 	for m := range d.ipred {
 		d.ipred[m] = intraPredFn[P](m)
 		d.cflPred[m] = cflPredFn[P](m)
