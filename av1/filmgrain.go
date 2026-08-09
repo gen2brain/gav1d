@@ -146,7 +146,19 @@ func fgSeeds(data *filmGrainData, rowNum, rows int) (seed [2]uint32) {
 	return seed
 }
 
-func fgy32x32xn[P pixel](dstRow []P, dstOff int, srcRow []P, srcOff, stride int,
+// fgApplyRow adds noise to a run of pixels whose grain samples are contiguous,
+// which is every row of a block except its overlapped columns.
+func fgApplyRow[P pixel](dst []P, dstOff int, src []P, srcOff int,
+	scaling []uint8, grain []int16, n, shift, minValue, maxValue int,
+) {
+	for i := range n {
+		v := int(src[srcOff+i])
+		noise := fgRound2(int(scaling[v])*int(grain[i]), shift)
+		dst[dstOff+i] = P(clip(v+noise, minValue, maxValue))
+	}
+}
+
+func fgy32x32xn[P pixel](dsp *dspContext[P], dstRow []P, dstOff int, srcRow []P, srcOff, stride int,
 	data *filmGrainData, pw int, scaling []uint8, lut *grainLut, bh, rowNum, bpc int,
 ) {
 	rows := 1
@@ -196,10 +208,14 @@ func fgy32x32xn[P pixel](dstRow []P, dstOff int, srcRow []P, srcOff, stride int,
 
 		w := &fgOverlapWeights[0]
 
+		randval := offsets[0][0]
+		offx := 3 + 2*(3+(randval>>4))
+		offy := 3 + 2*(3+(randval&0xf))
+
 		for y := ystart; y < bh; y++ {
-			for x := xstart; x < bw; x++ {
-				addNoise(x, y, fgSampleLut(lut, &offsets, 0, 0, 0, 0, x, y), bx)
-			}
+			off := y*stride + bx + xstart
+			dsp.fgApplyRow(dstRow, dstOff+off, srcRow, srcOff+off, scaling,
+				lut[offy+y][offx+xstart:], bw-xstart, shift, minValue, maxValue)
 			for x := range xstart {
 				grain := fgSampleLut(lut, &offsets, 0, 0, 0, 0, x, y)
 				old := fgSampleLut(lut, &offsets, 0, 0, 1, 0, x, y)
@@ -413,7 +429,7 @@ func prepGrain[P pixel](fg *filmGrainCtx, data *filmGrainData, layout, bpc, w, h
 		scalingSize = 1 << bpc
 	}
 	for pl := range 3 {
-		fg.scaling[pl] = make([]uint8, scalingSize)
+		fg.scaling[pl] = make([]uint8, scalingSize+4)[:scalingSize]
 	}
 	if data.numYPoints != 0 || data.chromaScalingFromLuma != 0 {
 		generateScaling(bpc, data.yPoints[:], data.numYPoints, fg.scaling[0])
@@ -439,8 +455,8 @@ func prepGrain[P pixel](fg *filmGrainCtx, data *filmGrainData, layout, bpc, w, h
 	}
 }
 
-func applyGrainRow[P pixel](fg *filmGrainCtx, data *filmGrainData, layout, bpc, w, h int,
-	isID bool, dst *[3][]P, src *[3][]P, stride *[3]int, row int,
+func applyGrainRow[P pixel](dsp *dspContext[P], fg *filmGrainCtx, data *filmGrainData,
+	layout, bpc, w, h int, isID bool, dst *[3][]P, src *[3][]P, stride *[3]int, row int,
 ) {
 	ssVer := b2i(layout == pixelLayoutI420)
 	ssHor := b2i(layout != pixelLayoutI444)
@@ -449,7 +465,7 @@ func applyGrainRow[P pixel](fg *filmGrainCtx, data *filmGrainData, layout, bpc, 
 
 	if data.numYPoints != 0 {
 		bh := min(h-row*fgBlockSize, fgBlockSize)
-		fgy32x32xn(dst[0], lumaSrc, src[0], lumaSrc, stride[0], data, w,
+		fgy32x32xn(dsp, dst[0], lumaSrc, src[0], lumaSrc, stride[0], data, w,
 			fg.scaling[0], &fg.lut[0], bh, row, bpc)
 	}
 
@@ -482,14 +498,14 @@ func applyGrainRow[P pixel](fg *filmGrainCtx, data *filmGrainData, layout, bpc, 
 	}
 }
 
-func applyGrain[P pixel](data *filmGrainData, layout, bpc, w, h int, isID bool,
-	dst *[3][]P, src *[3][]P, stride *[3]int,
+func applyGrain[P pixel](dsp *dspContext[P], data *filmGrainData, layout, bpc, w, h int,
+	isID bool, dst *[3][]P, src *[3][]P, stride *[3]int,
 ) {
 	var fg filmGrainCtx
 
 	prepGrain(&fg, data, layout, bpc, w, h, dst, src, stride)
 	for row := range (h + fgBlockSize - 1) / fgBlockSize {
-		applyGrainRow(&fg, data, layout, bpc, w, h, isID, dst, src, stride, row)
+		applyGrainRow(dsp, &fg, data, layout, bpc, w, h, isID, dst, src, stride, row)
 	}
 }
 
@@ -509,7 +525,7 @@ func (f *frameContext[P, C]) grainPicture() *Picture {
 		dst[pl] = make([]P, stride[pl]*ph)
 	}
 
-	applyGrain(&f.frameHdr.filmGrain.data, f.layout, f.bpc, w, h,
+	applyGrain(f.dsp, &f.frameHdr.filmGrain.data, f.layout, f.bpc, w, h,
 		f.seqHdr.mtrx == mcIdentity, &dst, &f.srCur, &stride)
 
 	p := &Picture{

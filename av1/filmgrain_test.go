@@ -136,9 +136,10 @@ func runFilmGrain[P pixel](iter, bpc, layout, w, h int, isID bool) fgResult {
 	}
 
 	var fg filmGrainCtx
+	goDsp := &dspContext[P]{fgApplyRow: fgApplyRow[P]}
 	prepGrain(&fg, &data, layout, bpc, w, h, &dst, &src, &stride)
 	for row := range (h + fgBlockSize - 1) / fgBlockSize {
-		applyGrainRow(&fg, &data, layout, bpc, w, h, isID, &dst, &src, &stride, row)
+		applyGrainRow(goDsp, &fg, &data, layout, bpc, w, h, isID, &dst, &src, &stride, row)
 	}
 
 	res := fgResult{scaling: fg.scaling, lut: fg.lut}
@@ -157,6 +158,52 @@ func runFilmGrain[P pixel](iter, bpc, layout, w, h int, isID bool) fgResult {
 	}
 
 	return res
+}
+
+// TestFilmGrainAsm checks the architecture-specific noise row against the pure
+// Go one. The whole destination is compared, so a kernel that runs past the end
+// of the row fails.
+func TestFilmGrainAsm(t *testing.T) {
+	d := newDsp[uint8]()
+	scaling := make([]uint8, 256+4)[:256]
+	for i := range scaling {
+		scaling[i] = uint8(cdefGen(7, 3, i))
+	}
+
+	cases := 0
+
+	for iter := range 6 {
+		src := make([]uint8, 64)
+		for i := range src {
+			src[i] = uint8(cdefGen(iter, 0, i))
+		}
+		grain := make([]int16, 64)
+		for i := range grain {
+			grain[i] = int16(cdefGen(iter, 1, i)&255) - 128
+		}
+
+		for _, n := range []int{16, 17, 23, 30, 31, 32, 33, 48} {
+			for shift := 8; shift <= 11; shift++ {
+				for _, lim := range [2][2]int{{0, 255}, {16, 235}} {
+					ref := make([]uint8, 64)
+					got := make([]uint8, 64)
+					fgApplyRow(ref, 4, src, 2, scaling, grain, n, shift, lim[0], lim[1])
+					d.fgApplyRow(got, 4, src, 2, scaling, grain, n, shift, lim[0], lim[1])
+
+					for i := range ref {
+						if got[i] == ref[i] {
+							continue
+						}
+						t.Fatalf("n=%d shift=%d clip=%v: dst[%d] = %d, want %d",
+							n, shift, lim, i, got[i], ref[i])
+					}
+					cases++
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
 }
 
 func TestFilmGrain(t *testing.T) {

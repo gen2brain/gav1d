@@ -16,5 +16,6 @@ func dspInit[P pixel](d *dspContext[P]) {
 
 	if d8, ok := any(d).(*dspContext[uint8]); ok {
 		d8.cdefFilter = cdefFilterBlockAVX2
+		d8.fgApplyRow = fgApplyRow8AVX2
 	}
 }
