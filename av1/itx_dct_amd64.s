@@ -1,0 +1,404 @@
+//go:build amd64 && !noasm
+
+#include "textflag.h"
+
+// Butterfly coefficients, broadcast so the multiplies take them from memory.
+DATA itxc<>+0(SB)/8, $0x000000b5000000b5
+DATA itxc<>+8(SB)/8, $0x000000b5000000b5
+DATA itxc<>+16(SB)/8, $0x000000b5000000b5
+DATA itxc<>+24(SB)/8, $0x000000b5000000b5
+DATA itxc<>+32(SB)/8, $0x0000061f0000061f
+DATA itxc<>+40(SB)/8, $0x0000061f0000061f
+DATA itxc<>+48(SB)/8, $0x0000061f0000061f
+DATA itxc<>+56(SB)/8, $0x0000061f0000061f
+DATA itxc<>+64(SB)/8, $0x0000013800000138
+DATA itxc<>+72(SB)/8, $0x0000013800000138
+DATA itxc<>+80(SB)/8, $0x0000013800000138
+DATA itxc<>+88(SB)/8, $0x0000013800000138
+DATA itxc<>+96(SB)/8, $0x0000031f0000031f
+DATA itxc<>+104(SB)/8, $0x0000031f0000031f
+DATA itxc<>+112(SB)/8, $0x0000031f0000031f
+DATA itxc<>+120(SB)/8, $0x0000031f0000031f
+DATA itxc<>+128(SB)/8, $0x0000004f0000004f
+DATA itxc<>+136(SB)/8, $0x0000004f0000004f
+DATA itxc<>+144(SB)/8, $0x0000004f0000004f
+DATA itxc<>+152(SB)/8, $0x0000004f0000004f
+DATA itxc<>+160(SB)/8, $0x000006a7000006a7
+DATA itxc<>+168(SB)/8, $0x000006a7000006a7
+DATA itxc<>+176(SB)/8, $0x000006a7000006a7
+DATA itxc<>+184(SB)/8, $0x000006a7000006a7
+DATA itxc<>+192(SB)/8, $0x0000047200000472
+DATA itxc<>+200(SB)/8, $0x0000047200000472
+DATA itxc<>+208(SB)/8, $0x0000047200000472
+DATA itxc<>+216(SB)/8, $0x0000047200000472
+DATA itxc<>+224(SB)/8, $0x0000019100000191
+DATA itxc<>+232(SB)/8, $0x0000019100000191
+DATA itxc<>+240(SB)/8, $0x0000019100000191
+DATA itxc<>+248(SB)/8, $0x0000019100000191
+DATA itxc<>+256(SB)/8, $0x0000001400000014
+DATA itxc<>+264(SB)/8, $0x0000001400000014
+DATA itxc<>+272(SB)/8, $0x0000001400000014
+DATA itxc<>+280(SB)/8, $0x0000001400000014
+DATA itxc<>+288(SB)/8, $0x0000062f0000062f
+DATA itxc<>+296(SB)/8, $0x0000062f0000062f
+DATA itxc<>+304(SB)/8, $0x0000062f0000062f
+DATA itxc<>+312(SB)/8, $0x0000062f0000062f
+DATA itxc<>+320(SB)/8, $0x0000051300000513
+DATA itxc<>+328(SB)/8, $0x0000051300000513
+DATA itxc<>+336(SB)/8, $0x0000051300000513
+DATA itxc<>+344(SB)/8, $0x0000051300000513
+DATA itxc<>+352(SB)/8, $0x0000078b0000078b
+DATA itxc<>+360(SB)/8, $0x0000078b0000078b
+DATA itxc<>+368(SB)/8, $0x0000078b0000078b
+DATA itxc<>+376(SB)/8, $0x0000078b0000078b
+DATA itxc<>+384(SB)/8, $0x000001e4000001e4
+DATA itxc<>+392(SB)/8, $0x000001e4000001e4
+DATA itxc<>+400(SB)/8, $0x000001e4000001e4
+DATA itxc<>+408(SB)/8, $0x000001e4000001e4
+DATA itxc<>+416(SB)/8, $0x000000b0000000b0
+DATA itxc<>+424(SB)/8, $0x000000b0000000b0
+DATA itxc<>+432(SB)/8, $0x000000b0000000b0
+DATA itxc<>+440(SB)/8, $0x000000b0000000b0
+DATA itxc<>+448(SB)/8, $0x000004a5000004a5
+DATA itxc<>+456(SB)/8, $0x000004a5000004a5
+DATA itxc<>+464(SB)/8, $0x000004a5000004a5
+DATA itxc<>+472(SB)/8, $0x000004a5000004a5
+DATA itxc<>+480(SB)/8, $0x0000008000000080
+DATA itxc<>+488(SB)/8, $0x0000008000000080
+DATA itxc<>+496(SB)/8, $0x0000008000000080
+DATA itxc<>+504(SB)/8, $0x0000008000000080
+DATA itxc<>+512(SB)/8, $0x0000040000000400
+DATA itxc<>+520(SB)/8, $0x0000040000000400
+DATA itxc<>+528(SB)/8, $0x0000040000000400
+DATA itxc<>+536(SB)/8, $0x0000040000000400
+DATA itxc<>+544(SB)/8, $0x0000080000000800
+DATA itxc<>+552(SB)/8, $0x0000080000000800
+DATA itxc<>+560(SB)/8, $0x0000080000000800
+DATA itxc<>+568(SB)/8, $0x0000080000000800
+GLOBL itxc<>(SB), RODATA|NOPTR, $576
+
+#define K181 itxc<>+0(SB)
+#define K1567 itxc<>+32(SB)
+#define K312 itxc<>+64(SB)
+#define K799 itxc<>+96(SB)
+#define K79 itxc<>+128(SB)
+#define K1703 itxc<>+160(SB)
+#define K1138 itxc<>+192(SB)
+#define K401 itxc<>+224(SB)
+#define K20 itxc<>+256(SB)
+#define K1583 itxc<>+288(SB)
+#define K1299 itxc<>+320(SB)
+#define K1931 itxc<>+352(SB)
+#define K484 itxc<>+384(SB)
+#define K176 itxc<>+416(SB)
+#define K1189 itxc<>+448(SB)
+#define K128 itxc<>+480(SB)
+#define K1024 itxc<>+512(SB)
+#define K2048 itxc<>+544(SB)
+
+// MACA is (A*CA + B*CB + RND) >> SH, MACS the same with the second term
+// subtracted. The scalar path rounds once, after the sum.
+#define MACA(D, A, CA, B, CB, RND, SH, T) \
+	VPMULLD CA, A, D;  \
+	VPMULLD CB, B, T;  \
+	VPADDD  T, D, D;   \
+	VPADDD  RND, D, D; \
+	VPSRAD  $SH, D, D
+
+#define MACS(D, A, CA, B, CB, RND, SH, T) \
+	VPMULLD CA, A, D;  \
+	VPMULLD CB, B, T;  \
+	VPSUBD  T, D, D;   \
+	VPADDD  RND, D, D; \
+	VPSRAD  $SH, D, D
+
+// R181 is ((A OP B)*181 + 128) >> 8, the half-turn butterfly.
+#define R181(D, A, B, OP) \
+	OP      B, A, D;  \
+	VPMULLD K181, D, D; \
+	VPADDD  K128, D, D; \
+	VPSRAD  $8, D, D
+
+#define CLIP(V)          \
+	VPMAXSD Y14, V, V; \
+	VPMINSD Y15, V, V
+
+// BFLY writes the two outputs a butterfly pair produces.
+#define BFLY(LO, HI, A, B, T) \
+	VPADDD B, A, T;       \
+	CLIP(T);              \
+	VMOVDQU T, LO;        \
+	VPSUBD B, A, T;       \
+	CLIP(T);              \
+	VMOVDQU T, HI
+
+// SETUP takes the row pointers the four bases and the stride address rows with.
+#define SETUP                     \
+	MOVQ tmp+0(FP), SI;       \
+	MOVQ w+8(FP), BX;         \
+	MOVL lo+16(FP), AX;       \
+	VMOVD AX, X14;            \
+	VPBROADCASTD X14, Y14;    \
+	MOVL hi+20(FP), AX;       \
+	VMOVD AX, X15;            \
+	VPBROADCASTD X15, Y15;    \
+	MOVQ BX, DX;              \
+	SHLQ $2, DX;              \
+	LEAQ (DX)(DX*2), R9
+
+// DCT4 is the four-point core, in0..in3 in A0..A3 and the results back in them.
+#define DCT4(A0, A1, A2, A3, T0, T1, T2) \
+	R181(T0, A0, A2, VPADDD); \
+	R181(T1, A0, A2, VPSUBD); \
+	MACA(T2, A1, K1567, A3, K312, K2048, 12, A0); \
+	VPSUBD A3, T2, T2;        \
+	MACS(A0, A3, K1567, A1, K312, K2048, 12, A2); \
+	VPADDD A1, A0, A3;        \
+	VPADDD A3, T0, A0;        \
+	CLIP(A0);                 \
+	VPADDD T2, T1, A1;        \
+	CLIP(A1);                 \
+	VPSUBD T2, T1, A2;        \
+	CLIP(A2);                 \
+	VPSUBD A3, T0, A3;        \
+	CLIP(A3)
+
+// func itxColDct4AVX2(tmp *int32, w int, lo, hi int32)
+TEXT ·itxColDct4AVX2(SB), NOSPLIT, $0-24
+	SETUP
+
+col4:
+	VMOVDQU (SI), Y0
+	VMOVDQU (SI)(DX*1), Y1
+	VMOVDQU (SI)(DX*2), Y2
+	VMOVDQU (SI)(R9*1), Y3
+	DCT4(Y0, Y1, Y2, Y3, Y4, Y5, Y6)
+	VMOVDQU Y0, (SI)
+	VMOVDQU Y1, (SI)(DX*1)
+	VMOVDQU Y2, (SI)(DX*2)
+	VMOVDQU Y3, (SI)(R9*1)
+
+	ADDQ $32, SI
+	SUBQ $8, BX
+	JNZ  col4
+
+	VZEROUPPER
+	RET
+
+// func itxColDct8AVX2(tmp *int32, w int, lo, hi int32)
+TEXT ·itxColDct8AVX2(SB), NOSPLIT, $0-24
+	SETUP
+
+col8:
+	LEAQ (SI)(DX*4), R8
+
+	VMOVDQU (SI), Y0
+	VMOVDQU (SI)(DX*2), Y1
+	VMOVDQU (R8), Y2
+	VMOVDQU (R8)(DX*2), Y3
+	DCT4(Y0, Y1, Y2, Y3, Y4, Y5, Y6)
+
+	VMOVDQU (SI)(DX*1), Y4
+	VMOVDQU (SI)(R9*1), Y5
+	VMOVDQU (R8)(DX*1), Y6
+	VMOVDQU (R8)(R9*1), Y7
+
+	MACA(Y8, Y4, K799, Y7, K79, K2048, 12, Y13)
+	VPSUBD Y7, Y8, Y8
+	MACS(Y9, Y6, K1703, Y5, K1138, K1024, 11, Y13)
+	MACA(Y10, Y6, K1138, Y5, K1703, K1024, 11, Y13)
+	MACS(Y11, Y7, K799, Y4, K79, K2048, 12, Y13)
+	VPADDD Y4, Y11, Y11
+
+	VPADDD Y9, Y8, Y4
+	CLIP(Y4)
+	VPSUBD Y9, Y8, Y5
+	CLIP(Y5)
+	VPADDD Y10, Y11, Y7
+	CLIP(Y7)
+	VPSUBD Y10, Y11, Y6
+	CLIP(Y6)
+
+	R181(Y8, Y6, Y5, VPSUBD)
+	R181(Y9, Y6, Y5, VPADDD)
+
+	BFLY((SI), (R8)(R9*1), Y0, Y7, Y13)
+	BFLY((SI)(DX*1), (R8)(DX*2), Y1, Y9, Y13)
+	BFLY((SI)(DX*2), (R8)(DX*1), Y2, Y8, Y13)
+	BFLY((SI)(R9*1), (R8), Y3, Y4, Y13)
+
+	ADDQ $32, SI
+	SUBQ $8, BX
+	JNZ  col8
+
+	VZEROUPPER
+	RET
+
+// func itxColDct16AVX2(tmp *int32, w int, lo, hi int32)
+TEXT ·itxColDct16AVX2(SB), NOSPLIT, $256-24
+	SETUP
+	VPXOR Y11, Y11, Y11
+
+col16:
+	LEAQ (SI)(DX*4), R8
+	LEAQ (SI)(DX*8), R10
+	LEAQ (R8)(DX*8), R11
+
+	// The eight-point half, on the even rows, left where the Go code puts it.
+	VMOVDQU (SI), Y0
+	VMOVDQU (R8), Y1
+	VMOVDQU (R10), Y2
+	VMOVDQU (R11), Y3
+	DCT4(Y0, Y1, Y2, Y3, Y4, Y5, Y6)
+
+	VMOVDQU (SI)(DX*2), Y4
+	VMOVDQU (R8)(DX*2), Y5
+	VMOVDQU (R10)(DX*2), Y6
+	VMOVDQU (R11)(DX*2), Y7
+
+	MACA(Y8, Y4, K799, Y7, K79, K2048, 12, Y13)
+	VPSUBD Y7, Y8, Y8
+	MACS(Y9, Y6, K1703, Y5, K1138, K1024, 11, Y13)
+	MACA(Y10, Y6, K1138, Y5, K1703, K1024, 11, Y13)
+	MACS(Y12, Y7, K799, Y4, K79, K2048, 12, Y13)
+	VPADDD Y4, Y12, Y12
+
+	VPADDD Y9, Y8, Y4
+	CLIP(Y4)
+	VPSUBD Y9, Y8, Y5
+	CLIP(Y5)
+	VPADDD Y10, Y12, Y7
+	CLIP(Y7)
+	VPSUBD Y10, Y12, Y6
+	CLIP(Y6)
+
+	R181(Y8, Y6, Y5, VPSUBD)
+	R181(Y9, Y6, Y5, VPADDD)
+
+	BFLY((SI), (R11)(DX*2), Y0, Y7, Y13)
+	BFLY((SI)(DX*2), (R11), Y1, Y9, Y13)
+	BFLY((R8), (R10)(DX*2), Y2, Y8, Y13)
+	BFLY((R8)(DX*2), (R10), Y3, Y4, Y13)
+
+	// The sixteen-point odd half, from the odd rows.
+	VMOVDQU (SI)(DX*1), Y8
+	VMOVDQU (R11)(R9*1), Y9
+	MACA(Y0, Y8, K401, Y9, K20, K2048, 12, Y10)
+	VPSUBD Y9, Y0, Y0
+	MACS(Y7, Y9, K401, Y8, K20, K2048, 12, Y10)
+	VPADDD Y8, Y7, Y7
+
+	VMOVDQU (R10)(DX*1), Y8
+	VMOVDQU (R8)(R9*1), Y9
+	MACS(Y1, Y8, K1583, Y9, K1299, K1024, 11, Y10)
+	MACA(Y6, Y8, K1299, Y9, K1583, K1024, 11, Y10)
+
+	VMOVDQU (R8)(DX*1), Y8
+	VMOVDQU (R10)(R9*1), Y9
+	MACA(Y2, Y8, K1931, Y9, K484, K2048, 12, Y10)
+	VPSUBD Y9, Y2, Y2
+	MACS(Y5, Y9, K1931, Y8, K484, K2048, 12, Y10)
+	VPADDD Y8, Y5, Y5
+
+	VMOVDQU (R11)(DX*1), Y8
+	VMOVDQU (SI)(R9*1), Y9
+	VPMULLD K176, Y8, Y3
+	VPMULLD K1189, Y9, Y10
+	VPADDD  Y10, Y3, Y3
+	VPSUBD  Y3, Y11, Y3
+	VPADDD  K2048, Y3, Y3
+	VPSRAD  $12, Y3, Y3
+	VPADDD  Y8, Y3, Y3
+	MACS(Y4, Y8, K1189, Y9, K176, K2048, 12, Y10)
+	VPADDD Y9, Y4, Y4
+
+	VPADDD Y1, Y0, Y8
+	CLIP(Y8)
+	VPSUBD Y1, Y0, Y9
+	CLIP(Y9)
+	VPSUBD Y2, Y3, Y10
+	CLIP(Y10)
+	VPADDD Y2, Y3, Y0
+	CLIP(Y0)
+	VPADDD Y5, Y4, Y1
+	CLIP(Y1)
+	VPSUBD Y5, Y4, Y2
+	CLIP(Y2)
+	VPSUBD Y6, Y7, Y3
+	CLIP(Y3)
+	VPADDD Y6, Y7, Y4
+	CLIP(Y4)
+
+	MACA(Y5, Y3, K1567, Y9, K312, K2048, 12, Y13)
+	VPSUBD Y9, Y5, Y5
+	MACS(Y6, Y9, K1567, Y3, K312, K2048, 12, Y13)
+	VPADDD Y3, Y6, Y6
+	MACS(Y7, Y2, K312, Y10, K1567, K2048, 12, Y13)
+	VPSUBD Y2, Y7, Y7
+	MACA(Y12, Y2, K1567, Y10, K312, K2048, 12, Y13)
+	VPSUBD Y10, Y12, Y12
+
+	VPADDD Y0, Y8, Y2
+	CLIP(Y2)
+	VPSUBD Y0, Y8, Y3
+	CLIP(Y3)
+	VPADDD Y7, Y5, Y9
+	CLIP(Y9)
+	VPSUBD Y7, Y5, Y10
+	CLIP(Y10)
+	VPSUBD Y1, Y4, Y13
+	CLIP(Y13)
+	VPADDD Y1, Y4, Y0
+	CLIP(Y0)
+	VPSUBD Y12, Y6, Y1
+	CLIP(Y1)
+	VPADDD Y12, Y6, Y4
+	CLIP(Y4)
+
+	R181(Y5, Y1, Y10, VPSUBD)
+	R181(Y6, Y1, Y10, VPADDD)
+	R181(Y7, Y13, Y3, VPSUBD)
+	R181(Y8, Y13, Y3, VPADDD)
+
+	VMOVDQU Y0, 0(SP)
+	VMOVDQU Y4, 32(SP)
+	VMOVDQU Y6, 64(SP)
+	VMOVDQU Y8, 96(SP)
+	VMOVDQU Y7, 128(SP)
+	VMOVDQU Y5, 160(SP)
+	VMOVDQU Y9, 192(SP)
+	VMOVDQU Y2, 224(SP)
+
+	VMOVDQU (SI), Y0
+	VMOVDQU (SI)(DX*2), Y1
+	VMOVDQU (R8), Y2
+	VMOVDQU (R8)(DX*2), Y3
+	VMOVDQU (R10), Y4
+	VMOVDQU (R10)(DX*2), Y5
+	VMOVDQU (R11), Y6
+	VMOVDQU (R11)(DX*2), Y7
+
+	VMOVDQU 0(SP), Y8
+	BFLY((SI), (R11)(R9*1), Y0, Y8, Y9)
+	VMOVDQU 32(SP), Y8
+	BFLY((SI)(DX*1), (R11)(DX*2), Y1, Y8, Y9)
+	VMOVDQU 64(SP), Y8
+	BFLY((SI)(DX*2), (R11)(DX*1), Y2, Y8, Y9)
+	VMOVDQU 96(SP), Y8
+	BFLY((SI)(R9*1), (R11), Y3, Y8, Y9)
+	VMOVDQU 128(SP), Y8
+	BFLY((R8), (R10)(R9*1), Y4, Y8, Y9)
+	VMOVDQU 160(SP), Y8
+	BFLY((R8)(DX*1), (R10)(DX*2), Y5, Y8, Y9)
+	VMOVDQU 192(SP), Y8
+	BFLY((R8)(DX*2), (R10)(DX*1), Y6, Y8, Y9)
+	VMOVDQU 224(SP), Y8
+	BFLY((R8)(R9*1), (R10), Y7, Y8, Y9)
+
+	VPXOR Y11, Y11, Y11
+	ADDQ  $32, SI
+	SUBQ  $8, BX
+	JNZ   col16
+
+	VZEROUPPER
+	RET

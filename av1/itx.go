@@ -150,8 +150,10 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 	dsp.itxClip(tmp[:w*sh], rnd, shift, colClipMin, colClipMax)
 	clear(tmp[sh*w : h*w])
 
-	for x := range w {
-		second1d(tmp, x, w, colClipMin, colClipMax)
+	if dsp.itxCol == nil || !dsp.itxCol(tmp, w, h, int(txtps[1]), colClipMin, colClipMax) {
+		for x := range w {
+			second1d(tmp, x, w, colClipMin, colClipMax)
+		}
 	}
 
 	dsp.itxAdd(dst, dstOff, stride, tmp, w, h, bitdepthMax)
