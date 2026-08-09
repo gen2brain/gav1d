@@ -96,6 +96,7 @@ type scratch[P pixel] struct {
 	itx        [64 * 64]int32
 	cdefLrBak  [2][3][16]P
 	lrBorder   [2][(128 + 8) * 4]P
+	lrParams   looprestorationParams
 }
 
 type frameContext[P pixel, C coef] struct {

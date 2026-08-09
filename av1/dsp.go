@@ -1,5 +1,7 @@
 package av1
 
+import "sync"
+
 // dspContext holds the kernels that have architecture-specific versions. It is
 // built per frame, so the entries are already concrete for the bit depth, and
 // assembly never has to reach through a type parameter.
@@ -46,9 +48,31 @@ func newDspGo[P pixel]() *dspContext[P] {
 	return d
 }
 
-func newDsp[P pixel]() *dspContext[P] {
+// The table is immutable once built, so every frame of a bit depth shares one.
+var (
+	dsp8  = sync.OnceValue(func() *dspContext[uint8] { return buildDsp[uint8]() })
+	dsp16 = sync.OnceValue(func() *dspContext[uint16] { return buildDsp[uint16]() })
+)
+
+func buildDsp[P pixel]() *dspContext[P] {
 	d := newDspGo[P]()
 	dspInit(d)
 
 	return d
+}
+
+func newDsp[P pixel]() *dspContext[P] {
+	var zero P
+	switch any(zero).(type) {
+	case uint8:
+		if d, ok := any(dsp8()).(*dspContext[P]); ok {
+			return d
+		}
+	case uint16:
+		if d, ok := any(dsp16()).(*dspContext[P]); ok {
+			return d
+		}
+	}
+
+	return buildDsp[P]()
 }

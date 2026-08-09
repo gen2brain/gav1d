@@ -1,8 +1,9 @@
 package av1
 
-func lrStripe[P pixel, C coef](f *frameContext[P, C], p []P, pOff int,
+func lrStripe[P pixel, C coef](t *taskContext[P, C], p []P, pOff int,
 	left []P, leftOff, x, y, plane, unitW, rowH int, lr *av1RestorationUnit, edges int,
 ) {
+	f := t.f
 	chroma := b2i(plane != 0)
 	ssVer := chroma & b2i(f.layout == pixelLayoutI420)
 	stride := f.srStride[chroma]
@@ -11,7 +12,8 @@ func lrStripe[P pixel, C coef](f *frameContext[P, C], p []P, pOff int,
 	sby := (y + (8<<ssVer)*b2i(y != 0)) >> (6 - ssVer + int(f.seqHdr.sb128))
 	stripeH := min((64-8*b2i(y == 0))>>ssVer, rowH-y)
 
-	var params looprestorationParams
+	params := &t.scratch.lrParams
+	*params = looprestorationParams{}
 	var fn func(dst []P, dstOff, stride int, left []P, leftOff int,
 		lpf []P, lpfOff, w, h int, params *looprestorationParams, edges int,
 		bitdepthMax int32)
@@ -58,7 +60,7 @@ func lrStripe[P pixel, C coef](f *frameContext[P, C], p []P, pOff int,
 		}
 
 		fn(p, pOff, stride, left, leftOff, f.lf.lrLineBuf, lpfOff,
-			unitW, stripeH, &params, edges, f.bitdepthMax)
+			unitW, stripeH, params, edges, f.bitdepthMax)
 
 		leftOff += stripeH * 4
 		y += stripeH
@@ -125,7 +127,7 @@ func lrSbrowPlane[P pixel, C coef](t *taskContext[P, C], pOff, y, w, h, rowH, pl
 			backup4xU(preLrBorder[bit][:], 0, f.srCur[plane], pOff+unitSize-4, pStride, backupH)
 		}
 		if restore {
-			lrStripe(f, f.srCur[plane], pOff, preLrBorder[1-bit][:], 0, x, y, plane,
+			lrStripe(t, f.srCur[plane], pOff, preLrBorder[1-bit][:], 0, x, y, plane,
 				unitSize, rowH, lr[bit], edges)
 		}
 		x = nextX
@@ -138,7 +140,7 @@ func lrSbrowPlane[P pixel, C coef](t *taskContext[P, C], pOff, y, w, h, rowH, pl
 
 	if restore {
 		edges &^= lrHaveRight
-		lrStripe(f, f.srCur[plane], pOff, preLrBorder[1-bit][:], 0, x, y, plane,
+		lrStripe(t, f.srCur[plane], pOff, preLrBorder[1-bit][:], 0, x, y, plane,
 			w-x, rowH, lr[bit], edges)
 	}
 }
