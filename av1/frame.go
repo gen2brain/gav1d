@@ -65,6 +65,7 @@ func setupFrame[P pixel, C coef](d *Decoder, tiles []tileGroup, p *pendingFrame)
 	f.lfEnabled = frameHdr.loopfilter.levelY[0] != 0 || frameHdr.loopfilter.levelY[1] != 0
 	f.progress = newFrameProgress()
 	f.dsp = newDsp[P]()
+	f.lr = newLr[P, C]()
 
 	f.resize = frameHdr.width[0] != frameHdr.width[1]
 	f.srWidth = frameHdr.width[1]

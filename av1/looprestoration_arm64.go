@@ -91,3 +91,17 @@ func wienerV16NEONRow(p []uint16, pOff int, hor []uint16, rows *[7]int,
 	}
 	wienerVRow(p, pOff+n, hor, &tail, fv, w-n, bitdepthMax)
 }
+
+func lrInit[P pixel, C coef](l *lrContext[P, C]) {
+	if l8, ok := any(l).(*lrContext[uint8, int16]); ok {
+		l8.wienerH = wienerH8NEONRow
+		l8.wienerV = wienerV8NEONRow
+		l8.finish1 = sgrFinish1NEONRow
+		l8.finish2 = sgrFinish2NEONRow
+	}
+
+	if l16, ok := any(l).(*lrContext[uint16, int32]); ok {
+		l16.wienerH = wienerH16NEONRow
+		l16.wienerV = wienerV16NEONRow
+	}
+}

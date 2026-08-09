@@ -63,3 +63,17 @@ func wienerV16RVVRow(p []uint16, pOff int, hor []uint16, rows *[7]int,
 	rnd, shift := wienerVRVVRnd(bitdepthMax)
 	wienerV16RVV(&p[pOff], &hor[0], rows, fv, w, rnd, shift, bitdepthMax)
 }
+
+func lrInit[P pixel, C coef](l *lrContext[P, C]) {
+	if l8, ok := any(l).(*lrContext[uint8, int16]); ok {
+		l8.wienerH = wienerH8RVVRow
+		l8.wienerV = wienerV8RVVRow
+		l8.finish1 = sgrFinish1RVVRow
+		l8.finish2 = sgrFinish2RVVRow
+	}
+
+	if l16, ok := any(l).(*lrContext[uint16, int32]); ok {
+		l16.wienerH = wienerH16RVVRow
+		l16.wienerV = wienerV16RVVRow
+	}
+}

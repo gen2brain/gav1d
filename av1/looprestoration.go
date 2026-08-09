@@ -72,7 +72,7 @@ func wienerHRow[P pixel](dst []uint16, dstOff int, src []P, srcOff, n int,
 
 // wienerFilterH folds the rounding offset and, at 8 bits, the unscaled centre
 // pixel into the taps, so the bulk of the row is an unconditional 7-tap.
-func wienerFilterH[P pixel](dsp *dspContext[P], dst []uint16, dstOff int,
+func wienerFilterH[P pixel, C coef](lr *lrContext[P, C], dst []uint16, dstOff int,
 	left []P, leftOff int, hasLeft bool, src []P, srcOff int, fh *[8]int16,
 	w, edges int, bitdepthMax int32,
 ) {
@@ -105,7 +105,7 @@ func wienerFilterH[P pixel](dsp *dspContext[P], dst []uint16, dstOff int,
 		end = w
 	}
 
-	dsp.wienerH(dst, dstOff+start, src, srcOff+start, end-start, &f, rnd, shift, limit)
+	lr.wienerH(dst, dstOff+start, src, srcOff+start, end-start, &f, rnd, shift, limit)
 
 	if end < w {
 		wienerHEdge(dst, dstOff, left, leftOff, hasLeft, src, srcOff, &f,
@@ -135,26 +135,26 @@ func wienerVRow[P pixel](p []P, pOff int, hor []uint16, rows *[7]int,
 
 // wienerFilterV runs at the bottom of a stripe, where the seventh row is a
 // repeat of the sixth.
-func wienerFilterV[P pixel](dsp *dspContext[P], p []P, pOff int, hor []uint16,
+func wienerFilterV[P pixel, C coef](lr *lrContext[P, C], p []P, pOff int, hor []uint16,
 	ptrs *[7]int, fv *[8]int16, w int, bitdepthMax int32,
 ) {
 	rows := [7]int{ptrs[0], ptrs[1], ptrs[2], ptrs[3], ptrs[4], ptrs[5], ptrs[5]}
-	dsp.wienerV(p, pOff, hor, &rows, fv, w, bitdepthMax)
+	lr.wienerV(p, pOff, hor, &rows, fv, w, bitdepthMax)
 
 	for i := range 5 {
 		ptrs[i] = ptrs[i+1]
 	}
 }
 
-func wienerFilterHV[P pixel](dsp *dspContext[P], p []P, pOff int, hor []uint16,
+func wienerFilterHV[P pixel, C coef](lr *lrContext[P, C], p []P, pOff int, hor []uint16,
 	ptrs *[7]int, left []P, leftOff int, hasLeft bool, src []P, srcOff int,
 	filter *[2][8]int16, w, edges int, bitdepthMax int32,
 ) {
-	wienerFilterH(dsp, hor, lrScratchRow, left, leftOff, hasLeft, src, srcOff,
+	wienerFilterH(lr, hor, lrScratchRow, left, leftOff, hasLeft, src, srcOff,
 		&filter[0], w, edges, bitdepthMax)
 
 	rows := [7]int{ptrs[0], ptrs[1], ptrs[2], ptrs[3], ptrs[4], ptrs[5], lrScratchRow}
-	dsp.wienerV(p, pOff, hor, &rows, &filter[1], w, bitdepthMax)
+	lr.wienerV(p, pOff, hor, &rows, &filter[1], w, bitdepthMax)
 
 	copy(hor[ptrs[6]:ptrs[6]+w], hor[lrScratchRow:lrScratchRow+w])
 
@@ -164,7 +164,7 @@ func wienerFilterHV[P pixel](dsp *dspContext[P], p []P, pOff int, hor []uint16,
 	ptrs[6] = ptrs[0]
 }
 
-func lrWiener[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
+func lrWiener[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 	left []P, leftOff int, lpf []P, lpfOff, w, h int,
 	params *looprestorationParams, edges int, bitdepthMax int32,
 ) {
@@ -184,11 +184,11 @@ func lrWiener[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 	if edges&lrHaveTop != 0 {
 		ptrs = [7]int{rows[0], rows[0], rows[1], rows[2], rows[2], rows[2], 0}
 
-		wienerFilterH(dsp, hor, rows[0], left, 0, false, lpf, lpfOff, fh, w, edges, bitdepthMax)
+		wienerFilterH(lr, hor, rows[0], left, 0, false, lpf, lpfOff, fh, w, edges, bitdepthMax)
 		lpfOff += stride
-		wienerFilterH(dsp, hor, rows[1], left, 0, false, lpf, lpfOff, fh, w, edges, bitdepthMax)
+		wienerFilterH(lr, hor, rows[1], left, 0, false, lpf, lpfOff, fh, w, edges, bitdepthMax)
 
-		wienerFilterH(dsp, hor, rows[2], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
+		wienerFilterH(lr, hor, rows[2], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
 		leftOff += 4
 		srcOff += stride
 
@@ -199,7 +199,7 @@ func lrWiener[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 		}
 
 		ptrs[4], ptrs[5] = rows[3], rows[3]
-		wienerFilterH(dsp, hor, rows[3], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
+		wienerFilterH(lr, hor, rows[3], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
 		leftOff += 4
 		srcOff += stride
 
@@ -210,7 +210,7 @@ func lrWiener[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 		}
 
 		ptrs[5] = rows[4]
-		wienerFilterH(dsp, hor, rows[4], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
+		wienerFilterH(lr, hor, rows[4], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
 		leftOff += 4
 		srcOff += stride
 
@@ -222,7 +222,7 @@ func lrWiener[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 	} else {
 		ptrs = [7]int{rows[0], rows[0], rows[0], rows[0], rows[0], rows[0], 0}
 
-		wienerFilterH(dsp, hor, rows[0], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
+		wienerFilterH(lr, hor, rows[0], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
 		leftOff += 4
 		srcOff += stride
 
@@ -233,7 +233,7 @@ func lrWiener[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 		}
 
 		ptrs[4], ptrs[5] = rows[1], rows[1]
-		wienerFilterH(dsp, hor, rows[1], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
+		wienerFilterH(lr, hor, rows[1], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
 		leftOff += 4
 		srcOff += stride
 
@@ -244,7 +244,7 @@ func lrWiener[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 		}
 
 		ptrs[5] = rows[2]
-		wienerFilterH(dsp, hor, rows[2], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
+		wienerFilterH(lr, hor, rows[2], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
 		leftOff += 4
 		srcOff += stride
 
@@ -255,7 +255,7 @@ func lrWiener[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 		}
 
 		ptrs[6] = rows[3]
-		wienerFilterHV(dsp, dst, dstOff, hor, &ptrs, left, leftOff, true, src, srcOff,
+		wienerFilterHV(lr, dst, dstOff, hor, &ptrs, left, leftOff, true, src, srcOff,
 			&params.filter, w, edges, bitdepthMax)
 		leftOff += 4
 		srcOff += stride
@@ -268,7 +268,7 @@ func lrWiener[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 		}
 
 		ptrs[6] = rows[4]
-		wienerFilterHV(dsp, dst, dstOff, hor, &ptrs, left, leftOff, true, src, srcOff,
+		wienerFilterHV(lr, dst, dstOff, hor, &ptrs, left, leftOff, true, src, srcOff,
 			&params.filter, w, edges, bitdepthMax)
 		leftOff += 4
 		srcOff += stride
@@ -283,7 +283,7 @@ func lrWiener[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 
 	ptrs[6] = ptrs[5] + restUnitStride
 	for {
-		wienerFilterHV(dsp, dst, dstOff, hor, &ptrs, left, leftOff, true, src, srcOff,
+		wienerFilterHV(lr, dst, dstOff, hor, &ptrs, left, leftOff, true, src, srcOff,
 			&params.filter, w, edges, bitdepthMax)
 		leftOff += 4
 		srcOff += stride
@@ -300,12 +300,12 @@ func lrWiener[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 		goto vert
 	}
 
-	wienerFilterHV(dsp, dst, dstOff, hor, &ptrs, left, 0, false, lpf, lpfBottom,
+	wienerFilterHV(lr, dst, dstOff, hor, &ptrs, left, 0, false, lpf, lpfBottom,
 		&params.filter, w, edges, bitdepthMax)
 	lpfBottom += stride
 	dstOff += stride
 
-	wienerFilterHV(dsp, dst, dstOff, hor, &ptrs, left, 0, false, lpf, lpfBottom,
+	wienerFilterHV(lr, dst, dstOff, hor, &ptrs, left, 0, false, lpf, lpfBottom,
 		&params.filter, w, edges, bitdepthMax)
 	dstOff += stride
 
@@ -313,15 +313,15 @@ func lrWiener[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 
 vert:
 	if stage == 3 {
-		wienerFilterV(dsp, dst, dstOff, hor, &ptrs, fv, w, bitdepthMax)
+		wienerFilterV(lr, dst, dstOff, hor, &ptrs, fv, w, bitdepthMax)
 		dstOff += stride
 		stage = 2
 	}
 	if stage == 2 {
-		wienerFilterV(dsp, dst, dstOff, hor, &ptrs, fv, w, bitdepthMax)
+		wienerFilterV(lr, dst, dstOff, hor, &ptrs, fv, w, bitdepthMax)
 		dstOff += stride
 	}
-	wienerFilterV(dsp, dst, dstOff, hor, &ptrs, fv, w, bitdepthMax)
+	wienerFilterV(lr, dst, dstOff, hor, &ptrs, fv, w, bitdepthMax)
 }
 
 func rotate(sumsqPtrs, sumPtrs []int, n int) {
@@ -499,8 +499,8 @@ func sgrFinishFilterRow1[P pixel, C coef](tmp []C, tmpOff int, src []P, srcOff i
 	}
 }
 
-func sgrFinishFilter2[P pixel, C coef](tmp []C, tmpOff int, src []P, srcOff, srcStride int,
-	a []int32, aPtrs []int, b []C, bPtrs []int, w, h int,
+func sgrFinishFilter2Row[P pixel, C coef](tmp []C, tmpOff int, src []P, srcOff int,
+	a []int32, aPtrs []int, b []C, bPtrs []int, w int,
 ) {
 	for i := range w {
 		j := i + 1
@@ -511,18 +511,28 @@ func sgrFinishFilter2[P pixel, C coef](tmp []C, tmpOff int, src []P, srcOff, src
 			(a[aPtrs[0]+j-1]+a[aPtrs[1]+j-1]+a[aPtrs[0]+j+1]+a[aPtrs[1]+j+1])*5
 		tmp[tmpOff+i] = C((as - bs*int32(src[srcOff+i]) + (1 << 8)) >> 9)
 	}
-	if h <= 1 {
-		return
-	}
+}
 
-	tmpOff += filterOutStride
-	srcOff += srcStride
-	aOff, bOff := aPtrs[1]+1, bPtrs[1]+1
+func sgrFinishFilter2Mid[P pixel, C coef](tmp []C, tmpOff int, src []P, srcOff int,
+	a []int32, aOff int, b []C, bOff, w int,
+) {
 	for i := range w {
 		bs := int32(b[bOff+i])*6 + (int32(b[bOff+i-1])+int32(b[bOff+i+1]))*5
 		as := a[aOff+i]*6 + (a[aOff+i-1]+a[aOff+i+1])*5
 		tmp[tmpOff+i] = C((as - bs*int32(src[srcOff+i]) + (1 << 7)) >> 8)
 	}
+}
+
+func sgrFinishFilter2[P pixel, C coef](tmp []C, tmpOff int, src []P, srcOff, srcStride int,
+	a []int32, aPtrs []int, b []C, bPtrs []int, w, h int,
+) {
+	sgrFinishFilter2Row(tmp, tmpOff, src, srcOff, a, aPtrs, b, bPtrs, w)
+	if h <= 1 {
+		return
+	}
+
+	sgrFinishFilter2Mid(tmp, tmpOff+filterOutStride, src, srcOff+srcStride,
+		a, aPtrs[1]+1, b, bPtrs[1]+1, w)
 }
 
 func sgrWeightedRow1[P pixel, C coef](dst []P, dstOff int, t1 []C, t1Off, w int,
@@ -548,25 +558,25 @@ func sgrWeighted2[P pixel, C coef](dst []P, dstOff, dstStride int, t1 []C, t1Off
 	}
 }
 
-func sgrFinish1[P pixel, C coef](dst []P, dstOff *int, stride int,
+func sgrFinish1[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff *int, stride int,
 	a []int32, aPtrs []int, b []C, bPtrs []int, w int, w1 int32, bitdepthMax int32,
 ) {
 	var tmpBuf [384]C
 	tmp := tmpBuf[:]
 
-	sgrFinishFilterRow1(tmp, 0, dst, *dstOff, a, aPtrs, b, bPtrs, w)
+	lr.finish1(tmp, 0, dst, *dstOff, a, aPtrs, b, bPtrs, w)
 	sgrWeightedRow1(dst, *dstOff, tmp, 0, w, w1, bitdepthMax)
 	*dstOff += stride
 	rotate(aPtrs, bPtrs, 3)
 }
 
-func sgrFinish2[P pixel, C coef](dst []P, dstOff *int, stride int,
+func sgrFinish2[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff *int, stride int,
 	a []int32, aPtrs []int, b []C, bPtrs []int, w, h int, w1 int32, bitdepthMax int32,
 ) {
 	var tmpBuf [2 * filterOutStride]C
 	tmp := tmpBuf[:]
 
-	sgrFinishFilter2(tmp, 0, dst, *dstOff, stride, a, aPtrs, b, bPtrs, w, h)
+	lr.finish2(tmp, 0, dst, *dstOff, stride, a, aPtrs, b, bPtrs, w, h)
 	sgrWeightedRow1(dst, *dstOff, tmp, 0, w, w1, bitdepthMax)
 	*dstOff += stride
 	if h > 1 {
@@ -576,7 +586,7 @@ func sgrFinish2[P pixel, C coef](dst []P, dstOff *int, stride int,
 	rotate(aPtrs, bPtrs, 2)
 }
 
-func sgrFinishMix[P pixel, C coef](dst []P, dstOff *int, stride int,
+func sgrFinishMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff *int, stride int,
 	a5 []int32, a5Ptrs []int, b5 []C, b5Ptrs []int,
 	a3 []int32, a3Ptrs []int, b3 []C, b3Ptrs []int,
 	w, h int, w0, w1 int32, bitdepthMax int32,
@@ -584,10 +594,10 @@ func sgrFinishMix[P pixel, C coef](dst []P, dstOff *int, stride int,
 	var tmp5Buf, tmp3Buf [2 * filterOutStride]C
 	tmp5, tmp3 := tmp5Buf[:], tmp3Buf[:]
 
-	sgrFinishFilter2(tmp5, 0, dst, *dstOff, stride, a5, a5Ptrs, b5, b5Ptrs, w, h)
-	sgrFinishFilterRow1(tmp3, 0, dst, *dstOff, a3, a3Ptrs, b3, b3Ptrs, w)
+	lr.finish2(tmp5, 0, dst, *dstOff, stride, a5, a5Ptrs, b5, b5Ptrs, w, h)
+	lr.finish1(tmp3, 0, dst, *dstOff, a3, a3Ptrs, b3, b3Ptrs, w)
 	if h > 1 {
-		sgrFinishFilterRow1(tmp3, filterOutStride, dst, *dstOff+stride,
+		lr.finish1(tmp3, filterOutStride, dst, *dstOff+stride,
 			a3, a3Ptrs[1:], b3, b3Ptrs[1:], w)
 	}
 	sgrWeighted2(dst, *dstOff, stride, tmp5, 0, tmp3, 0, w, h, w0, w1, bitdepthMax)
@@ -596,7 +606,7 @@ func sgrFinishMix[P pixel, C coef](dst []P, dstOff *int, stride int,
 	rotate(a3Ptrs, b3Ptrs, 4)
 }
 
-func lrSgr3x3[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
+func lrSgr3x3[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 	left []P, leftOff int, lpf []P, lpfOff, w, h int,
 	params *looprestorationParams, edges int, bitdepthMax int32,
 ) {
@@ -685,7 +695,7 @@ func lrSgr3x3[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 		leftOff += 4
 		srcOff += stride
 
-		sgrFinish1(dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
+		sgrFinish1(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
 
 		h--
 		if h <= 0 {
@@ -701,12 +711,12 @@ func lrSgr3x3[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 		left, 0, false, lpf, lpfBottom, w, s1, edges, bitdepthMax)
 	lpfBottom += stride
 
-	sgrFinish1(dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
+	sgrFinish1(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
 
 	sgrBox3HV(sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[2], b, bPtrs[2],
 		left, 0, false, lpf, lpfBottom, w, s1, edges, bitdepthMax)
 
-	sgrFinish1(dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
+	sgrFinish1(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
 
 	return
 
@@ -715,7 +725,7 @@ vert2:
 	sgrBox3Vert(sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[2], b, bPtrs[2],
 		w, s1, bitdepthMax)
 
-	sgrFinish1(dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
+	sgrFinish1(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
 
 	goto output1
 
@@ -730,10 +740,10 @@ output1:
 	sgrBox3Vert(sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[2], b, bPtrs[2],
 		w, s1, bitdepthMax)
 
-	sgrFinish1(dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
+	sgrFinish1(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
 }
 
-func lrSgr5x5[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
+func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 	left []P, leftOff int, lpf []P, lpfOff, w, h int,
 	params *looprestorationParams, edges int, bitdepthMax int32,
 ) {
@@ -835,7 +845,7 @@ func lrSgr5x5[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 
 		sgrBox5Vert(sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[1], b, bPtrs[1],
 			w, s0, bitdepthMax)
-		sgrFinish2(dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
+		sgrFinish2(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
 
 		h--
 		if h <= 0 {
@@ -863,7 +873,7 @@ func lrSgr5x5[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 
 		sgrBox5Vert(sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[1], b, bPtrs[1],
 			w, s0, bitdepthMax)
-		sgrFinish2(dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
+		sgrFinish2(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
 
 		h--
 		if h <= 0 {
@@ -882,7 +892,7 @@ func lrSgr5x5[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 output2:
 	sgrBox5Vert(sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[1], b, bPtrs[1],
 		w, s0, bitdepthMax)
-	sgrFinish2(dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
+	sgrFinish2(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
 
 	return
 
@@ -897,7 +907,7 @@ odd:
 
 	sgrBox5Vert(sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[1], b, bPtrs[1],
 		w, s0, bitdepthMax)
-	sgrFinish2(dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
+	sgrFinish2(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
 
 	goto output1
 
@@ -914,10 +924,10 @@ output1:
 
 	sgrBox5Vert(sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[1], b, bPtrs[1],
 		w, s0, bitdepthMax)
-	sgrFinish2(dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 1, w0, bitdepthMax)
+	sgrFinish2(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 1, w0, bitdepthMax)
 }
 
-func lrSgrMix[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
+func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 	left []P, leftOff int, lpf []P, lpfOff, w, h int,
 	params *looprestorationParams, edges int, bitdepthMax int32,
 ) {
@@ -1068,7 +1078,7 @@ func lrSgrMix[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 			w, s0, bitdepthMax)
 		sgrBox3Vert(sumsq3, sumsq3Ptrs[:], sum3, sum3Ptrs[:], a3, a3Ptrs[3], b3, b3Ptrs[3],
 			w, s1, bitdepthMax)
-		sgrFinishMix(dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
+		sgrFinishMix(lr, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
 			a3, a3Ptrs[:], b3, b3Ptrs[:], w, 2, w0, w1, bitdepthMax)
 
 		h--
@@ -1105,7 +1115,7 @@ func lrSgrMix[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 			w, s0, bitdepthMax)
 		sgrBox3Vert(sumsq3, sumsq3Ptrs[:], sum3, sum3Ptrs[:], a3, a3Ptrs[3], b3, b3Ptrs[3],
 			w, s1, bitdepthMax)
-		sgrFinishMix(dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
+		sgrFinishMix(lr, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
 			a3, a3Ptrs[:], b3, b3Ptrs[:], w, 2, w0, w1, bitdepthMax)
 
 		h--
@@ -1135,7 +1145,7 @@ output2:
 		w, s0, bitdepthMax)
 	sgrBox3Vert(sumsq3, sumsq3Ptrs[:], sum3, sum3Ptrs[:], a3, a3Ptrs[3], b3, b3Ptrs[3],
 		w, s1, bitdepthMax)
-	sgrFinishMix(dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
+	sgrFinishMix(lr, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
 		a3, a3Ptrs[:], b3, b3Ptrs[:], w, 2, w0, w1, bitdepthMax)
 
 	return
@@ -1161,7 +1171,7 @@ odd:
 		w, s0, bitdepthMax)
 	sgrBox3Vert(sumsq3, sumsq3Ptrs[:], sum3, sum3Ptrs[:], a3, a3Ptrs[3], b3, b3Ptrs[3],
 		w, s1, bitdepthMax)
-	sgrFinishMix(dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
+	sgrFinishMix(lr, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
 		a3, a3Ptrs[:], b3, b3Ptrs[:], w, 2, w0, w1, bitdepthMax)
 
 	goto output1
@@ -1189,6 +1199,6 @@ output1:
 		w, s1, bitdepthMax)
 	rotate(a3Ptrs[:], b3Ptrs[:], 4)
 
-	sgrFinishMix(dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
+	sgrFinishMix(lr, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
 		a3, a3Ptrs[:], b3, b3Ptrs[:], w, 1, w0, w1, bitdepthMax)
 }

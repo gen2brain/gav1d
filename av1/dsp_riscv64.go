@@ -14,8 +14,6 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d16.itxAdd = itxAdd16Vec
 		d16.cdefDir = cdefFindDir16RVV
 		d16.cdefCopy = cdefCopy16RVVRows
-		d16.wienerH = wienerH16RVVRow
-		d16.wienerV = wienerV16RVVRow
 	}
 
 	if d8, ok := any(d).(*dspContext[uint8]); ok {
@@ -27,7 +25,5 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.cdefDir = cdefFindDir8RVV
 		d8.cdefCopy = cdefCopy8RVVRows
 		d8.loopFilter = loopFilter8RVV
-		d8.wienerH = wienerH8RVVRow
-		d8.wienerV = wienerV8RVVRow
 	}
 }

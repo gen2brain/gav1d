@@ -1,0 +1,219 @@
+//go:build riscv64 && riscv64.rva23u64 && !noasm
+
+#include "textflag.h"
+
+// The a rows are int32 and the b rows int16, three taps apart in each, so a
+// tap is just the row pointer plus a constant.
+
+// ATAP loads one int32 tap.
+#define ATAP(OFF, REG, VD)   \
+	ADD    $OFF, REG, X6; \
+	VLE32V (X6), VD
+
+// BTAP loads one int16 tap and widens it.
+#define BTAP(OFF, REG, VD)      \
+	ADD     $OFF, REG, X6;  \
+	VSETVLI X10, E16, MF2, TA, MA, X7; \
+	VLE16V  (X6), V15;      \
+	VSETVLI X10, E32, M1, TA, MA, X7; \
+	VSEXTVF2 V15, VD
+
+// STORE finishes one group: subtract, round, shift and narrow.
+#define STORE(SHIFT)              \
+	VSETVLI  X10, E8, MF4, TA, MA, X7; \
+	VLE8V    (X11), V16;      \
+	VSETVLI  X10, E32, M1, TA, MA, X7; \
+	VZEXTVF4 V16, V17;        \
+	VMULVV   V17, V20, V20;   \
+	VSUBVV   V20, V19, V19;   \
+	VADDVX   X14, V19, V19;   \
+	VSRAVI   SHIFT, V19, V19; \
+	VSETVLI  X10, E16, MF2, TA, MA, X7; \
+	VNSRLWI  $0, V19, V18;    \
+	VSE16V   V18, (X12);      \
+	VSETVLI  X10, E32, M1, TA, MA, X7
+
+// func sgrFinish1RVV(tmp *int16, src *uint8, a0, a1, a2 *int32, b0, b1, b2 *int16, n int)
+TEXT ·sgrFinish1RVV(SB), NOSPLIT, $0-72
+	MOV tmp+0(FP), X12
+	MOV src+8(FP), X11
+	MOV a0+16(FP), X18
+	MOV a1+24(FP), X19
+	MOV a2+32(FP), X20
+	MOV b0+40(FP), X21
+	MOV b1+48(FP), X22
+	MOV b2+56(FP), X23
+	MOV n+64(FP), X13
+	MOV $256, X14
+
+loop1:
+	VSETVLI X13, E32, M1, TA, MA, X10
+
+	ATAP(4, X19, V19)
+	ATAP(0, X19, V1)
+	VADDVV V1, V19, V19
+	ATAP(8, X19, V1)
+	VADDVV V1, V19, V19
+	ATAP(4, X18, V1)
+	VADDVV V1, V19, V19
+	ATAP(4, X20, V1)
+	VADDVV V1, V19, V19
+	ATAP(0, X18, V2)
+	ATAP(0, X20, V1)
+	VADDVV V1, V2, V2
+	ATAP(8, X18, V1)
+	VADDVV V1, V2, V2
+	ATAP(8, X20, V1)
+	VADDVV V1, V2, V2
+	VSLLVI $2, V19, V19
+	VSLLVI $1, V2, V3
+	VADDVV V3, V2, V2
+	VADDVV V2, V19, V19
+
+	BTAP(2, X22, V20)
+	BTAP(0, X22, V1)
+	VADDVV V1, V20, V20
+	BTAP(4, X22, V1)
+	VADDVV V1, V20, V20
+	BTAP(2, X21, V1)
+	VADDVV V1, V20, V20
+	BTAP(2, X23, V1)
+	VADDVV V1, V20, V20
+	BTAP(0, X21, V2)
+	BTAP(0, X23, V1)
+	VADDVV V1, V2, V2
+	BTAP(4, X21, V1)
+	VADDVV V1, V2, V2
+	BTAP(4, X23, V1)
+	VADDVV V1, V2, V2
+	VSLLVI $2, V20, V20
+	VSLLVI $1, V2, V3
+	VADDVV V3, V2, V2
+	VADDVV V2, V20, V20
+
+	STORE($9)
+
+	SLLI $2, X10, X6
+	ADD  X6, X18, X18
+	ADD  X6, X19, X19
+	ADD  X6, X20, X20
+	SLLI $1, X10, X6
+	ADD  X6, X21, X21
+	ADD  X6, X22, X22
+	ADD  X6, X23, X23
+	ADD  X6, X12, X12
+	ADD  X10, X11, X11
+	SUB  X10, X13, X13
+	BNE  X0, X13, loop1
+
+	RET
+
+// func sgrFinish2RowRVV(tmp *int16, src *uint8, a0, a1 *int32, b0, b1 *int16, n int)
+TEXT ·sgrFinish2RowRVV(SB), NOSPLIT, $0-56
+	MOV tmp+0(FP), X12
+	MOV src+8(FP), X11
+	MOV a0+16(FP), X18
+	MOV a1+24(FP), X19
+	MOV b0+32(FP), X21
+	MOV b1+40(FP), X22
+	MOV n+48(FP), X13
+	MOV $256, X14
+
+loop2:
+	VSETVLI X13, E32, M1, TA, MA, X10
+
+	ATAP(4, X18, V19)
+	ATAP(4, X19, V1)
+	VADDVV V1, V19, V19
+	ATAP(0, X18, V2)
+	ATAP(0, X19, V1)
+	VADDVV V1, V2, V2
+	ATAP(8, X18, V1)
+	VADDVV V1, V2, V2
+	ATAP(8, X19, V1)
+	VADDVV V1, V2, V2
+	VSLLVI $2, V19, V3
+	VSLLVI $1, V19, V19
+	VADDVV V3, V19, V19
+	VSLLVI $2, V2, V3
+	VADDVV V3, V2, V2
+	VADDVV V2, V19, V19
+
+	BTAP(2, X21, V20)
+	BTAP(2, X22, V1)
+	VADDVV V1, V20, V20
+	BTAP(0, X21, V2)
+	BTAP(0, X22, V1)
+	VADDVV V1, V2, V2
+	BTAP(4, X21, V1)
+	VADDVV V1, V2, V2
+	BTAP(4, X22, V1)
+	VADDVV V1, V2, V2
+	VSLLVI $2, V20, V3
+	VSLLVI $1, V20, V20
+	VADDVV V3, V20, V20
+	VSLLVI $2, V2, V3
+	VADDVV V3, V2, V2
+	VADDVV V2, V20, V20
+
+	STORE($9)
+
+	SLLI $2, X10, X6
+	ADD  X6, X18, X18
+	ADD  X6, X19, X19
+	SLLI $1, X10, X6
+	ADD  X6, X21, X21
+	ADD  X6, X22, X22
+	ADD  X6, X12, X12
+	ADD  X10, X11, X11
+	SUB  X10, X13, X13
+	BNE  X0, X13, loop2
+
+	RET
+
+// func sgrFinish2MidRVV(tmp *int16, src *uint8, a1 *int32, b1 *int16, n int)
+TEXT ·sgrFinish2MidRVV(SB), NOSPLIT, $0-40
+	MOV tmp+0(FP), X12
+	MOV src+8(FP), X11
+	MOV a1+16(FP), X19
+	MOV b1+24(FP), X22
+	MOV n+32(FP), X13
+	MOV $128, X14
+
+loop3:
+	VSETVLI X13, E32, M1, TA, MA, X10
+
+	ATAP(4, X19, V19)
+	ATAP(0, X19, V2)
+	ATAP(8, X19, V1)
+	VADDVV V1, V2, V2
+	VSLLVI $2, V19, V3
+	VSLLVI $1, V19, V19
+	VADDVV V3, V19, V19
+	VSLLVI $2, V2, V3
+	VADDVV V3, V2, V2
+	VADDVV V2, V19, V19
+
+	BTAP(2, X22, V20)
+	BTAP(0, X22, V2)
+	BTAP(4, X22, V1)
+	VADDVV V1, V2, V2
+	VSLLVI $2, V20, V3
+	VSLLVI $1, V20, V20
+	VADDVV V3, V20, V20
+	VSLLVI $2, V2, V3
+	VADDVV V3, V2, V2
+	VADDVV V2, V20, V20
+
+	STORE($8)
+
+	SLLI $2, X10, X6
+	ADD  X6, X19, X19
+	SLLI $1, X10, X6
+	ADD  X6, X22, X22
+	ADD  X6, X12, X12
+	ADD  X10, X11, X11
+	SUB  X10, X13, X13
+	BNE  X0, X13, loop3
+
+	RET

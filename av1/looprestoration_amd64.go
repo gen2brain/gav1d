@@ -102,3 +102,21 @@ func wienerV16AVX2Row(p []uint16, pOff int, hor []uint16, rows *[7]int,
 	}
 	wienerVRow(p, pOff+n, hor, &tail, fv, w-n, bitdepthMax)
 }
+
+func lrInit[P pixel, C coef](l *lrContext[P, C]) {
+	if !hasAVX2 {
+		return
+	}
+
+	if l8, ok := any(l).(*lrContext[uint8, int16]); ok {
+		l8.wienerH = wienerH8AVX2Row
+		l8.wienerV = wienerV8AVX2Row
+		l8.finish1 = sgrFinish1AVX2Row
+		l8.finish2 = sgrFinish2AVX2Row
+	}
+
+	if l16, ok := any(l).(*lrContext[uint16, int32]); ok {
+		l16.wienerH = wienerH16AVX2Row
+		l16.wienerV = wienerV16AVX2Row
+	}
+}

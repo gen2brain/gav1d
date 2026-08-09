@@ -25,11 +25,6 @@ type dspContext[P pixel] struct {
 	put8tap func(dst []P, dstOff, dstStride int, src []P, srcOff, srcStride,
 		w, h, mx, my, filterType int, bitdepthMax int32)
 
-	wienerH func(dst []uint16, dstOff int, src []P, srcOff, n int,
-		fh *[8]int16, rnd int32, shift int, limit int32)
-	wienerV func(p []P, pOff int, hor []uint16, rows *[7]int,
-		fv *[8]int16, w int, bitdepthMax int32)
-
 	itxClip func(tmp []int32, rnd int32, shift int, lo, hi int32)
 	itxAdd  func(dst []P, dstOff, stride int, tmp []int32, w, h int, bitdepthMax int32)
 	itxCol  func(tmp []int32, w, h, txtp int, lo, hi int32) bool
@@ -53,8 +48,6 @@ func newDspGo[P pixel]() *dspContext[P] {
 		fgApplyRow:   fgApplyRow[P],
 		fguvApplyRow: fguvApplyRow[P],
 		put8tap:      put8tap[P],
-		wienerH:      wienerHRow[P],
-		wienerV:      wienerVRow[P],
 		itxClip:      itxClipGo,
 		itxAdd:       itxAddGo[P],
 	}

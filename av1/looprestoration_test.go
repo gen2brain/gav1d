@@ -45,7 +45,7 @@ func runLR[P pixel, C coef](b, iter, kind, w, h, edges int,
 
 	base := lrPad*lrStride + lrPad
 	lpfBase := 2*lrStride + lrPad
-	d := newDsp[P]()
+	d := newLr[P, C]()
 
 	switch kind {
 	case 0:
@@ -173,7 +173,7 @@ func wienerTaps(iter, k int, bitdepthMax int32) looprestorationParams {
 	return params
 }
 
-func runWiener[P pixel, C coef](d *dspContext[P], b, iter, w, h, edges int,
+func runWiener[P pixel, C coef](d *lrContext[P, C], b, iter, w, h, edges int,
 	params *looprestorationParams, bitdepthMax int32,
 ) []P {
 	dst, lpf, left := lrBuffers[P](b, iter, bitdepthMax)
@@ -206,7 +206,7 @@ func TestWienerAsm(t *testing.T) {
 func wienerAsmDepth[P pixel, C coef](t *testing.T, bitdepthMax int32) int {
 	t.Helper()
 
-	ref, got := newDspGo[P](), newDsp[P]()
+	ref, got := newLrGo[P, C](), newLr[P, C]()
 	b := (bitdepthFromMax(bitdepthMax) - 8) / 2
 	widths := []int{1, 2, 5, 6, 7, 8, 15, 16, 17, 31, 32, 33, 47, 64, 253, 256}
 	heights := []int{1, 2, 3, 4, 5, 8, 17, 48}
@@ -226,6 +226,93 @@ func wienerAsmDepth[P pixel, C coef](t *testing.T, bitdepthMax int32) int {
 						t.Fatalf("bpc=%d %dx%d edges=%d iter=%d: buf[%d] = %d, want %d",
 							bitdepthFromMax(bitdepthMax), w, h, edges, iter,
 							i, have[i], want[i])
+					}
+					cases++
+				}
+			}
+		}
+	}
+
+	return cases
+}
+
+func runSgr[P pixel, C coef](d *lrContext[P, C], b, iter, kind, w, h, edges int,
+	params *looprestorationParams, bitdepthMax int32,
+) []P {
+	dst, lpf, left := lrBuffers[P](b, iter, bitdepthMax)
+
+	base := lrPad*lrStride + lrPad
+	lpfBase := 2*lrStride + lrPad
+
+	switch kind {
+	case 0:
+		lrSgr5x5[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+			params, edges, bitdepthMax)
+	case 1:
+		lrSgr3x3[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+			params, edges, bitdepthMax)
+	default:
+		lrSgrMix[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+			params, edges, bitdepthMax)
+	}
+
+	return dst
+}
+
+// TestSgrAsm checks the architecture-specific self-guided restoration against
+// the pure Go one over every radius pair the spec allows, each edge
+// combination, and widths that straddle the vector width. The whole buffer is
+// compared, so a kernel that writes outside the unit fails.
+func TestSgrAsm(t *testing.T) {
+	cases := 0
+	for _, bpc := range []int{8, 10, 12} {
+		bitdepthMax := int32(1<<bpc - 1)
+		if bpc == 8 {
+			cases += sgrAsmDepth[uint8, int16](t, bitdepthMax)
+
+			continue
+		}
+		cases += sgrAsmDepth[uint16, int32](t, bitdepthMax)
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+func sgrAsmDepth[P pixel, C coef](t *testing.T, bitdepthMax int32) int {
+	t.Helper()
+
+	ref, got := newLrGo[P, C](), newLr[P, C]()
+	b := (bitdepthFromMax(bitdepthMax) - 8) / 2
+	widths := []int{1, 2, 7, 8, 9, 15, 16, 17, 31, 33, 64, 253, 256}
+	heights := []int{1, 2, 3, 4, 5, 8, 33}
+	cases := 0
+
+	for idx := range sgrParams {
+		sp := &sgrParams[idx]
+		kind := b2i(sp[0] != 0) + b2i(sp[1] != 0)*2 - 1
+		if kind < 0 {
+			continue
+		}
+		for iter := range 2 {
+			var params looprestorationParams
+			params.sgr.s0 = uint32(sp[0])
+			params.sgr.s1 = uint32(sp[1])
+			params.sgr.w0 = int16(lrGen(iter, 11, idx) % 97)
+			params.sgr.w1 = 128 - params.sgr.w0 - int16(lrGen(iter, 12, idx)%97)
+
+			for k, w := range widths {
+				h := heights[k%len(heights)]
+				for edges := range 16 {
+					want := runSgr[P, C](ref, b, iter, kind, w, h, edges, &params, bitdepthMax)
+					have := runSgr[P, C](got, b, iter, kind, w, h, edges, &params, bitdepthMax)
+					for i := range want {
+						if have[i] == want[i] {
+							continue
+						}
+						t.Fatalf("bpc=%d kind=%d %dx%d edges=%d idx=%d iter=%d: "+
+							"buf[%d] = %d, want %d",
+							bitdepthFromMax(bitdepthMax), kind, w, h, edges, idx,
+							iter, i, have[i], want[i])
 					}
 					cases++
 				}
