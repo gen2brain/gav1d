@@ -49,7 +49,8 @@ type blockGeom struct {
 func (t *taskContext[P, C]) decodeB(bl, bs, bp int, intraEdgeFlags int) error {
 	ts := t.ts
 	f := t.f
-	var b av1Block
+	b := &t.blk
+	*b = av1Block{}
 	bDim := &blockDimensions[bs]
 	bx4, by4 := t.bx&31, t.by&31
 	ssVer := b2i(f.layout == pixelLayoutI420)
@@ -332,13 +333,13 @@ func (t *taskContext[P, C]) decodeB(bl, bs, bp int, intraEdgeFlags int) error {
 			if b.yMode == dcPred {
 				palCtx := b2i(t.a.palSz[bx4] > 0) + b2i(t.l.palSz[by4] > 0)
 				if ts.msac.boolAdapt(ts.cdf.m.palY[szCtx][palCtx][:]) != 0 {
-					readPalPlane(t, &b, 0, szCtx, bx4, by4)
+					readPalPlane(t, b, 0, szCtx, bx4, by4)
 				}
 			}
 			if hasChroma && b.uvMode == dcPred {
 				palCtx := b2i(b.palSz[0] > 0)
 				if ts.msac.boolAdapt(ts.cdf.m.palUv[palCtx][:]) != 0 {
-					readPalUv(t, &b, szCtx, bx4, by4)
+					readPalUv(t, b, szCtx, bx4, by4)
 				}
 			}
 		}
@@ -378,7 +379,7 @@ func (t *taskContext[P, C]) decodeB(bl, bs, bp int, intraEdgeFlags int) error {
 			}
 		}
 
-		f.reconIntra(t, bs, intraEdgeFlags, &b)
+		f.reconIntra(t, bs, intraEdgeFlags, b)
 
 		if f.lfEnabled {
 			var auv, luv []uint8
@@ -452,10 +453,10 @@ func (t *taskContext[P, C]) decodeB(bl, bs, bp int, intraEdgeFlags int) error {
 			haveTop: haveTop, haveLeft: haveLeft, hasChroma: hasChroma,
 		}
 		if isKeyOrIntra(f.frameHdr) {
-			if err := t.decodeBIntrabc(&b, bs, intraEdgeFlags, segPred, &g); err != nil {
+			if err := t.decodeBIntrabc(b, bs, intraEdgeFlags, segPred, &g); err != nil {
 				return err
 			}
-		} else if err := t.decodeBInter(&b, bs, intraEdgeFlags, seg, segPred, &g); err != nil {
+		} else if err := t.decodeBInter(b, bs, intraEdgeFlags, seg, segPred, &g); err != nil {
 			return err
 		}
 	}

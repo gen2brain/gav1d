@@ -183,6 +183,7 @@ type taskContext[P pixel, C coef] struct {
 
 	cf           []C
 	scratch      scratch[P]
+	blk          av1Block
 	curSbCdefIdx []int8
 	lfMask       *av1Filter
 
