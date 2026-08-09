@@ -8,9 +8,8 @@ DATA fgOnes<>+16(SB)/8, $0x0101010101010101
 DATA fgOnes<>+24(SB)/8, $0x0101010101010101
 GLOBL fgOnes<>(SB), RODATA|NOPTR, $32
 
-// NOISE turns sixteen scaling indices in Y6 into the filtered pixels, given the
-// source words in Y0. The multiply-high replaces the rounding shift, which
-// would overflow a word before it could be shifted back down.
+// NOISE applies the gathered scaling to the grain. The multiply-high replaces
+// the rounding shift, which would overflow a word.
 #define NOISE                      \
 	VPCMPEQD   Y3, Y3, Y3;     \
 	VPGATHERDD Y3, (BX)(Y1*1), Y4; \
@@ -67,8 +66,8 @@ loop:
 	TESTQ CX, CX
 	JZ    done
 
-	// Finish with a block overlapping the one just done. Every pixel is an
-	// independent function of src and grain, and dst is never the source.
+	// Overlap the block just done; every pixel is independent and dst is
+	// never the source.
 	MOVQ $16, AX
 	SUBQ CX, AX
 	SUBQ AX, SI
@@ -84,8 +83,8 @@ done:
 
 // func fguvApplyRowAVX2(dst, src, luma, scaling *uint8, grain *int16, n, mul, minValue, maxValue int, p *fguvParams)
 //
-// Eight pixels an iteration, not sixteen: a subsampled block is only sixteen
-// wide, and the overlapped column leaves fifteen.
+// Eight an iteration, not sixteen: a subsampled block minus its overlapped
+// column leaves fifteen.
 TEXT ·fguvApplyRowAVX2(SB), NOSPLIT, $0-80
 	MOVQ dst+0(FP), DI
 	MOVQ src+8(FP), SI

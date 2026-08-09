@@ -6,9 +6,8 @@ DATA cdefRound<>+0(SB)/8, $0x0008000800080008
 DATA cdefRound<>+8(SB)/8, $0x0008000800080008
 GLOBL cdefRound<>(SB), RODATA|NOPTR, $16
 
-// TAP accumulates one neighbour into the running sum. X0 is the pixel, X1 the
-// sum, X12 the fill value that padding writes outside the frame; a tap that
-// reads it must contribute nothing, which the mask in X5 forces.
+// TAP accumulates one neighbour. X12 is the out-of-frame fill, which the mask
+// in X5 forces to contribute nothing.
 #define TAP(OFF, THR, SH, MUL)     \
 	VMOVDQU  (SI)(OFF*2), X4;  \
 	VPCMPEQW X12, X4, X5;      \
@@ -22,9 +21,8 @@ GLOBL cdefRound<>(SB), RODATA|NOPTR, $16
 	VPMULLW  MUL, X14, X14;    \
 	VPADDW   X14, X1, X1
 
-// TAPC also tracks the neighbourhood range the result is clipped to. The fill
-// value loses both comparisons on its own: it is the smallest signed word, and
-// unsigned it is larger than any pixel.
+// TAPC also tracks the range the result is clipped to; the fill loses both
+// comparisons on its own.
 #define TAPC(OFF, THR, SH, MUL)    \
 	TAP(OFF, THR, SH, MUL);    \
 	VPMAXSW  X4, X2, X2;       \
@@ -50,7 +48,6 @@ GLOBL cdefRound<>(SB), RODATA|NOPTR, $16
 	MOVLQSX 56(BX), AX;            \
 	MOVLQSX 60(BX), CX
 
-// ROUND turns the accumulated sum into the filtered pixel, still as words.
 #define ROUND                          \
 	VPSRAW  $15, X1, X4;           \
 	VPADDW  X4, X1, X1;            \

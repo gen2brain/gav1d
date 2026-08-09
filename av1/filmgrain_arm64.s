@@ -7,8 +7,7 @@
 #define SQRDMULH(Vd, Vn, Vm) WORD $(0x6E60B400 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
 #define SQXTUN(Vd, Vn)       WORD $(0x2E212800 | ((Vn) << 5) | (Vd))
 
-// LOOKUP loads scaling[src[I]] shifted up by lshift into lane I. NEON has no
-// gather, so the table lookup stays scalar.
+// LOOKUP loads scaling[src[I]] shifted up by lshift; NEON has no gather.
 #define LOOKUP(I)             \
 	MOVBU I(R1), R8;      \
 	MOVBU (R2)(R8), R9;   \
@@ -17,9 +16,8 @@
 
 // func fgApplyRowNEON(dst, src, scaling *uint8, grain *int16, n, lshift, minValue, maxValue int)
 //
-// Eight pixels an iteration. Pre-shifting the scaling value by 15-lshift turns
-// the rounding shift into a rounding multiply-high, which SQRDMULH does in one
-// instruction without overflowing a halfword.
+// Pre-shifting the scaling value turns the rounding shift into SQRDMULH, which
+// cannot overflow a halfword.
 TEXT ·fgApplyRowNEON(SB), NOSPLIT, $0-64
 	MOVD dst+0(FP), R0
 	MOVD src+8(FP), R1
@@ -64,8 +62,8 @@ loop:
 
 	CBZ R4, done
 
-	// Finish with a block overlapping the one just done. Every pixel is an
-	// independent function of src and grain, and dst is never the source.
+	// Overlap the block just done; every pixel is independent and dst is
+	// never the source.
 	MOVD $8, R10
 	SUB  R4, R10, R10
 	SUB  R10, R0
@@ -78,10 +76,8 @@ loop:
 done:
 	RET
 
-// UVLOOKUP computes the chroma scaling index for lane I and loads the shifted
-// table entry into it. NEON has no gather, so the index arithmetic is scalar
-// too, which is why no widening multiply is needed here. Branchless: sx folds
-// into the average, and a conditional select picks between it and the mix.
+// UVLOOKUP builds the chroma scaling index for lane I. The gather is scalar
+// anyway, so the index is too, which avoids a widening multiply.
 #define UVLOOKUP(I)            \
 	MOVD  $I, R13;         \
 	LSL   R7, R13, R13;    \

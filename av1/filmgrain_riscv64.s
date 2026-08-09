@@ -4,9 +4,8 @@
 
 // func fgApplyRowRVV(dst, src, scaling *uint8, grain *int16, n, lshift, minValue, maxValue int)
 //
-// Vector length agnostic: vsetvli clamps the last iteration, so there is no
-// tail to fix up. Pre-shifting the scaling value by 15-lshift turns the
-// rounding shift into vsmul, which rounds and narrows in one instruction.
+// Length agnostic: vsetvli clamps the last iteration, so there is no tail.
+// Pre-shifting the scaling value turns the rounding shift into vsmul.
 TEXT ·fgApplyRowRVV(SB), NOSPLIT, $0-64
 	MOV dst+0(FP), X10
 	MOV src+8(FP), X11
@@ -55,8 +54,8 @@ loop:
 
 // func fguvApplyRowRVV(dst, src, luma, scaling *uint8, grain *int16, n, lshift, minValue, maxValue int, p *fguvParams)
 //
-// As above, but the scaling index comes from the co-located luma. A segment
-// load splits the subsampled luma pairs into even and odd for the average.
+// As above, but the index comes from the co-located luma; a segment load
+// splits the subsampled pairs for the average.
 TEXT ·fguvApplyRowRVV(SB), NOSPLIT, $0-80
 	MOV dst+0(FP), X10
 	MOV src+8(FP), X11

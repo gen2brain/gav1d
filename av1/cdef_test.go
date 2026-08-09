@@ -69,25 +69,27 @@ func TestCdefAsm(t *testing.T) {
 	cases := 0
 
 	for iter := range 4 {
-		for _, s := range shapes {
-			w, h := s[0], s[1]
-			for edges := range 16 {
-				for _, pri := range []int{0, 1, 5, 15} {
-					for _, sec := range []int{0, 1, 2, 4} {
-						for dir := range 8 {
-							for _, damping := range []int{3, 6} {
-								ref, got := cdefAsmCase(d, iter, w, h, edges,
-									pri, sec, dir, damping)
-								for i := range ref {
-									if got[i] == ref[i] {
-										continue
+		for _, flat := range []bool{false, true} {
+			for _, s := range shapes {
+				w, h := s[0], s[1]
+				for edges := range 16 {
+					for _, pri := range []int{0, 1, 5, 15} {
+						for _, sec := range []int{0, 1, 2, 4} {
+							for dir := range 8 {
+								for _, damping := range []int{3, 6} {
+									ref, got := cdefAsmCase(d, iter, w, h, edges,
+										pri, sec, dir, damping, flat)
+									for i := range ref {
+										if got[i] == ref[i] {
+											continue
+										}
+										t.Fatalf("%dx%d flat=%v edges=%d pri=%d sec=%d dir=%d damping=%d: "+
+											"buf[%d] = %d, want %d",
+											w, h, flat, edges, pri, sec, dir, damping,
+											i, got[i], ref[i])
 									}
-									t.Fatalf("%dx%d edges=%d pri=%d sec=%d dir=%d damping=%d: "+
-										"buf[%d] = %d, want %d",
-										w, h, edges, pri, sec, dir, damping,
-										i, got[i], ref[i])
+									cases++
 								}
-								cases++
 							}
 						}
 					}
@@ -99,17 +101,28 @@ func TestCdefAsm(t *testing.T) {
 	t.Logf("%d cases", cases)
 }
 
-func cdefAsmCase(d *dspContext[uint8], iter, w, h, edges, pri, sec, dir, damping int,
+// cdefAsmCase builds one block. The flat variant keeps the neighbourhood tight,
+// which is what makes the clip to its range actually bind.
+func cdefAsmCase(d *dspContext[uint8], iter, w, h, edges, pri, sec, dir, damping int, flat bool,
 ) (ref, got []uint8) {
 	const bitdepthMax = 255
 
+	gen := func(kind, i int) uint8 {
+		v := cdefGen(iter, kind, i)
+		if flat {
+			return uint8(128 + v&7)
+		}
+
+		return uint8(v & bitdepthMax)
+	}
+
 	got = make([]uint8, cdefRows*cdefStride)
 	for i := range got {
-		got[i] = uint8(cdefGen(iter, 0, i) & bitdepthMax)
+		got[i] = gen(0, i)
 	}
 	left := make([]uint8, 16)
 	for i := range left {
-		left[i] = uint8(cdefGen(iter, 1, i) & bitdepthMax)
+		left[i] = gen(1, i)
 	}
 	ref = append([]uint8(nil), got...)
 
