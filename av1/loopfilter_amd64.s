@@ -15,6 +15,10 @@ DATA lpfWord<>+0(SB)/8, $0x0d0c090805040100
 DATA lpfWord<>+8(SB)/8, $0x0f0e0b0a07060302
 GLOBL lpfWord<>(SB), RODATA|NOPTR, $16
 
+DATA lpfWordInv<>+0(SB)/8, $0x0b0a030209080100
+DATA lpfWordInv<>+8(SB)/8, $0x0f0e07060d0c0504
+GLOBL lpfWordInv<>(SB), RODATA|NOPTR, $16
+
 #define E      0(DI)
 #define I      4(DI)
 #define H      8(DI)
@@ -489,3 +493,220 @@ done:
 	VZEROUPPER
 	RET
 
+
+// func lpf16AVX2(dst *uint16, stridea, strideb int, p *lpfParams)
+TEXT ·lpf16AVX2(SB), 0, $832-32
+	MOVQ dst+0(FP), SI
+	MOVQ stridea+8(FP), R8
+	MOVQ strideb+16(FP), R9
+	MOVQ p+24(FP), DI
+	LEAQ 216(SP), BX
+	LEAQ (R8)(R8*2), R10
+
+	MOVL WD, AX
+	MOVQ $-2, R12
+	MOVQ $4, R13
+	CMPL AX, $4
+	JLE  spanset
+	MOVQ $-3, R12
+	MOVQ $6, R13
+	CMPL AX, $6
+	JLE  spanset
+	MOVQ $-4, R12
+	MOVQ $8, R13
+	CMPL AX, $16
+	JLT  spanset
+	MOVQ $-7, R12
+	MOVQ $14, R13
+
+spanset:
+	CMPQ R8, $1
+	JEQ  gathercols
+
+	VMOVDQU lpfWord<>(SB), X8
+	CMPL    AX, $16
+	JGE     gatherwide
+	MOVQ    $-4, R12
+	MOVQ    $8, R13
+	VMOVDQU -8(SI), X0
+	VMOVDQU -8(SI)(R8*2), X1
+	VMOVDQU -8(SI)(R8*4), X2
+	VMOVDQU -8(SI)(R10*2), X3
+	TRANSPOSE4(X0, X1, X2, X3, X4, X5, X6, X7)
+	VPSHUFB X8, X0, X0
+	VPSHUFB X8, X1, X1
+	VPSHUFB X8, X2, X2
+	VPSHUFB X8, X3, X3
+	VMOVDQU X0, 520(BX)
+	VMOVDQU X1, 536(BX)
+	VMOVDQU X2, 552(BX)
+	VMOVDQU X3, 568(BX)
+	JMP     widen
+
+gatherwide:
+	MOVQ    $-7, R12
+	MOVQ    $16, R13
+	VMOVDQU -14(SI), X0
+	VMOVDQU -14(SI)(R8*2), X1
+	VMOVDQU -14(SI)(R8*4), X2
+	VMOVDQU -14(SI)(R10*2), X3
+	TRANSPOSE4(X0, X1, X2, X3, X4, X5, X6, X7)
+	VPSHUFB X8, X0, X0
+	VPSHUFB X8, X1, X1
+	VPSHUFB X8, X2, X2
+	VPSHUFB X8, X3, X3
+	VMOVDQU X0, 496(BX)
+	VMOVDQU X1, 512(BX)
+	VMOVDQU X2, 528(BX)
+	VMOVDQU X3, 544(BX)
+	VMOVDQU 2(SI), X0
+	VMOVDQU 2(SI)(R8*2), X1
+	VMOVDQU 2(SI)(R8*4), X2
+	VMOVDQU 2(SI)(R10*2), X3
+	TRANSPOSE4(X0, X1, X2, X3, X4, X5, X6, X7)
+	VPSHUFB X8, X0, X0
+	VPSHUFB X8, X1, X1
+	VPSHUFB X8, X2, X2
+	VPSHUFB X8, X3, X3
+	VMOVDQU X0, 560(BX)
+	VMOVDQU X1, 576(BX)
+	VMOVDQU X2, 592(BX)
+	VMOVDQU X3, 608(BX)
+	JMP     widen
+
+gathercols:
+	MOVQ  R12, AX
+	IMULQ R9, AX
+	LEAQ  (SI)(AX*2), CX
+	LEAQ  552(BX), DX
+	LEAQ  (DX)(R12*8), DX
+	MOVQ  R13, R14
+
+gathercolsloop:
+	MOVQ (CX), AX
+	MOVQ AX, (DX)
+	LEAQ (CX)(R9*2), CX
+	ADDQ $8, DX
+	DECQ R14
+	JNZ  gathercolsloop
+
+widen:
+	LEAQ 552(BX), CX
+	LEAQ (CX)(R12*8), CX
+	MOVQ R12, AX
+	SHLQ $4, AX
+	LEAQ (BX)(AX*1), DX
+	MOVQ R13, R14
+
+widenloop:
+	VPMOVZXWD (CX), X0
+	VMOVDQU   X0, (DX)
+	VMOVDQU   X0, 320(DX)
+	ADDQ      $8, CX
+	ADDQ      $16, DX
+	DECQ      R14
+	JNZ       widenloop
+
+	LPFBODY
+
+scatter:
+	MOVL WD, AX
+	MOVQ $-2, R12
+	MOVQ $4, R13
+	CMPL AX, $6
+	JLE  scatterset
+	MOVQ $-3, R12
+	MOVQ $6, R13
+	CMPL AX, $16
+	JLT  scatterset
+	MOVQ $-6, R12
+	MOVQ $12, R13
+
+scatterset:
+	CMPQ R8, $1
+	JEQ  scattercols
+
+	LEAQ 552(BX), CX
+	LEAQ (CX)(R12*8), CX
+	JMP  packloop
+
+scattercols:
+	MOVQ  R12, AX
+	IMULQ R9, AX
+	LEAQ  (SI)(AX*2), CX
+
+packloop:
+	MOVQ      R12, AX
+	SHLQ      $4, AX
+	LEAQ      (BX)(AX*1), DX
+	ADDQ      $320, DX
+	VMOVDQU   (DX), X0
+	VPACKUSDW X0, X0, X0
+	VMOVQ     X0, (CX)
+	INCQ      R12
+	CMPQ      R8, $1
+	JEQ       packnextcol
+	ADDQ      $8, CX
+	JMP       packnext
+
+packnextcol:
+	LEAQ (CX)(R9*2), CX
+
+packnext:
+	DECQ R13
+	JNZ  packloop
+
+	CMPQ R8, $1
+	JEQ  done
+
+	VMOVDQU lpfWordInv<>(SB), X8
+	MOVL    WD, AX
+	CMPL    AX, $16
+	JGE     scatterwide
+
+	VMOVDQU 520(BX), X0
+	VMOVDQU 536(BX), X1
+	VMOVDQU 552(BX), X2
+	VMOVDQU 568(BX), X3
+	VPSHUFB X8, X0, X0
+	VPSHUFB X8, X1, X1
+	VPSHUFB X8, X2, X2
+	VPSHUFB X8, X3, X3
+	TRANSPOSE4(X0, X1, X2, X3, X4, X5, X6, X7)
+	VMOVDQU X0, -8(SI)
+	VMOVDQU X1, -8(SI)(R8*2)
+	VMOVDQU X2, -8(SI)(R8*4)
+	VMOVDQU X3, -8(SI)(R10*2)
+	JMP     done
+
+scatterwide:
+	VMOVDQU 496(BX), X0
+	VMOVDQU 512(BX), X1
+	VMOVDQU 528(BX), X2
+	VMOVDQU 544(BX), X3
+	VPSHUFB X8, X0, X0
+	VPSHUFB X8, X1, X1
+	VPSHUFB X8, X2, X2
+	VPSHUFB X8, X3, X3
+	TRANSPOSE4(X0, X1, X2, X3, X4, X5, X6, X7)
+	VMOVDQU X0, -14(SI)
+	VMOVDQU X1, -14(SI)(R8*2)
+	VMOVDQU X2, -14(SI)(R8*4)
+	VMOVDQU X3, -14(SI)(R10*2)
+	VMOVDQU 560(BX), X0
+	VMOVDQU 576(BX), X1
+	VMOVDQU 592(BX), X2
+	VMOVDQU 608(BX), X3
+	VPSHUFB X8, X0, X0
+	VPSHUFB X8, X1, X1
+	VPSHUFB X8, X2, X2
+	VPSHUFB X8, X3, X3
+	TRANSPOSE4(X0, X1, X2, X3, X4, X5, X6, X7)
+	VMOVDQU X0, 2(SI)
+	VMOVDQU X1, 2(SI)(R8*2)
+	VMOVDQU X2, 2(SI)(R8*4)
+	VMOVDQU X3, 2(SI)(R10*2)
+
+done:
+	VZEROUPPER
+	RET

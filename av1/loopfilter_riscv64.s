@@ -149,6 +149,149 @@
 #define OQ4 64
 #define OQ5 80
 
+// LPFBODY masks the lanes and layers the filters, working in 32-bit lanes
+// throughout, which is why both bit depths share it.
+#define LPFBODY \
+	BCAST(I, V21); \
+	BCAST(H, V22); \
+	GTA(P1, P0, V21, V15); \
+	GTA(P1, P0, V22, V16); \
+	ACCGT(Q1, Q0, V21, V18, V15); \
+	ACCGT(Q1, Q0, V22, V18, V16); \
+	VSUBVV  Q0, P0, V18; \
+	VRSUBVX X0, V18, V19; \
+	VMAXVV  V19, V18, V18; \
+	VADDVV  V18, V18, V18; \
+	VSUBVV  Q1, P1, V19; \
+	VRSUBVX X0, V19, V20; \
+	VMAXVV  V20, V19, V19; \
+	VSRLVI  $1, V19, V19; \
+	VADDVV  V19, V18, V18; \
+	BCAST(E, V23); \
+	VSUBVV  V18, V23, V18; \
+	VSRAVI  $31, V18, V18; \
+	VORVV   V18, V15, V15; \
+	MOV  $4, X6; \
+	BGE  X6, X18, fmdone; \
+	ACCGT(P1, P2, V21, V18, V15); \
+	ACCGT(Q1, Q2, V21, V18, V15); \
+	MOV  $6, X6; \
+	BGE  X6, X18, fmdone; \
+	ACCGT(P3, P2, V21, V18, V15); \
+	ACCGT(Q3, Q2, V21, V18, V15); \
+	fmdone:; \
+	ALLSET(V15, done); \
+	MOVW   NEGLIM, X20; \
+	MOVW   LIM1, X21; \
+	VSUBVV Q1, P1, V18; \
+	CLIPD(V18, X20, X21); \
+	VANDVV V16, V18, V18; \
+	VSUBVV P0, Q0, V19; \
+	VADDVV V19, V19, V20; \
+	VADDVV V19, V20, V20; \
+	VADDVV V20, V18, V18; \
+	CLIPD(V18, X20, X21); \
+	MOVW   C4, X6; \
+	VADDVX X6, V18, V19; \
+	VMINVX X21, V19, V19; \
+	VSRAVI $3, V19, V19; \
+	MOVW   C3, X6; \
+	VADDVX X6, V18, V20; \
+	VMINVX X21, V20, V20; \
+	VSRAVI $3, V20, V20; \
+	MOVW   PIXMAX, X22; \
+	VADDVV V20, P0, V21; \
+	CLIPD(V21, X0, X22); \
+	VSUBVV V19, Q0, V22; \
+	CLIPD(V22, X0, X22); \
+	MOVW   C1, X6; \
+	VADDVX X6, V19, V23; \
+	VSRAVI $1, V23, V23; \
+	VADDVV V23, P1, V18; \
+	CLIPD(V18, X0, X22); \
+	SEL(V16, P1, V18, V20); \
+	VSUBVV V23, Q1, V18; \
+	CLIPD(V18, X0, X22); \
+	SEL(V16, Q1, V18, V19); \
+	SEL(V15, P1, V20, V18); \
+	STOREO(OP1, V18); \
+	SEL(V15, P0, V21, V18); \
+	STOREO(OP0, V18); \
+	SEL(V15, Q0, V22, V18); \
+	STOREO(OQ0, V18); \
+	SEL(V15, Q1, V19, V18); \
+	STOREO(OQ1, V18); \
+	MOV $-2, X19; \
+	MOV $4, X16; \
+	MOV $4, X6; \
+	BGE X6, X18, scatter; \
+	BCAST(FTHR, V21); \
+	VORVV V15, V15, V17; \
+	ACCGT(P0, P2, V21, V18, V17); \
+	ACCGT(P1, P0, V21, V18, V17); \
+	ACCGT(Q1, Q0, V21, V18, V17); \
+	ACCGT(Q0, Q2, V21, V18, V17); \
+	MOV   $8, X6; \
+	BLT   X18, X6, flatindone; \
+	ACCGT(P0, P3, V21, V18, V17); \
+	ACCGT(Q0, Q3, V21, V18, V17); \
+	flatindone:; \
+	ALLSET(V17, scatter); \
+	BCAST(C4, V25); \
+	MOV  $6, X6; \
+	BLT  X6, X18, eight; \
+	WIDE6(P2, P2, P1, P0, Q0, OP1); \
+	WIDE6(P2, P1, P0, Q0, Q1, OP0); \
+	WIDE6(P1, P0, Q0, Q1, Q2, OQ0); \
+	WIDE6(P0, Q0, Q1, Q2, Q2, OQ1); \
+	JMP  scatter; \
+	eight:; \
+	MOV $-3, X19; \
+	MOV $6, X16; \
+	WIDE8(P3, P3, P3, P2, P1, P0, Q0, OP2); \
+	WIDE8(P3, P3, P2, P1, P0, Q0, Q1, OP1); \
+	WIDE8(P3, P2, P1, P0, Q0, Q1, Q2, OP0); \
+	WIDE8(P2, P1, P0, Q0, Q1, Q2, Q3, OQ0); \
+	WIDE8(P1, P0, Q0, Q1, Q2, Q3, Q3, OQ1); \
+	WIDE8(P0, Q0, Q1, Q2, Q3, Q3, Q3, OQ2); \
+	MOV $16, X6; \
+	BLT X18, X6, scatter; \
+	BCAST(FTHR, V21); \
+	ACCGT(P0, P6, V21, V18, V17); \
+	ACCGT(P0, P5, V21, V18, V17); \
+	ACCGT(P0, P4, V21, V18, V17); \
+	ACCGT(Q0, Q4, V21, V18, V17); \
+	ACCGT(Q0, Q5, V21, V18, V17); \
+	ACCGT(Q0, Q6, V21, V18, V17); \
+	ALLSET(V17, scatter); \
+	VADDVV P6, P6, V26; \
+	VADDVV V26, V26, V26; \
+	VADDVV P6, V26, V26; \
+	VADDVV P6, V26, V26; \
+	VADDVV P5, V26, V26; \
+	VADDVV P4, V26, V26; \
+	VADDVV P3, V26, V26; \
+	VADDVV P2, V26, V26; \
+	VADDVV P1, V26, V26; \
+	VADDVV P0, V26, V26; \
+	VADDVV Q0, V26, V26; \
+	BCAST(C4, V25); \
+	VADDVV V25, V25, V25; \
+	TAP14(P6, P5, P4, Q1, P6, OP5); \
+	TAP14(P5, P4, P3, Q2, P6, OP4); \
+	TAP14(P4, P3, P2, Q3, P6, OP3); \
+	TAP14(P3, P2, P1, Q4, P6, OP2); \
+	TAP14(P2, P1, P0, Q5, P6, OP1); \
+	TAP14(P1, P0, Q0, Q6, P6, OP0); \
+	TAP14(P0, Q0, Q1, Q6, P5, OQ0); \
+	TAP14(Q0, Q1, Q2, Q6, P4, OQ1); \
+	TAP14(Q1, Q2, Q3, Q6, P3, OQ2); \
+	TAP14(Q2, Q3, Q4, Q6, P2, OQ3); \
+	TAP14(Q3, Q4, Q5, Q6, P1, OQ4); \
+	TAP14L(Q4, Q5, Q6, OQ5); \
+	MOV $-6, X19; \
+	MOV $12, X16;
+
 // func lpf8RVV(dst *uint8, stridea, strideb int, p *lpfParams)
 TEXT ·lpf8RVV(SB), NOSPLIT, $736-32
 	MOV  dst+0(FP), X10
@@ -242,165 +385,7 @@ widen:
 	LOADS(96, Q6)
 
 taps:
-	BCAST(I, V21)
-	BCAST(H, V22)
-	GTA(P1, P0, V21, V15)
-	GTA(P1, P0, V22, V16)
-	ACCGT(Q1, Q0, V21, V18, V15)
-	ACCGT(Q1, Q0, V22, V18, V16)
-
-	VSUBVV  Q0, P0, V18
-	VRSUBVX X0, V18, V19
-	VMAXVV  V19, V18, V18
-	VADDVV  V18, V18, V18
-	VSUBVV  Q1, P1, V19
-	VRSUBVX X0, V19, V20
-	VMAXVV  V20, V19, V19
-	VSRLVI  $1, V19, V19
-	VADDVV  V19, V18, V18
-	BCAST(E, V23)
-	VSUBVV  V18, V23, V18
-	VSRAVI  $31, V18, V18
-	VORVV   V18, V15, V15
-
-	MOV  $4, X6
-	BGE  X6, X18, fmdone
-	ACCGT(P1, P2, V21, V18, V15)
-	ACCGT(Q1, Q2, V21, V18, V15)
-	MOV  $6, X6
-	BGE  X6, X18, fmdone
-	ACCGT(P3, P2, V21, V18, V15)
-	ACCGT(Q3, Q2, V21, V18, V15)
-
-fmdone:
-	ALLSET(V15, done)
-
-	// The narrow filter runs on every lane that got this far.
-	MOVW   NEGLIM, X20
-	MOVW   LIM1, X21
-	VSUBVV Q1, P1, V18
-	CLIPD(V18, X20, X21)
-	VANDVV V16, V18, V18
-	VSUBVV P0, Q0, V19
-	VADDVV V19, V19, V20
-	VADDVV V19, V20, V20
-	VADDVV V20, V18, V18
-	CLIPD(V18, X20, X21)
-	MOVW   C4, X6
-	VADDVX X6, V18, V19
-	VMINVX X21, V19, V19
-	VSRAVI $3, V19, V19
-	MOVW   C3, X6
-	VADDVX X6, V18, V20
-	VMINVX X21, V20, V20
-	VSRAVI $3, V20, V20
-	MOVW   PIXMAX, X22
-	VADDVV V20, P0, V21
-	CLIPD(V21, X0, X22)
-	VSUBVV V19, Q0, V22
-	CLIPD(V22, X0, X22)
-	MOVW   C1, X6
-	VADDVX X6, V19, V23
-	VSRAVI $1, V23, V23
-	VADDVV V23, P1, V18
-	CLIPD(V18, X0, X22)
-	SEL(V16, P1, V18, V20)
-	VSUBVV V23, Q1, V18
-	CLIPD(V18, X0, X22)
-	SEL(V16, Q1, V18, V19)
-	SEL(V15, P1, V20, V18)
-	STOREO(OP1, V18)
-	SEL(V15, P0, V21, V18)
-	STOREO(OP0, V18)
-	SEL(V15, Q0, V22, V18)
-	STOREO(OQ0, V18)
-	SEL(V15, Q1, V19, V18)
-	STOREO(OQ1, V18)
-
-	MOV $-2, X19
-	MOV $4, X16
-
-	MOV $4, X6
-	BGE X6, X18, scatter
-
-	// flat8in decides whether the six or eight tap filter replaces it.
-	BCAST(FTHR, V21)
-	VORVV V15, V15, V17
-	ACCGT(P0, P2, V21, V18, V17)
-	ACCGT(P1, P0, V21, V18, V17)
-	ACCGT(Q1, Q0, V21, V18, V17)
-	ACCGT(Q0, Q2, V21, V18, V17)
-	MOV   $8, X6
-	BLT   X18, X6, flatindone
-	ACCGT(P0, P3, V21, V18, V17)
-	ACCGT(Q0, Q3, V21, V18, V17)
-
-flatindone:
-	ALLSET(V17, scatter)
-
-	BCAST(C4, V25)
-	MOV  $6, X6
-	BLT  X6, X18, eight
-
-	WIDE6(P2, P2, P1, P0, Q0, OP1)
-	WIDE6(P2, P1, P0, Q0, Q1, OP0)
-	WIDE6(P1, P0, Q0, Q1, Q2, OQ0)
-	WIDE6(P0, Q0, Q1, Q2, Q2, OQ1)
-	JMP  scatter
-
-eight:
-	MOV $-3, X19
-	MOV $6, X16
-	WIDE8(P3, P3, P3, P2, P1, P0, Q0, OP2)
-	WIDE8(P3, P3, P2, P1, P0, Q0, Q1, OP1)
-	WIDE8(P3, P2, P1, P0, Q0, Q1, Q2, OP0)
-	WIDE8(P2, P1, P0, Q0, Q1, Q2, Q3, OQ0)
-	WIDE8(P1, P0, Q0, Q1, Q2, Q3, Q3, OQ1)
-	WIDE8(P0, Q0, Q1, Q2, Q3, Q3, Q3, OQ2)
-
-	MOV $16, X6
-	BLT X18, X6, scatter
-
-	// flat8out narrows it once more, to the fourteen tap filter.
-	BCAST(FTHR, V21)
-	ACCGT(P0, P6, V21, V18, V17)
-	ACCGT(P0, P5, V21, V18, V17)
-	ACCGT(P0, P4, V21, V18, V17)
-	ACCGT(Q0, Q4, V21, V18, V17)
-	ACCGT(Q0, Q5, V21, V18, V17)
-	ACCGT(Q0, Q6, V21, V18, V17)
-	ALLSET(V17, scatter)
-
-	// The window starts as six copies of p6 plus the seven samples up to q0.
-	VADDVV P6, P6, V26
-	VADDVV V26, V26, V26
-	VADDVV P6, V26, V26
-	VADDVV P6, V26, V26
-	VADDVV P5, V26, V26
-	VADDVV P4, V26, V26
-	VADDVV P3, V26, V26
-	VADDVV P2, V26, V26
-	VADDVV P1, V26, V26
-	VADDVV P0, V26, V26
-	VADDVV Q0, V26, V26
-
-	BCAST(C4, V25)
-	VADDVV V25, V25, V25
-
-	TAP14(P6, P5, P4, Q1, P6, OP5)
-	TAP14(P5, P4, P3, Q2, P6, OP4)
-	TAP14(P4, P3, P2, Q3, P6, OP3)
-	TAP14(P3, P2, P1, Q4, P6, OP2)
-	TAP14(P2, P1, P0, Q5, P6, OP1)
-	TAP14(P1, P0, Q0, Q6, P6, OP0)
-	TAP14(P0, Q0, Q1, Q6, P5, OQ0)
-	TAP14(Q0, Q1, Q2, Q6, P4, OQ1)
-	TAP14(Q1, Q2, Q3, Q6, P3, OQ2)
-	TAP14(Q2, Q3, Q4, Q6, P2, OQ3)
-	TAP14(Q3, Q4, Q5, Q6, P1, OQ4)
-	TAP14L(Q4, Q5, Q6, OQ5)
-	MOV $-6, X19
-	MOV $12, X16
+	LPFBODY
 
 scatter:
 	SLLI    $4, X19, X6
@@ -438,6 +423,116 @@ scatterrows:
 	VSE8V     V10, (X8)
 	ADD       X14, X8, X8
 	VSE8V     V11, (X8)
+
+done:
+	RET
+
+// func lpf16RVV(dst *uint16, stridea, strideb int, p *lpfParams)
+TEXT ·lpf16RVV(SB), NOSPLIT, $736-32
+	MOV  dst+0(FP), X10
+	MOV  stridea+8(FP), X14
+	MOV  strideb+16(FP), X15
+	MOV  p+24(FP), X11
+	ADD  $216, X2, X12
+	ADD  $536, X2, X13
+	SLLI $1, X14, X28
+
+	MOV     $4, X17
+	VSETVLI X17, E32, M1, TA, MA, X7
+
+	MOVW WD, X18
+	MOV  $-2, X19
+	MOV  $4, X16
+	MOV  $4, X6
+	BGE  X6, X18, spanset
+	MOV  $-3, X19
+	MOV  $6, X16
+	MOV  $6, X6
+	BGE  X6, X18, spanset
+	MOV  $-4, X19
+	MOV  $8, X16
+	MOV  $16, X6
+	BLT  X18, X6, spanset
+	MOV  $-7, X19
+	MOV  $14, X16
+
+spanset:
+	MUL  X15, X19, X8
+	SLLI $1, X8, X8
+	ADD  X10, X8, X8
+	SLLI $4, X19, X9
+	ADD  X12, X9, X9
+
+gather16:
+	VSETVLI  X17, E16, MF2, TA, MA, X7
+	VLSE16V  (X8), X28, V8
+	VSETVLI  X17, E32, M1, TA, MA, X7
+	VZEXTVF2 V8, V9
+	VSE32V   V9, (X9)
+	ADD      $320, X9, X6
+	VSE32V   V9, (X6)
+	SLLI     $1, X15, X6
+	ADD      X6, X8, X8
+	ADD      $16, X9, X9
+	SUB      $1, X16, X16
+	BNE      X0, X16, gather16
+
+	LOADS(-32, P1)
+	LOADS(-16, P0)
+	LOADS(0, Q0)
+	LOADS(16, Q1)
+	MOV  $4, X6
+	BGE  X6, X18, taps16
+	LOADS(-48, P2)
+	LOADS(32, Q2)
+	MOV  $6, X6
+	BGE  X6, X18, taps16
+	LOADS(-64, P3)
+	LOADS(48, Q3)
+	MOV  $16, X6
+	BLT  X18, X6, taps16
+	LOADS(-112, P6)
+	LOADS(-96, P5)
+	LOADS(-80, P4)
+	LOADS(64, Q4)
+	LOADS(80, Q5)
+	LOADS(96, Q6)
+
+taps16:
+	LPFBODY
+
+scatter:
+	MOVW WD, X18
+	MOV  $-2, X19
+	MOV  $4, X16
+	MOV  $6, X6
+	BGE  X6, X18, scattersetx
+	MOV  $-3, X19
+	MOV  $6, X16
+	MOV  $16, X6
+	BLT  X18, X6, scattersetx
+	MOV  $-6, X19
+	MOV  $12, X16
+
+scattersetx:
+	MUL  X15, X19, X8
+	SLLI $1, X8, X8
+	ADD  X10, X8, X8
+	SLLI $4, X19, X9
+	ADD  X13, X9, X9
+
+scatterxloop:
+	VSETVLI X17, E32, M1, TA, MA, X7
+	VLE32V  (X9), V8
+	VSETVLI X17, E16, MF2, TA, MA, X7
+	VNSRLWI $0, V8, V9
+	VSSE16V V9, X28, (X8)
+	VSETVLI X17, E32, M1, TA, MA, X7
+	SLLI    $1, X15, X6
+	ADD     X6, X8, X8
+	ADD     $16, X9, X9
+	SUB     $1, X16, X16
+	BNE     X0, X16, scatterxloop
 
 done:
 	RET
