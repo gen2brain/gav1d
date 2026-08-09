@@ -111,6 +111,11 @@ func lrInit[P pixel, C coef](l *lrContext[P, C]) {
 	if l8, ok := any(l).(*lrContext[uint8, int16]); ok {
 		l8.wienerH = wienerH8AVX2Row
 		l8.wienerV = wienerV8AVX2Row
+		l8.weight1 = sgrWeight1AVX2Row
+		l8.weight2 = sgrWeight2AVX2Row
+		l8.calcAB = sgrCalcABAVX2Row
+		l8.boxH3 = sgrBoxH3AVX2Row
+		l8.boxH5 = sgrBoxH5AVX2Row
 		l8.boxV3 = sgrBoxV3AVX2Row
 		l8.boxV5 = sgrBoxV5AVX2Row
 		l8.finish1 = sgrFinish1AVX2Row

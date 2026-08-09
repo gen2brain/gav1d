@@ -308,3 +308,189 @@ boxv5:
 	BNE     X0, X13, boxv5
 
 	RET
+
+// BOXH folds one more sample of the horizontal window in.
+#define BOXH(OFF)                \
+	ADD      $OFF, X11, X6;  \
+	VSETVLI  X13, E8, MF4, TA, MA, X10; \
+	VLE8V    (X6), V5;       \
+	VSETVLI  X13, E32, M1, TA, MA, X10; \
+	VZEXTVF4 V5, V3;         \
+	VADDVV   V3, V0, V0;     \
+	VMULVV   V3, V3, V3;     \
+	VADDVV   V3, V2, V2
+
+// BOXHSTORE narrows the running sum and stores both rows.
+#define BOXHSTORE                \
+	VSE32V   V2, (X12);      \
+	VSETVLI  X13, E16, MF2, TA, MA, X10; \
+	VNSRLWI  $0, V0, V1;     \
+	VSE16V   V1, (X14);      \
+	VSETVLI  X13, E32, M1, TA, MA, X10; \
+	ADD      X10, X11, X11;  \
+	SLLI     $1, X10, X6;    \
+	ADD      X6, X14, X14;   \
+	SLLI     $2, X10, X6;    \
+	ADD      X6, X12, X12;   \
+	SUB      X10, X13, X13
+
+// func sgrBoxH3RVV(sumsq *int32, sum *int16, src *uint8, n int)
+TEXT ·sgrBoxH3RVV(SB), NOSPLIT, $0-32
+	MOV sumsq+0(FP), X12
+	MOV sum+8(FP), X14
+	MOV src+16(FP), X11
+	MOV n+24(FP), X13
+
+boxh3:
+	VSETVLI  X13, E32, M1, TA, MA, X10
+	VMVVX    X0, V0
+	VMVVX    X0, V2
+	BOXH(-1)
+	BOXH(0)
+	BOXH(1)
+	BOXHSTORE
+	BNE      X0, X13, boxh3
+
+	RET
+
+// func sgrBoxH5RVV(sumsq *int32, sum *int16, src *uint8, n int)
+TEXT ·sgrBoxH5RVV(SB), NOSPLIT, $0-32
+	MOV sumsq+0(FP), X12
+	MOV sum+8(FP), X14
+	MOV src+16(FP), X11
+	MOV n+24(FP), X13
+
+boxh5:
+	VSETVLI  X13, E32, M1, TA, MA, X10
+	VMVVX    X0, V0
+	VMVVX    X0, V2
+	BOXH(-2)
+	BOXH(-1)
+	BOXH(0)
+	BOXH(1)
+	BOXH(2)
+	BOXHSTORE
+	BNE      X0, X13, boxh5
+
+	RET
+
+// func sgrCalcABRVV(aa *int32, bb *int16, tab *[256]uint32, n int, s, mul, oneByX uint32)
+TEXT ·sgrCalcABRVV(SB), NOSPLIT, $0-44
+	MOV  aa+0(FP), X12
+	MOV  bb+8(FP), X14
+	MOV  tab+16(FP), X15
+	MOV  n+24(FP), X13
+	MOVW s+32(FP), X16
+	MOVW mul+36(FP), X17
+	MOVW oneByX+40(FP), X18
+	MOV  $(1 << 19), X19
+	MOV  $255, X20
+	MOV  $(1 << 11), X21
+
+calcab:
+	VSETVLI  X13, E32, M1, TA, MA, X10
+	VLE32V   (X12), V0
+	VSETVLI  X13, E16, MF2, TA, MA, X10
+	VLE16V   (X14), V5
+	VSETVLI  X13, E32, M1, TA, MA, X10
+	VSEXTVF2 V5, V1
+
+	VMULVX   X17, V0, V2
+	VMULVV   V1, V1, V3
+	VSUBVV   V3, V2, V2
+	VMAXVX   X0, V2, V2
+	VMULVX   X16, V2, V2
+	VADDVX   X19, V2, V2
+	VSRLVI   $20, V2, V2
+	VMINUVX  X20, V2, V2
+	VSLLVI   $2, V2, V2
+	VLUXEI32V (X15), V2, V4
+
+	VMULVV   V4, V1, V6
+	VMULVX   X18, V6, V6
+	VADDVX   X21, V6, V6
+	VSRLVI   $12, V6, V6
+	VSE32V   V6, (X12)
+	VSETVLI  X13, E16, MF2, TA, MA, X10
+	VNSRLWI  $0, V4, V7
+	VSE16V   V7, (X14)
+	VSETVLI  X13, E32, M1, TA, MA, X10
+
+	SLLI $2, X10, X6
+	ADD  X6, X12, X12
+	SLLI $1, X10, X6
+	ADD  X6, X14, X14
+	SUB  X10, X13, X13
+	BNE  X0, X13, calcab
+
+	RET
+
+// WEND rounds the weighted sum, folds it into the destination and stores it.
+#define WEND                     \
+	VADDVX   X19, V0, V0;    \
+	VSRAVI   $11, V0, V0;    \
+	VSETVLI  X13, E8, MF4, TA, MA, X10; \
+	VLE8V    (X12), V5;      \
+	VSETVLI  X13, E32, M1, TA, MA, X10; \
+	VZEXTVF4 V5, V6;         \
+	VADDVV   V6, V0, V0;     \
+	VMAXVX   X0, V0, V0;     \
+	VMINVX   X20, V0, V0;    \
+	VSETVLI  X13, E16, MF2, TA, MA, X10; \
+	VNSRLWI  $0, V0, V1;     \
+	VSETVLI  X13, E8, MF4, TA, MA, X10; \
+	VNSRLWI  $0, V1, V2;     \
+	VSE8V    V2, (X12);      \
+	VSETVLI  X13, E32, M1, TA, MA, X10; \
+	ADD      X10, X12, X12;  \
+	SLLI     $1, X10, X6;    \
+	ADD      X6, X14, X14;   \
+	SUB      X10, X13, X13
+
+// func sgrWeight1RVV(dst *uint8, t1 *int16, n int, w1 int32)
+TEXT ·sgrWeight1RVV(SB), NOSPLIT, $0-28
+	MOV  dst+0(FP), X12
+	MOV  t1+8(FP), X14
+	MOV  n+16(FP), X13
+	MOVW w1+24(FP), X17
+	MOV  $1024, X19
+	MOV  $255, X20
+
+weight1:
+	VSETVLI  X13, E16, MF2, TA, MA, X10
+	VLE16V   (X14), V5
+	VSETVLI  X13, E32, M1, TA, MA, X10
+	VSEXTVF2 V5, V0
+	VMULVX   X17, V0, V0
+	WEND
+	BNE      X0, X13, weight1
+
+	RET
+
+// func sgrWeight2RVV(dst *uint8, t1, t2 *int16, n int, w0, w1 int32)
+TEXT ·sgrWeight2RVV(SB), NOSPLIT, $0-40
+	MOV  dst+0(FP), X12
+	MOV  t1+8(FP), X14
+	MOV  t2+16(FP), X15
+	MOV  n+24(FP), X13
+	MOVW w0+32(FP), X18
+	MOVW w1+36(FP), X17
+	MOV  $1024, X19
+	MOV  $255, X20
+
+weight2:
+	VSETVLI  X13, E16, MF2, TA, MA, X10
+	VLE16V   (X14), V5
+	VLE16V   (X15), V7
+	VSETVLI  X13, E32, M1, TA, MA, X10
+	VSEXTVF2 V5, V0
+	VMULVX   X18, V0, V0
+	VSEXTVF2 V7, V3
+	VMULVX   X17, V3, V3
+	VADDVV   V3, V0, V0
+	SLLI     $1, X10, X6
+	ADD      X6, X15, X15
+	WEND
+	BNE      X0, X13, weight2
+
+	RET

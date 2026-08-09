@@ -256,3 +256,192 @@ boxv5:
 
 	VZEROUPPER
 	RET
+
+// BOXH folds one more sample of the horizontal window into the sum and the
+// sum of squares.
+#define BOXH(OFF)              \
+	VPMOVZXBD OFF(SI), Y1; \
+	VPADDD    Y1, Y0, Y0;  \
+	VPMULLD   Y1, Y1, Y1;  \
+	VPADDD    Y1, Y2, Y2
+
+// PACKH narrows the running sum to sixteen bits and stores both rows.
+#define PACKH                  \
+	VPACKSSDW Y0, Y0, Y0;  \
+	VPERMQ    $0x08, Y0, Y0; \
+	VMOVDQU   X0, (BX);    \
+	VMOVDQU   Y2, (DI);    \
+	ADDQ      $8, SI;      \
+	ADDQ      $16, BX;     \
+	ADDQ      $32, DI;     \
+	SUBQ      $8, CX
+
+// func sgrBoxH3AVX2(sumsq *int32, sum *int16, src *uint8, n int)
+TEXT ·sgrBoxH3AVX2(SB), NOSPLIT, $0-32
+	MOVQ sumsq+0(FP), DI
+	MOVQ sum+8(FP), BX
+	MOVQ src+16(FP), SI
+	MOVQ n+24(FP), CX
+
+boxh3:
+	VPMOVZXBD -1(SI), Y0
+	VPMULLD   Y0, Y0, Y2
+	BOXH(0)
+	BOXH(1)
+	PACKH
+	JNZ       boxh3
+
+	VZEROUPPER
+	RET
+
+// func sgrBoxH5AVX2(sumsq *int32, sum *int16, src *uint8, n int)
+TEXT ·sgrBoxH5AVX2(SB), NOSPLIT, $0-32
+	MOVQ sumsq+0(FP), DI
+	MOVQ sum+8(FP), BX
+	MOVQ src+16(FP), SI
+	MOVQ n+24(FP), CX
+
+boxh5:
+	VPMOVZXBD -2(SI), Y0
+	VPMULLD   Y0, Y0, Y2
+	BOXH(-1)
+	BOXH(0)
+	BOXH(1)
+	BOXH(2)
+	PACKH
+	JNZ       boxh5
+
+	VZEROUPPER
+	RET
+
+// func sgrCalcABAVX2(aa *int32, bb *int16, tab *[256]uint32, n int, s, mul, oneByX uint32)
+TEXT ·sgrCalcABAVX2(SB), NOSPLIT, $0-44
+	MOVQ         aa+0(FP), DI
+	MOVQ         bb+8(FP), BX
+	MOVQ         tab+16(FP), R8
+	MOVQ         n+24(FP), CX
+	MOVL         s+32(FP), AX
+	VMOVD        AX, X10
+	VPBROADCASTD X10, Y10
+	MOVL         mul+36(FP), AX
+	VMOVD        AX, X11
+	VPBROADCASTD X11, Y11
+	MOVL         oneByX+40(FP), AX
+	VMOVD        AX, X12
+	VPBROADCASTD X12, Y12
+	MOVL         $(1 << 19), AX
+	VMOVD        AX, X13
+	VPBROADCASTD X13, Y13
+	MOVL         $255, AX
+	VMOVD        AX, X14
+	VPBROADCASTD X14, Y14
+	MOVL         $(1 << 11), AX
+	VMOVD        AX, X15
+	VPBROADCASTD X15, Y15
+	VPXOR        Y9, Y9, Y9
+
+calcab:
+	VMOVDQU   (DI), Y0
+	VPMOVSXWD (BX), Y1
+	VPMULLD   Y11, Y0, Y2
+	VPMULLD   Y1, Y1, Y3
+	VPSUBD    Y3, Y2, Y2
+	VPMAXSD   Y9, Y2, Y2
+	VPMULLD   Y10, Y2, Y2
+	VPADDD    Y13, Y2, Y2
+	VPSRLD    $20, Y2, Y2
+	VPMINUD   Y14, Y2, Y2
+
+	VPCMPEQD  Y4, Y4, Y4
+	VPGATHERDD Y4, (R8)(Y2*4), Y5
+
+	VPMULLD   Y5, Y1, Y6
+	VPMULLD   Y12, Y6, Y6
+	VPADDD    Y15, Y6, Y6
+	VPSRLD    $12, Y6, Y6
+	VMOVDQU   Y6, (DI)
+	VPACKSSDW Y5, Y5, Y5
+	VPERMQ    $0x08, Y5, Y5
+	VMOVDQU   X5, (BX)
+
+	ADDQ $32, DI
+	ADDQ $16, BX
+	SUBQ $8, CX
+	JNZ  calcab
+
+	VZEROUPPER
+	RET
+
+// WEND rounds the weighted sum, folds it into the destination and stores it.
+#define WEND                   \
+	VPADDD    Y8, Y0, Y0;  \
+	VPSRAD    $11, Y0, Y0; \
+	VPMOVZXBD (DI), Y1;    \
+	VPADDD    Y1, Y0, Y0;  \
+	VPMAXSD   Y9, Y0, Y0;  \
+	VPMINSD   Y10, Y0, Y0; \
+	VPACKUSDW Y0, Y0, Y0;  \
+	VPERMQ    $0x08, Y0, Y0; \
+	VPACKUSWB X0, X0, X0;  \
+	VMOVQ     X0, (DI);    \
+	ADDQ      $8, DI;      \
+	ADDQ      $16, SI;     \
+	SUBQ      $8, CX
+
+// func sgrWeight1AVX2(dst *uint8, t1 *int16, n int, w1 int32)
+TEXT ·sgrWeight1AVX2(SB), NOSPLIT, $0-28
+	MOVQ dst+0(FP), DI
+	MOVQ t1+8(FP), SI
+	MOVQ n+16(FP), CX
+	MOVL w1+24(FP), AX
+	VMOVD AX, X11
+	VPBROADCASTD X11, Y11
+	MOVL $1024, AX
+	VMOVD AX, X8
+	VPBROADCASTD X8, Y8
+	VPXOR Y9, Y9, Y9
+	MOVL $255, AX
+	VMOVD AX, X10
+	VPBROADCASTD X10, Y10
+
+weight1:
+	VPMOVSXWD (SI), Y0
+	VPMULLD   Y11, Y0, Y0
+	WEND
+	JNZ       weight1
+
+	VZEROUPPER
+	RET
+
+// func sgrWeight2AVX2(dst *uint8, t1, t2 *int16, n int, w0, w1 int32)
+TEXT ·sgrWeight2AVX2(SB), NOSPLIT, $0-40
+	MOVQ dst+0(FP), DI
+	MOVQ t1+8(FP), SI
+	MOVQ t2+16(FP), DX
+	MOVQ n+24(FP), CX
+	MOVL         w0+32(FP), AX
+	VMOVD        AX, X12
+	VPBROADCASTD X12, Y12
+	MOVL         w1+36(FP), AX
+	VMOVD        AX, X11
+	VPBROADCASTD X11, Y11
+	MOVL         $1024, AX
+	VMOVD        AX, X8
+	VPBROADCASTD X8, Y8
+	VPXOR        Y9, Y9, Y9
+	MOVL         $255, AX
+	VMOVD        AX, X10
+	VPBROADCASTD X10, Y10
+
+weight2:
+	VPMOVSXWD (SI), Y0
+	VPMULLD   Y12, Y0, Y0
+	VPMOVSXWD (DX), Y2
+	VPMULLD   Y11, Y2, Y2
+	VPADDD    Y2, Y0, Y0
+	ADDQ      $16, DX
+	WEND
+	JNZ       weight2
+
+	VZEROUPPER
+	RET

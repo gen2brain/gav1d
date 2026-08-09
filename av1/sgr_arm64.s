@@ -4,6 +4,10 @@
 
 // Go's arm64 assembler has none of these.
 #define MULS(Vd, Vn, Vm)   WORD $(0x4EA09C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define SMAXS(Vd, Vn, Vm)  WORD $(0x4EA06400 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define SMINS(Vd, Vn, Vm)  WORD $(0x4EA06C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define SSHR11(Vd, Vn)     WORD $(0x4F000400 | ((64 - 11) << 16) | ((Vn) << 5) | (Vd))
+#define XTNB(Vd, Vn)       WORD $(0x0E212800 | ((Vn) << 5) | (Vd))
 #define SSHLL(Vd, Vn)      WORD $(0x0F10A400 | ((Vn) << 5) | (Vd))
 #define SSHR9(Vd, Vn)      WORD $(0x4F000400 | ((64 - 9) << 16) | ((Vn) << 5) | (Vd))
 #define SSHR8(Vd, Vn)      WORD $(0x4F000400 | ((64 - 8) << 16) | ((Vn) << 5) | (Vd))
@@ -258,5 +262,209 @@ boxv5:
 	ADD  $16, R1, R1
 	SUBS $8, R10, R10
 	BNE  boxv5
+
+	RET
+
+// BOXH folds one more sample of the horizontal window in.
+#define BOXH(RS)                  \
+	VLD1 (RS), [V3.B8];       \
+	VUSHLL $0, V3.B8, V3.H8;  \
+	VUSHLL $0, V3.H4, V3.S4;  \
+	VADD V3.S4, V0.S4, V0.S4; \
+	MULS(3, 3, 3);            \
+	VADD V3.S4, V2.S4, V2.S4
+
+// func sgrBoxH3NEON(sumsq *int32, sum *int16, src *uint8, n int)
+TEXT ·sgrBoxH3NEON(SB), NOSPLIT, $0-32
+	MOVD sumsq+0(FP), R0
+	MOVD sum+8(FP), R1
+	MOVD src+16(FP), R2
+	MOVD n+24(FP), R10
+
+boxh3:
+	SUB    $1, R2, R3
+	VLD1   (R3), [V0.B8]
+	VUSHLL $0, V0.B8, V0.H8
+	VUSHLL $0, V0.H4, V0.S4
+	MULS(2, 0, 0)
+	BOXH(R2)
+	ADD    $1, R2, R3
+	BOXH(R3)
+	XTNS(1, 0)
+	VST1   [V1.D1], (R1)
+	VST1   [V2.S4], (R0)
+	ADD    $4, R2, R2
+	ADD    $8, R1, R1
+	ADD    $16, R0, R0
+	SUBS   $4, R10, R10
+	BNE    boxh3
+
+	RET
+
+// func sgrBoxH5NEON(sumsq *int32, sum *int16, src *uint8, n int)
+TEXT ·sgrBoxH5NEON(SB), NOSPLIT, $0-32
+	MOVD sumsq+0(FP), R0
+	MOVD sum+8(FP), R1
+	MOVD src+16(FP), R2
+	MOVD n+24(FP), R10
+
+boxh5:
+	SUB    $2, R2, R3
+	VLD1   (R3), [V0.B8]
+	VUSHLL $0, V0.B8, V0.H8
+	VUSHLL $0, V0.H4, V0.S4
+	MULS(2, 0, 0)
+	SUB    $1, R2, R3
+	BOXH(R3)
+	BOXH(R2)
+	ADD    $1, R2, R3
+	BOXH(R3)
+	ADD    $2, R2, R3
+	BOXH(R3)
+	XTNS(1, 0)
+	VST1   [V1.D1], (R1)
+	VST1   [V2.S4], (R0)
+	ADD    $4, R2, R2
+	ADD    $8, R1, R1
+	ADD    $16, R0, R0
+	SUBS   $4, R10, R10
+	BNE    boxh5
+
+	RET
+
+#define UMINS(Vd, Vn, Vm) WORD $(0x6EA06C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define USHR20(Vd, Vn)    WORD $(0x6F000400 | ((64 - 20) << 16) | ((Vn) << 5) | (Vd))
+#define USHR12(Vd, Vn)    WORD $(0x6F000400 | ((64 - 12) << 16) | ((Vn) << 5) | (Vd))
+#define SMAXZ(Vd, Vn)     WORD $(0x4EA06400 | (28 << 16) | ((Vn) << 5) | (Vd))
+
+// func sgrCalcABNEON(aa *int32, bb *int16, tab *[256]uint32, n int, s, mul, oneByX uint32)
+TEXT ·sgrCalcABNEON(SB), NOSPLIT, $0-44
+	MOVD  aa+0(FP), R0
+	MOVD  bb+8(FP), R1
+	MOVD  tab+16(FP), R2
+	MOVD  n+24(FP), R10
+	MOVWU s+32(FP), R3
+	VDUP  R3, V16.S4
+	MOVWU mul+36(FP), R3
+	VDUP  R3, V17.S4
+	MOVWU oneByX+40(FP), R3
+	VDUP  R3, V18.S4
+	MOVD  $(1 << 19), R3
+	VDUP  R3, V19.S4
+	MOVD  $255, R3
+	VDUP  R3, V20.S4
+	MOVD  $(1 << 11), R3
+	VDUP  R3, V21.S4
+	VMOVI $0, V28.B16
+
+calcab:
+	VLD1   (R0), [V0.S4]
+	VLD1   (R1), [V5.H8]
+	SSHLL(1, 5)
+	MULS(2, 0, 17)
+	MULS(3, 1, 1)
+	VSUB   V3.S4, V2.S4, V2.S4
+	SMAXZ(2, 2)
+	MULS(2, 2, 16)
+	VADD   V19.S4, V2.S4, V2.S4
+	USHR20(2, 2)
+	UMINS(2, 2, 20)
+
+	VMOV   V2.S[0], R3
+	MOVWU  (R2)(R3<<2), R4
+	VMOV   R4, V4.S[0]
+	VMOV   V2.S[1], R3
+	MOVWU  (R2)(R3<<2), R4
+	VMOV   R4, V4.S[1]
+	VMOV   V2.S[2], R3
+	MOVWU  (R2)(R3<<2), R4
+	VMOV   R4, V4.S[2]
+	VMOV   V2.S[3], R3
+	MOVWU  (R2)(R3<<2), R4
+	VMOV   R4, V4.S[3]
+
+	MULS(6, 4, 1)
+	MULS(6, 6, 18)
+	VADD   V21.S4, V6.S4, V6.S4
+	USHR12(6, 6)
+	VST1   [V6.S4], (R0)
+	XTNS(7, 4)
+	VST1   [V7.D1], (R1)
+
+	ADD  $16, R0, R0
+	ADD  $8, R1, R1
+	SUBS $4, R10, R10
+	BNE  calcab
+
+	RET
+
+// WEND rounds the weighted sum, folds it into the destination and stores it.
+#define WEND                     \
+	VADD V24.S4, V0.S4, V0.S4; \
+	SSHR11(0, 0);            \
+	MOVWU (R0), R4;          \
+	VMOV R4, V1.S[0];        \
+	VUSHLL $0, V1.B8, V1.H8; \
+	VUSHLL $0, V1.H4, V1.S4; \
+	VADD V1.S4, V0.S4, V0.S4; \
+	SMAXS(0, 0, 25);         \
+	SMINS(0, 0, 26);         \
+	XTNS(0, 0);              \
+	XTNB(0, 0);              \
+	VMOV V0.S[0], R4;        \
+	MOVW R4, (R0);           \
+	ADD  $4, R0, R0;         \
+	ADD  $8, R1, R1;         \
+	SUBS $4, R10, R10
+
+// func sgrWeight1NEON(dst *uint8, t1 *int16, n int, w1 int32)
+TEXT ·sgrWeight1NEON(SB), NOSPLIT, $0-28
+	MOVD  dst+0(FP), R0
+	MOVD  t1+8(FP), R1
+	MOVD  n+16(FP), R10
+	MOVWU w1+24(FP), R3
+	VDUP  R3, V22.S4
+	MOVD  $1024, R3
+	VDUP  R3, V24.S4
+	VMOVI $0, V25.B16
+	MOVD  $255, R3
+	VDUP  R3, V26.S4
+
+weight1:
+	VLD1 (R1), [V5.H8]
+	SSHLL(0, 5)
+	MULS(0, 0, 22)
+	WEND
+	BNE  weight1
+
+	RET
+
+// func sgrWeight2NEON(dst *uint8, t1, t2 *int16, n int, w0, w1 int32)
+TEXT ·sgrWeight2NEON(SB), NOSPLIT, $0-40
+	MOVD  dst+0(FP), R0
+	MOVD  t1+8(FP), R1
+	MOVD  t2+16(FP), R2
+	MOVD  n+24(FP), R10
+	MOVWU w0+32(FP), R3
+	VDUP  R3, V23.S4
+	MOVWU w1+36(FP), R3
+	VDUP  R3, V22.S4
+	MOVD  $1024, R3
+	VDUP  R3, V24.S4
+	VMOVI $0, V25.B16
+	MOVD  $255, R3
+	VDUP  R3, V26.S4
+
+weight2:
+	VLD1 (R1), [V5.H8]
+	SSHLL(0, 5)
+	MULS(0, 0, 23)
+	VLD1 (R2), [V6.H8]
+	SSHLL(2, 6)
+	MULS(2, 2, 22)
+	VADD V2.S4, V0.S4, V0.S4
+	ADD  $8, R2, R2
+	WEND
+	BNE  weight2
 
 	RET

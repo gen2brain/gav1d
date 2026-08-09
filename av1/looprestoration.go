@@ -347,73 +347,114 @@ func rotate5x2(sumsqPtrs, sumPtrs []int) {
 	}
 }
 
-func sgrBox3RowH[P pixel, C coef](sumsq []int32, sumsqOff int, sum []C, sumOff int,
+// sgrSample resolves one source index, replicating past whichever edges the
+// unit does not have.
+func sgrSample[P pixel](left []P, leftOff int, hasLeft bool,
+	src []P, srcOff, w, edges, i int,
+) int32 {
+	switch {
+	case i < 0 && edges&lrHaveLeft == 0:
+		return int32(src[srcOff])
+	case i < 0 && hasLeft:
+		return int32(left[leftOff+4+i])
+	case i >= w && edges&lrHaveRight == 0:
+		return int32(src[srcOff+w-1])
+	default:
+		return int32(src[srcOff+i])
+	}
+}
+
+// sgrBoxEdgeH is the fully conditional form, for the outputs whose window
+// reaches outside the row.
+func sgrBoxEdgeH[P pixel, C coef](sumsq []int32, sumsqOff int, sum []C, sumOff int,
+	left []P, leftOff int, hasLeft bool, src []P, srcOff, w, edges, r, x0, x1 int,
+) {
+	for x := x0; x < x1; x++ {
+		var t, tsq int32
+		for k := -r; k <= r; k++ {
+			v := sgrSample(left, leftOff, hasLeft, src, srcOff, w, edges, x+k)
+			t += v
+			tsq += v * v
+		}
+		sum[sumOff+x] = C(t)
+		sumsq[sumsqOff+x] = tsq
+	}
+}
+
+func sgrBox3HRow[P pixel, C coef](sumsq []int32, sumsqOff int, sum []C, sumOff int,
+	src []P, srcOff, n int,
+) {
+	for i := range n {
+		a := int32(src[srcOff+i-1])
+		b := int32(src[srcOff+i])
+		c := int32(src[srcOff+i+1])
+		sum[sumOff+i] = C(a + b + c)
+		sumsq[sumsqOff+i] = a*a + b*b + c*c
+	}
+}
+
+func sgrBox5HRow[P pixel, C coef](sumsq []int32, sumsqOff int, sum []C, sumOff int,
+	src []P, srcOff, n int,
+) {
+	for i := range n {
+		a := int32(src[srcOff+i-2])
+		b := int32(src[srcOff+i-1])
+		c := int32(src[srcOff+i])
+		d := int32(src[srcOff+i+1])
+		e := int32(src[srcOff+i+2])
+		sum[sumOff+i] = C(a + b + c + d + e)
+		sumsq[sumsqOff+i] = a*a + b*b + c*c + d*d + e*e
+	}
+}
+
+// sgrBoxRowH splits the row into the outputs the edges reach and the bulk that
+// reads the source straight through, which is the only part worth vectorising.
+func sgrBoxRowH[P pixel, C coef](bulk func(sumsq []int32, sumsqOff int, sum []C, sumOff int,
+	src []P, srcOff, n int), r int,
+	sumsq []int32, sumsqOff int, sum []C, sumOff int,
 	left []P, leftOff int, hasLeft bool, src []P, srcOff, w, edges int,
 ) {
 	sumsqOff++
 	sumOff++
 
-	var a, b int32
-	if edges&lrHaveLeft != 0 {
-		if hasLeft {
-			a, b = int32(left[leftOff+2]), int32(left[leftOff+3])
-		} else {
-			a, b = int32(src[srcOff-2]), int32(src[srcOff-1])
-		}
-	} else {
-		a, b = int32(src[srcOff]), int32(src[srcOff])
+	x0, x1 := r, w-r
+	if edges&lrHaveRight != 0 {
+		x1 = w + 1
+	}
+	if x1 < x0 {
+		x0, x1 = -1, -1
 	}
 
-	for x := -1; x < w+1; x++ {
-		var c int32
-		if x+1 < w || edges&lrHaveRight != 0 {
-			c = int32(src[srcOff+x+1])
-		} else {
-			c = int32(src[srcOff+w-1])
-		}
-		sum[sumOff+x] = C(a + b + c)
-		sumsq[sumsqOff+x] = a*a + b*b + c*c
-		a, b = b, c
+	sgrBoxEdgeH(sumsq, sumsqOff, sum, sumOff, left, leftOff, hasLeft,
+		src, srcOff, w, edges, r, -1, x0)
+	if x1 > x0 {
+		bulk(sumsq, sumsqOff+x0, sum, sumOff+x0, src, srcOff+x0, x1-x0)
 	}
+	sgrBoxEdgeH(sumsq, sumsqOff, sum, sumOff, left, leftOff, hasLeft,
+		src, srcOff, w, edges, r, x1, w+1)
 }
 
-func sgrBox5RowH[P pixel, C coef](sumsq []int32, sumsqOff int, sum []C, sumOff int,
-	left []P, leftOff int, hasLeft bool, src []P, srcOff, w, edges int,
+func sgrBox3RowH[P pixel, C coef](lr *lrContext[P, C], sumsq []int32, sumsqOff int,
+	sum []C, sumOff int, left []P, leftOff int, hasLeft bool, src []P, srcOff, w, edges int,
 ) {
-	sumsqOff++
-	sumOff++
-
-	var a, b, c int32
-	if edges&lrHaveLeft != 0 {
-		if hasLeft {
-			a, b, c = int32(left[leftOff+1]), int32(left[leftOff+2]), int32(left[leftOff+3])
-		} else {
-			a, b, c = int32(src[srcOff-3]), int32(src[srcOff-2]), int32(src[srcOff-1])
-		}
-	} else {
-		a, b, c = int32(src[srcOff]), int32(src[srcOff]), int32(src[srcOff])
-	}
-	d := int32(src[srcOff])
-
-	for x := -1; x < w+1; x++ {
-		var e int32
-		if x+2 < w || edges&lrHaveRight != 0 {
-			e = int32(src[srcOff+x+2])
-		} else {
-			e = int32(src[srcOff+w-1])
-		}
-		sum[sumOff+x] = C(a + b + c + d + e)
-		sumsq[sumsqOff+x] = a*a + b*b + c*c + d*d + e*e
-		a, b, c, d = b, c, d, e
-	}
+	sgrBoxRowH(lr.boxH3, 1, sumsq, sumsqOff, sum, sumOff, left, leftOff, hasLeft,
+		src, srcOff, w, edges)
 }
 
-func sgrBox35RowH[P pixel, C coef](sumsq3 []int32, sumsq3Off int, sum3 []C, sum3Off int,
+func sgrBox5RowH[P pixel, C coef](lr *lrContext[P, C], sumsq []int32, sumsqOff int,
+	sum []C, sumOff int, left []P, leftOff int, hasLeft bool, src []P, srcOff, w, edges int,
+) {
+	sgrBoxRowH(lr.boxH5, 2, sumsq, sumsqOff, sum, sumOff, left, leftOff, hasLeft,
+		src, srcOff, w, edges)
+}
+
+func sgrBox35RowH[P pixel, C coef](lr *lrContext[P, C],
+	sumsq3 []int32, sumsq3Off int, sum3 []C, sum3Off int,
 	sumsq5 []int32, sumsq5Off int, sum5 []C, sum5Off int,
 	left []P, leftOff int, hasLeft bool, src []P, srcOff, w, edges int,
 ) {
-	sgrBox3RowH(sumsq3, sumsq3Off, sum3, sum3Off, left, leftOff, hasLeft, src, srcOff, w, edges)
-	sgrBox5RowH(sumsq5, sumsq5Off, sum5, sum5Off, left, leftOff, hasLeft, src, srcOff, w, edges)
+	sgrBox3RowH(lr, sumsq3, sumsq3Off, sum3, sum3Off, left, leftOff, hasLeft, src, srcOff, w, edges)
+	sgrBox5RowH(lr, sumsq5, sumsq5Off, sum5, sum5Off, left, leftOff, hasLeft, src, srcOff, w, edges)
 }
 
 func sgrBox3RowV[C coef](sumsq []int32, sumsqPtrs []int, sum []C, sumPtrs []int,
@@ -460,7 +501,7 @@ func sgrBox3Vert[P pixel, C coef](lr *lrContext[P, C], sumsq []int32, sumsqPtrs 
 	bitdepthMax int32,
 ) {
 	lr.boxV3(sumsq, sumsqPtrs, sum, sumPtrs, sumsqOut, sumsqOutOff, sumOut, sumOutOff, w)
-	sgrCalcRowAB(sumsqOut, sumsqOutOff, sumOut, sumOutOff, w, s, bitdepthMax, 9, 455)
+	lr.calcAB(sumsqOut, sumsqOutOff, sumOut, sumOutOff, w, s, bitdepthMax, 9, 455)
 	rotate(sumsqPtrs, sumPtrs, 3)
 }
 
@@ -469,7 +510,7 @@ func sgrBox5Vert[P pixel, C coef](lr *lrContext[P, C], sumsq []int32, sumsqPtrs 
 	bitdepthMax int32,
 ) {
 	lr.boxV5(sumsq, sumsqPtrs, sum, sumPtrs, sumsqOut, sumsqOutOff, sumOut, sumOutOff, w)
-	sgrCalcRowAB(sumsqOut, sumsqOutOff, sumOut, sumOutOff, w, s, bitdepthMax, 25, 164)
+	lr.calcAB(sumsqOut, sumsqOutOff, sumOut, sumOutOff, w, s, bitdepthMax, 25, 164)
 	rotate5x2(sumsqPtrs, sumPtrs)
 }
 
@@ -477,7 +518,7 @@ func sgrBox3HV[P pixel, C coef](lr *lrContext[P, C], sumsq []int32, sumsqPtrs []
 	aa []int32, aaOff int, bb []C, bbOff int, left []P, leftOff int, hasLeft bool,
 	src []P, srcOff, w int, s uint32, edges int, bitdepthMax int32,
 ) {
-	sgrBox3RowH(sumsq, sumsqPtrs[2], sum, sumPtrs[2], left, leftOff, hasLeft,
+	sgrBox3RowH(lr, sumsq, sumsqPtrs[2], sum, sumPtrs[2], left, leftOff, hasLeft,
 		src, srcOff, w, edges)
 	sgrBox3Vert(lr, sumsq, sumsqPtrs, sum, sumPtrs, aa, aaOff, bb, bbOff, w, s, bitdepthMax)
 }
@@ -544,14 +585,20 @@ func sgrWeightedRow1[P pixel, C coef](dst []P, dstOff int, t1 []C, t1Off, w int,
 	}
 }
 
-func sgrWeighted2[P pixel, C coef](dst []P, dstOff, dstStride int, t1 []C, t1Off int,
-	t2 []C, t2Off, w, h int, w0, w1 int32, bitdepthMax int32,
+func sgrWeightedRow2[P pixel, C coef](dst []P, dstOff int, t1 []C, t1Off int,
+	t2 []C, t2Off, w int, w0, w1 int32, bitdepthMax int32,
+) {
+	for i := range w {
+		v := w0*int32(t1[t1Off+i]) + w1*int32(t2[t2Off+i])
+		dst[dstOff+i] = P(clip(int32(dst[dstOff+i])+((v+(1<<10))>>11), 0, bitdepthMax))
+	}
+}
+
+func sgrWeighted2[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, dstStride int,
+	t1 []C, t1Off int, t2 []C, t2Off, w, h int, w0, w1 int32, bitdepthMax int32,
 ) {
 	for range h {
-		for i := range w {
-			v := w0*int32(t1[t1Off+i]) + w1*int32(t2[t2Off+i])
-			dst[dstOff+i] = P(clip(int32(dst[dstOff+i])+((v+(1<<10))>>11), 0, bitdepthMax))
-		}
+		lr.weight2(dst, dstOff, t1, t1Off, t2, t2Off, w, w0, w1, bitdepthMax)
 		dstOff += dstStride
 		t1Off += filterOutStride
 		t2Off += filterOutStride
@@ -565,7 +612,7 @@ func sgrFinish1[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff *int, stri
 	tmp := tmpBuf[:]
 
 	lr.finish1(tmp, 0, dst, *dstOff, a, aPtrs, b, bPtrs, w)
-	sgrWeightedRow1(dst, *dstOff, tmp, 0, w, w1, bitdepthMax)
+	lr.weight1(dst, *dstOff, tmp, 0, w, w1, bitdepthMax)
 	*dstOff += stride
 	rotate(aPtrs, bPtrs, 3)
 }
@@ -577,10 +624,10 @@ func sgrFinish2[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff *int, stri
 	tmp := tmpBuf[:]
 
 	lr.finish2(tmp, 0, dst, *dstOff, stride, a, aPtrs, b, bPtrs, w, h)
-	sgrWeightedRow1(dst, *dstOff, tmp, 0, w, w1, bitdepthMax)
+	lr.weight1(dst, *dstOff, tmp, 0, w, w1, bitdepthMax)
 	*dstOff += stride
 	if h > 1 {
-		sgrWeightedRow1(dst, *dstOff, tmp, filterOutStride, w, w1, bitdepthMax)
+		lr.weight1(dst, *dstOff, tmp, filterOutStride, w, w1, bitdepthMax)
 		*dstOff += stride
 	}
 	rotate(aPtrs, bPtrs, 2)
@@ -600,7 +647,7 @@ func sgrFinishMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff *int, st
 		lr.finish1(tmp3, filterOutStride, dst, *dstOff+stride,
 			a3, a3Ptrs[1:], b3, b3Ptrs[1:], w)
 	}
-	sgrWeighted2(dst, *dstOff, stride, tmp5, 0, tmp3, 0, w, h, w0, w1, bitdepthMax)
+	sgrWeighted2(lr, dst, *dstOff, stride, tmp5, 0, tmp3, 0, w, h, w0, w1, bitdepthMax)
 	*dstOff += h * stride
 	rotate(a5Ptrs, b5Ptrs, 2)
 	rotate(a3Ptrs, b3Ptrs, 4)
@@ -631,9 +678,9 @@ func lrSgr3x3[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		sumsqPtrs = [3]int{rows[0], rows[1], rows[2]}
 		sumPtrs = sumsqPtrs
 
-		sgrBox3RowH(sumsq, rows[0], sum, rows[0], left, 0, false, lpf, lpfOff, w, edges)
+		sgrBox3RowH(lr, sumsq, rows[0], sum, rows[0], left, 0, false, lpf, lpfOff, w, edges)
 		lpfOff += stride
-		sgrBox3RowH(sumsq, rows[1], sum, rows[1], left, 0, false, lpf, lpfOff, w, edges)
+		sgrBox3RowH(lr, sumsq, rows[1], sum, rows[1], left, 0, false, lpf, lpfOff, w, edges)
 
 		sgrBox3HV(lr, sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[2], b, bPtrs[2],
 			left, leftOff, true, src, srcOff, w, s1, edges, bitdepthMax)
@@ -660,7 +707,7 @@ func lrSgr3x3[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		sumsqPtrs = [3]int{rows[0], rows[0], rows[0]}
 		sumPtrs = sumsqPtrs
 
-		sgrBox3RowH(sumsq, rows[0], sum, rows[0], left, leftOff, true, src, srcOff, w, edges)
+		sgrBox3RowH(lr, sumsq, rows[0], sum, rows[0], left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
 
@@ -773,11 +820,11 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		sumsqPtrs = [5]int{rows[0], rows[0], rows[1], rows[2], rows[3]}
 		sumPtrs = sumsqPtrs
 
-		sgrBox5RowH(sumsq, rows[0], sum, rows[0], left, 0, false, lpf, lpfOff, w, edges)
+		sgrBox5RowH(lr, sumsq, rows[0], sum, rows[0], left, 0, false, lpf, lpfOff, w, edges)
 		lpfOff += stride
-		sgrBox5RowH(sumsq, rows[1], sum, rows[1], left, 0, false, lpf, lpfOff, w, edges)
+		sgrBox5RowH(lr, sumsq, rows[1], sum, rows[1], left, 0, false, lpf, lpfOff, w, edges)
 
-		sgrBox5RowH(sumsq, rows[2], sum, rows[2], left, leftOff, true, src, srcOff, w, edges)
+		sgrBox5RowH(lr, sumsq, rows[2], sum, rows[2], left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
 
@@ -786,7 +833,7 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 			goto vert1
 		}
 
-		sgrBox5RowH(sumsq, rows[3], sum, rows[3], left, leftOff, true, src, srcOff, w, edges)
+		sgrBox5RowH(lr, sumsq, rows[3], sum, rows[3], left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
 		sgrBox5Vert(lr, sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[1], b, bPtrs[1],
@@ -803,7 +850,7 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		sumsqPtrs = [5]int{rows[0], rows[0], rows[0], rows[0], rows[0]}
 		sumPtrs = sumsqPtrs
 
-		sgrBox5RowH(sumsq, rows[0], sum, rows[0], left, leftOff, true, src, srcOff, w, edges)
+		sgrBox5RowH(lr, sumsq, rows[0], sum, rows[0], left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
 
@@ -814,7 +861,7 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 
 		sumsqPtrs[4], sumPtrs[4] = rows[1], rows[1]
 
-		sgrBox5RowH(sumsq, rows[1], sum, rows[1], left, leftOff, true, src, srcOff, w, edges)
+		sgrBox5RowH(lr, sumsq, rows[1], sum, rows[1], left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
 
@@ -830,7 +877,7 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		sumsqPtrs[3], sumPtrs[3] = rows[2], rows[2]
 		sumsqPtrs[4], sumPtrs[4] = rows[3], rows[3]
 
-		sgrBox5RowH(sumsq, rows[2], sum, rows[2], left, leftOff, true, src, srcOff, w, edges)
+		sgrBox5RowH(lr, sumsq, rows[2], sum, rows[2], left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
 
@@ -839,7 +886,7 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 			goto odd
 		}
 
-		sgrBox5RowH(sumsq, rows[3], sum, rows[3], left, leftOff, true, src, srcOff, w, edges)
+		sgrBox5RowH(lr, sumsq, rows[3], sum, rows[3], left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
 
@@ -856,7 +903,7 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 	}
 
 	for {
-		sgrBox5RowH(sumsq, sumsqPtrs[3], sum, sumPtrs[3], left, leftOff, true,
+		sgrBox5RowH(lr, sumsq, sumsqPtrs[3], sum, sumPtrs[3], left, leftOff, true,
 			src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
@@ -866,7 +913,7 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 			goto odd
 		}
 
-		sgrBox5RowH(sumsq, sumsqPtrs[4], sum, sumPtrs[4], left, leftOff, true,
+		sgrBox5RowH(lr, sumsq, sumsqPtrs[4], sum, sumPtrs[4], left, leftOff, true,
 			src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
@@ -885,9 +932,9 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		goto vert2
 	}
 
-	sgrBox5RowH(sumsq, sumsqPtrs[3], sum, sumPtrs[3], left, 0, false, lpf, lpfBottom, w, edges)
+	sgrBox5RowH(lr, sumsq, sumsqPtrs[3], sum, sumPtrs[3], left, 0, false, lpf, lpfBottom, w, edges)
 	lpfBottom += stride
-	sgrBox5RowH(sumsq, sumsqPtrs[4], sum, sumPtrs[4], left, 0, false, lpf, lpfBottom, w, edges)
+	sgrBox5RowH(lr, sumsq, sumsqPtrs[4], sum, sumPtrs[4], left, 0, false, lpf, lpfBottom, w, edges)
 
 output2:
 	sgrBox5Vert(lr, sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[1], b, bPtrs[1],
@@ -974,13 +1021,13 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		sumsq3Ptrs = [3]int{rows3[0], rows3[1], rows3[2]}
 		sum3Ptrs = sumsq3Ptrs
 
-		sgrBox35RowH(sumsq3, rows3[0], sum3, rows3[0], sumsq5, rows5[0], sum5, rows5[0],
+		sgrBox35RowH(lr, sumsq3, rows3[0], sum3, rows3[0], sumsq5, rows5[0], sum5, rows5[0],
 			left, 0, false, lpf, lpfOff, w, edges)
 		lpfOff += stride
-		sgrBox35RowH(sumsq3, rows3[1], sum3, rows3[1], sumsq5, rows5[1], sum5, rows5[1],
+		sgrBox35RowH(lr, sumsq3, rows3[1], sum3, rows3[1], sumsq5, rows5[1], sum5, rows5[1],
 			left, 0, false, lpf, lpfOff, w, edges)
 
-		sgrBox35RowH(sumsq3, rows3[2], sum3, rows3[2], sumsq5, rows5[2], sum5, rows5[2],
+		sgrBox35RowH(lr, sumsq3, rows3[2], sum3, rows3[2], sumsq5, rows5[2], sum5, rows5[2],
 			left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
@@ -994,7 +1041,7 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 			goto vert1
 		}
 
-		sgrBox35RowH(sumsq3, sumsq3Ptrs[2], sum3, sum3Ptrs[2], sumsq5, rows5[3], sum5, rows5[3],
+		sgrBox35RowH(lr, sumsq3, sumsq3Ptrs[2], sum3, sum3Ptrs[2], sumsq5, rows5[3], sum5, rows5[3],
 			left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
@@ -1017,7 +1064,7 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		sumsq3Ptrs = [3]int{rows3[0], rows3[0], rows3[0]}
 		sum3Ptrs = sumsq3Ptrs
 
-		sgrBox35RowH(sumsq3, rows3[0], sum3, rows3[0], sumsq5, rows5[0], sum5, rows5[0],
+		sgrBox35RowH(lr, sumsq3, rows3[0], sum3, rows3[0], sumsq5, rows5[0], sum5, rows5[0],
 			left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
@@ -1034,7 +1081,7 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		sumsq5Ptrs[4], sum5Ptrs[4] = rows5[1], rows5[1]
 		sumsq3Ptrs[2], sum3Ptrs[2] = rows3[1], rows3[1]
 
-		sgrBox35RowH(sumsq3, rows3[1], sum3, rows3[1], sumsq5, rows5[1], sum5, rows5[1],
+		sgrBox35RowH(lr, sumsq3, rows3[1], sum3, rows3[1], sumsq5, rows5[1], sum5, rows5[1],
 			left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
@@ -1055,7 +1102,7 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		sumsq5Ptrs[4], sum5Ptrs[4] = rows5[3], rows5[3]
 		sumsq3Ptrs[2], sum3Ptrs[2] = rows3[2], rows3[2]
 
-		sgrBox35RowH(sumsq3, rows3[2], sum3, rows3[2], sumsq5, rows5[2], sum5, rows5[2],
+		sgrBox35RowH(lr, sumsq3, rows3[2], sum3, rows3[2], sumsq5, rows5[2], sum5, rows5[2],
 			left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
@@ -1069,7 +1116,7 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 			goto odd
 		}
 
-		sgrBox35RowH(sumsq3, sumsq3Ptrs[2], sum3, sum3Ptrs[2], sumsq5, rows5[3], sum5, rows5[3],
+		sgrBox35RowH(lr, sumsq3, sumsq3Ptrs[2], sum3, sum3Ptrs[2], sumsq5, rows5[3], sum5, rows5[3],
 			left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
 		srcOff += stride
@@ -1090,7 +1137,7 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 	}
 
 	for {
-		sgrBox35RowH(sumsq3, sumsq3Ptrs[2], sum3, sum3Ptrs[2],
+		sgrBox35RowH(lr, sumsq3, sumsq3Ptrs[2], sum3, sum3Ptrs[2],
 			sumsq5, sumsq5Ptrs[3], sum5, sum5Ptrs[3],
 			left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
@@ -1105,7 +1152,7 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 			goto odd
 		}
 
-		sgrBox35RowH(sumsq3, sumsq3Ptrs[2], sum3, sum3Ptrs[2],
+		sgrBox35RowH(lr, sumsq3, sumsq3Ptrs[2], sum3, sum3Ptrs[2],
 			sumsq5, sumsq5Ptrs[4], sum5, sum5Ptrs[4],
 			left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
@@ -1128,7 +1175,7 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		goto vert2
 	}
 
-	sgrBox35RowH(sumsq3, sumsq3Ptrs[2], sum3, sum3Ptrs[2],
+	sgrBox35RowH(lr, sumsq3, sumsq3Ptrs[2], sum3, sum3Ptrs[2],
 		sumsq5, sumsq5Ptrs[3], sum5, sum5Ptrs[3],
 		left, 0, false, lpf, lpfBottom, w, edges)
 	lpfBottom += stride
@@ -1136,7 +1183,7 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		w, s1, bitdepthMax)
 	rotate(a3Ptrs[:], b3Ptrs[:], 4)
 
-	sgrBox35RowH(sumsq3, sumsq3Ptrs[2], sum3, sum3Ptrs[2],
+	sgrBox35RowH(lr, sumsq3, sumsq3Ptrs[2], sum3, sum3Ptrs[2],
 		sumsq5, sumsq5Ptrs[4], sum5, sum5Ptrs[4],
 		left, 0, false, lpf, lpfBottom, w, edges)
 

@@ -69,3 +69,84 @@ func sgrBoxV5RVVRow(sumsq []int32, sumsqPtrs []int, sum []int16, sumPtrs []int,
 			&sumsqOut[sumsqOutOff], &sumOut[sumOutOff], n)
 	}
 }
+
+//go:noescape
+func sgrBoxH3RVV(sumsq *int32, sum *int16, src *uint8, n int)
+
+//go:noescape
+func sgrBoxH5RVV(sumsq *int32, sum *int16, src *uint8, n int)
+
+func sgrBoxH3RVVRow(sumsq []int32, sumsqOff int, sum []int16, sumOff int,
+	src []uint8, srcOff, n int,
+) {
+	if n > 0 {
+		sgrBoxH3RVV(&sumsq[sumsqOff], &sum[sumOff], &src[srcOff], n)
+	}
+}
+
+func sgrBoxH5RVVRow(sumsq []int32, sumsqOff int, sum []int16, sumOff int,
+	src []uint8, srcOff, n int,
+) {
+	if n > 0 {
+		sgrBoxH5RVV(&sumsq[sumsqOff], &sum[sumOff], &src[srcOff], n)
+	}
+}
+
+//go:noescape
+func sgrCalcABRVV(aa *int32, bb *int16, tab *[256]uint32, n int, s, mul, oneByX uint32)
+
+func sgrCalcABRVVRow(aa []int32, aaOff int, bb []int16, bbOff, w int, s uint32,
+	bitdepthMax int32, n, sgrOneByX int32,
+) {
+	if bitdepthFromMax(bitdepthMax) != 8 {
+		sgrCalcRowAB(aa, aaOff, bb, bbOff, w, s, bitdepthMax, n, sgrOneByX)
+
+		return
+	}
+
+	cnt := w + 2
+	if cnt > 0 {
+		sgrCalcABRVV(&aa[aaOff], &bb[bbOff], &sgrXByXWide, cnt,
+			s, uint32(n), uint32(sgrOneByX))
+		cnt = 0
+	}
+	for i := range cnt {
+		a := aa[aaOff+i]
+		b := int32(bb[bbOff+i])
+		p := uint32(max(a*n-b*b, 0))
+		z := (p*s + (1 << 19)) >> 20
+		x := uint32(sgrXByX[min(z, 255)])
+		aa[aaOff+i] = int32((x*uint32(b)*uint32(sgrOneByX) + (1 << 11)) >> 12)
+		bb[bbOff+i] = int16(x)
+	}
+}
+
+//go:noescape
+func sgrWeight1RVV(dst *uint8, t1 *int16, n int, w1 int32)
+
+//go:noescape
+func sgrWeight2RVV(dst *uint8, t1, t2 *int16, n int, w0, w1 int32)
+
+func sgrWeight1RVVRow(dst []uint8, dstOff int, t1 []int16, t1Off, w int,
+	w1 int32, bitdepthMax int32,
+) {
+	n := w
+	if n > 0 {
+		sgrWeight1RVV(&dst[dstOff], &t1[t1Off], n, w1)
+	}
+	if n < w {
+		sgrWeightedRow1(dst, dstOff+n, t1, t1Off+n, w-n, w1, bitdepthMax)
+	}
+}
+
+func sgrWeight2RVVRow(dst []uint8, dstOff int, t1 []int16, t1Off int,
+	t2 []int16, t2Off, w int, w0, w1 int32, bitdepthMax int32,
+) {
+	n := w
+	if n > 0 {
+		sgrWeight2RVV(&dst[dstOff], &t1[t1Off], &t2[t2Off], n, w0, w1)
+	}
+	if n < w {
+		sgrWeightedRow2(dst, dstOff+n, t1, t1Off+n, t2, t2Off+n, w-n, w0, w1, bitdepthMax)
+	}
+}

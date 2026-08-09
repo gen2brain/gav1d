@@ -102,3 +102,92 @@ func sgrBoxV5AVX2Row(sumsq []int32, sumsqPtrs []int, sum []int16, sumPtrs []int,
 			sum[sumPtrs[3]+x] + sum[sumPtrs[4]+x]
 	}
 }
+
+//go:noescape
+func sgrBoxH3AVX2(sumsq *int32, sum *int16, src *uint8, n int)
+
+//go:noescape
+func sgrBoxH5AVX2(sumsq *int32, sum *int16, src *uint8, n int)
+
+func sgrBoxH3AVX2Row(sumsq []int32, sumsqOff int, sum []int16, sumOff int,
+	src []uint8, srcOff, n int,
+) {
+	if n8 := n &^ 7; n8 > 0 {
+		sgrBoxH3AVX2(&sumsq[sumsqOff], &sum[sumOff], &src[srcOff], n8)
+		sumsqOff, sumOff, srcOff, n = sumsqOff+n8, sumOff+n8, srcOff+n8, n-n8
+	}
+	if n > 0 {
+		sgrBox3HRow(sumsq, sumsqOff, sum, sumOff, src, srcOff, n)
+	}
+}
+
+func sgrBoxH5AVX2Row(sumsq []int32, sumsqOff int, sum []int16, sumOff int,
+	src []uint8, srcOff, n int,
+) {
+	if n8 := n &^ 7; n8 > 0 {
+		sgrBoxH5AVX2(&sumsq[sumsqOff], &sum[sumOff], &src[srcOff], n8)
+		sumsqOff, sumOff, srcOff, n = sumsqOff+n8, sumOff+n8, srcOff+n8, n-n8
+	}
+	if n > 0 {
+		sgrBox5HRow(sumsq, sumsqOff, sum, sumOff, src, srcOff, n)
+	}
+}
+
+//go:noescape
+func sgrCalcABAVX2(aa *int32, bb *int16, tab *[256]uint32, n int, s, mul, oneByX uint32)
+
+func sgrCalcABAVX2Row(aa []int32, aaOff int, bb []int16, bbOff, w int, s uint32,
+	bitdepthMax int32, n, sgrOneByX int32,
+) {
+	if bitdepthFromMax(bitdepthMax) != 8 {
+		sgrCalcRowAB(aa, aaOff, bb, bbOff, w, s, bitdepthMax, n, sgrOneByX)
+
+		return
+	}
+
+	cnt := w + 2
+	if c8 := cnt &^ 7; c8 > 0 {
+		sgrCalcABAVX2(&aa[aaOff], &bb[bbOff], &sgrXByXWide, c8,
+			s, uint32(n), uint32(sgrOneByX))
+		aaOff, bbOff, cnt = aaOff+c8, bbOff+c8, cnt-c8
+	}
+	for i := range cnt {
+		a := aa[aaOff+i]
+		b := int32(bb[bbOff+i])
+		p := uint32(max(a*n-b*b, 0))
+		z := (p*s + (1 << 19)) >> 20
+		x := uint32(sgrXByX[min(z, 255)])
+		aa[aaOff+i] = int32((x*uint32(b)*uint32(sgrOneByX) + (1 << 11)) >> 12)
+		bb[bbOff+i] = int16(x)
+	}
+}
+
+//go:noescape
+func sgrWeight1AVX2(dst *uint8, t1 *int16, n int, w1 int32)
+
+//go:noescape
+func sgrWeight2AVX2(dst *uint8, t1, t2 *int16, n int, w0, w1 int32)
+
+func sgrWeight1AVX2Row(dst []uint8, dstOff int, t1 []int16, t1Off, w int,
+	w1 int32, bitdepthMax int32,
+) {
+	n := w &^ 7
+	if n > 0 {
+		sgrWeight1AVX2(&dst[dstOff], &t1[t1Off], n, w1)
+	}
+	if n < w {
+		sgrWeightedRow1(dst, dstOff+n, t1, t1Off+n, w-n, w1, bitdepthMax)
+	}
+}
+
+func sgrWeight2AVX2Row(dst []uint8, dstOff int, t1 []int16, t1Off int,
+	t2 []int16, t2Off, w int, w0, w1 int32, bitdepthMax int32,
+) {
+	n := w &^ 7
+	if n > 0 {
+		sgrWeight2AVX2(&dst[dstOff], &t1[t1Off], &t2[t2Off], n, w0, w1)
+	}
+	if n < w {
+		sgrWeightedRow2(dst, dstOff+n, t1, t1Off+n, t2, t2Off+n, w-n, w0, w1, bitdepthMax)
+	}
+}

@@ -2,6 +2,15 @@ package av1
 
 import "sync"
 
+// sgrXByXWide is the reciprocal table widened so a gather can reach it.
+var sgrXByXWide = func() (t [256]uint32) {
+	for i, v := range sgrXByX {
+		t[i] = uint32(v)
+	}
+
+	return t
+}()
+
 // lrContext holds the loop restoration kernels. The self-guided half works on
 // the sum buffers, which are int16 at 8 bits and int32 above, so unlike
 // dspContext this table needs the coefficient type too.
@@ -10,6 +19,18 @@ type lrContext[P pixel, C coef] struct {
 		fh *[8]int16, rnd int32, shift int, limit int32)
 	wienerV func(p []P, pOff int, hor []uint16, rows *[7]int,
 		fv *[8]int16, w int, bitdepthMax int32)
+
+	boxH3 func(sumsq []int32, sumsqOff int, sum []C, sumOff int,
+		src []P, srcOff, n int)
+	boxH5 func(sumsq []int32, sumsqOff int, sum []C, sumOff int,
+		src []P, srcOff, n int)
+
+	weight1 func(dst []P, dstOff int, t1 []C, t1Off, w int, w1 int32, bitdepthMax int32)
+	weight2 func(dst []P, dstOff int, t1 []C, t1Off int, t2 []C, t2Off, w int,
+		w0, w1 int32, bitdepthMax int32)
+
+	calcAB func(aa []int32, aaOff int, bb []C, bbOff, w int, s uint32,
+		bitdepthMax int32, n, sgrOneByX int32)
 
 	boxV3 func(sumsq []int32, sumsqPtrs []int, sum []C, sumPtrs []int,
 		sumsqOut []int32, sumsqOutOff int, sumOut []C, sumOutOff, w int)
@@ -28,6 +49,11 @@ func newLrGo[P pixel, C coef]() *lrContext[P, C] {
 	return &lrContext[P, C]{
 		wienerH: wienerHRow[P],
 		wienerV: wienerVRow[P],
+		boxH3:   sgrBox3HRow[P, C],
+		boxH5:   sgrBox5HRow[P, C],
+		weight1: sgrWeightedRow1[P, C],
+		weight2: sgrWeightedRow2[P, C],
+		calcAB:  sgrCalcRowAB[C],
 		boxV3:   sgrBox3RowV[C],
 		boxV5:   sgrBox5RowV[C],
 		finish1: sgrFinishFilterRow1[P, C],
