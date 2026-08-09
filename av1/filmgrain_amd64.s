@@ -2,6 +2,10 @@
 
 #include "textflag.h"
 
+DATA fgDeint<>+0(SB)/8, $0x0d0c090805040100
+DATA fgDeint<>+8(SB)/8, $0x0f0e0b0a07060302
+GLOBL fgDeint<>(SB), RODATA|NOPTR, $16
+
 DATA fgOnes<>+0(SB)/8, $0x0101010101010101
 DATA fgOnes<>+8(SB)/8, $0x0101010101010101
 DATA fgOnes<>+16(SB)/8, $0x0101010101010101
@@ -200,5 +204,164 @@ nosub:
 	JMP  loopuv
 
 doneuv:
+	VZEROUPPER
+	RET
+
+// NOISE16 applies the gathered scaling to the grain in 32-bit lanes, since at
+// high bit depth the product no longer fits a word.
+#define NOISE16                        \
+	VPMOVZXWD  (SI), Y0;           \
+	VPCMPEQD   Y3, Y3, Y3;         \
+	VPGATHERDD Y3, (BX)(Y0*1), Y4; \
+	VPAND      Y8, Y4, Y4;         \
+	VPMOVSXWD  (DX), Y5;           \
+	VPMULLD    Y5, Y4, Y4;         \
+	VPADDD     Y9, Y4, Y4;         \
+	VPSRAD     X12, Y4, Y4;        \
+	VPADDD     Y0, Y4, Y4;         \
+	VPMAXSD    Y10, Y4, Y4;        \
+	VPMINSD    Y11, Y4, Y4;        \
+	VPACKUSDW  Y4, Y4, Y4;         \
+	VPERMQ     $0x08, Y4, Y4;      \
+	VMOVDQU    X4, (DI)
+
+// func fgApplyRow16AVX2(dst, src *uint16, scaling *uint8, grain *int16, n, shift, minValue, maxValue int)
+TEXT ·fgApplyRow16AVX2(SB), NOSPLIT, $0-64
+	MOVQ         dst+0(FP), DI
+	MOVQ         src+8(FP), SI
+	MOVQ         scaling+16(FP), BX
+	MOVQ         grain+24(FP), DX
+	MOVQ         n+32(FP), CX
+	MOVQ         shift+40(FP), AX
+	VMOVD        AX, X12
+	MOVQ         AX, CX
+	MOVQ         $1, R8
+	SHLQ         CX, R8
+	SHRQ         $1, R8
+	VMOVD        R8, X9
+	VPBROADCASTD X9, Y9
+	MOVL         $255, AX
+	VMOVD        AX, X8
+	VPBROADCASTD X8, Y8
+	MOVQ         minValue+48(FP), AX
+	VMOVD        AX, X10
+	VPBROADCASTD X10, Y10
+	MOVQ         maxValue+56(FP), AX
+	VMOVD        AX, X11
+	VPBROADCASTD X11, Y11
+	MOVQ         n+32(FP), CX
+
+fgrow16:
+	NOISE16
+	ADDQ $16, SI
+	ADDQ $16, DI
+	ADDQ $16, DX
+	SUBQ $8, CX
+	JNZ  fgrow16
+
+	VZEROUPPER
+	RET
+
+// func fguvApplyRow16AVX2(dst, src, luma *uint16, scaling *uint8, grain *int16, p *fguvParams)
+TEXT ·fguvApplyRow16AVX2(SB), NOSPLIT, $0-48
+	MOVQ         dst+0(FP), DI
+	MOVQ         src+8(FP), SI
+	MOVQ         luma+16(FP), R10
+	MOVQ         scaling+24(FP), BX
+	MOVQ         grain+32(FP), DX
+	MOVQ         p+40(FP), R11
+	MOVQ         8(R11), AX
+	VMOVD        AX, X12
+	MOVQ         $1, R8
+	MOVQ         AX, CX
+	SHLQ         CX, R8
+	SHRQ         $1, R8
+	VMOVD        R8, X9
+	VPBROADCASTD X9, Y9
+	MOVQ         0(R11), CX
+	MOVL         $255, AX
+	VMOVD        AX, X8
+	VPBROADCASTD X8, Y8
+	MOVQ         16(R11), AX
+	VMOVD        AX, X10
+	VPBROADCASTD X10, Y10
+	MOVQ         24(R11), AX
+	VMOVD        AX, X11
+	VPBROADCASTD X11, Y11
+	MOVQ         32(R11), R9
+	MOVQ         40(R11), AX
+	VMOVD        AX, X13
+	VPBROADCASTD X13, Y13
+	MOVQ         48(R11), AX
+	VMOVD        AX, X14
+	VPBROADCASTD X14, Y14
+	MOVQ         56(R11), AX
+	VMOVD        AX, X15
+	VPBROADCASTD X15, Y15
+	MOVQ         64(R11), AX
+	VMOVD        AX, X6
+	VPBROADCASTD X6, Y6
+	MOVQ         72(R11), R12
+	VBROADCASTI128 fgDeint<>(SB), Y7
+
+fguvrow16:
+	CMPQ    R12, $0
+	JNE     sub16
+	VPMOVZXWD (R10), Y2
+	JMP     havelum16
+
+sub16:
+	VMOVDQU        (R10), Y2
+	VPSHUFB        Y7, Y2, Y2
+	VPERMQ         $0xd8, Y2, Y2
+	VEXTRACTI128   $1, Y2, X3
+	VPMOVZXWD      X3, Y3
+	VPMOVZXWD      X2, Y2
+	VPADDD         Y3, Y2, Y2
+	VPCMPEQD       Y3, Y3, Y3
+	VPSUBD         Y3, Y2, Y2
+	VPSRLD         $1, Y2, Y2
+
+havelum16:
+	VPMOVZXWD (SI), Y1
+	CMPQ      R9, $0
+	JNE       idxdone16
+	VPMULLD   Y13, Y2, Y2
+	VPMULLD   Y14, Y1, Y0
+	VPADDD    Y0, Y2, Y2
+	VPSRAD    $6, Y2, Y2
+	VPADDD    Y15, Y2, Y2
+	VPXOR     Y0, Y0, Y0
+	VPMAXSD   Y0, Y2, Y2
+	VPMINSD   Y6, Y2, Y2
+
+idxdone16:
+	VPCMPEQD   Y3, Y3, Y3
+	VPGATHERDD Y3, (BX)(Y2*1), Y4
+	VPAND      Y8, Y4, Y4
+	VPMOVSXWD  (DX), Y5
+	VPMULLD    Y5, Y4, Y4
+	VPADDD     Y9, Y4, Y4
+	VPSRAD     X12, Y4, Y4
+	VPADDD     Y1, Y4, Y4
+	VPMAXSD    Y10, Y4, Y4
+	VPMINSD    Y11, Y4, Y4
+	VPACKUSDW  Y4, Y4, Y4
+	VPERMQ     $0x08, Y4, Y4
+	VMOVDQU    X4, (DI)
+
+	ADDQ $16, SI
+	ADDQ $16, DI
+	ADDQ $16, DX
+	MOVQ R12, AX
+	ADDQ $16, R10
+	CMPQ AX, $0
+	JEQ  nosub16
+	ADDQ $16, R10
+
+nosub16:
+	SUBQ $8, CX
+	JNZ  fguvrow16
+
 	VZEROUPPER
 	RET

@@ -21,6 +21,8 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d16.cdefFilter = cdefFilterBlock16AVX2
 		d16.itxAdd = itxAdd16Vec
 		d16.cdefDir = cdefFindDir16AVX2
+		d16.fgApplyRow = fgApplyRow16AVX2Row
+		d16.fguvApplyRow = fguvApplyRow16AVX2Row
 		d16.cdefCopy = cdefCopy16AVX2Rows
 	}
 

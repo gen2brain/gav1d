@@ -206,6 +206,117 @@ func TestFilmGrainAsm(t *testing.T) {
 	t.Logf("%d cases", cases)
 }
 
+// TestFilmGrain16Asm checks the same row at high bit depth, where the scaling
+// table is indexed by the whole sample and the product no longer fits a word.
+func TestFilmGrain16Asm(t *testing.T) {
+	d := newDsp[uint16]()
+	cases := 0
+
+	for _, bpc := range []int{10, 12} {
+		size := 1 << bpc
+		scaling := make([]uint8, size+4)[:size]
+		for i := range scaling {
+			scaling[i] = uint8(cdefGen(7, 3, i))
+		}
+		pixMax := int(1<<bpc - 1)
+
+		for iter := range 6 {
+			src := make([]uint16, 64)
+			for i := range src {
+				src[i] = uint16(int(cdefGen(iter, 0, i)) & pixMax)
+			}
+			grain := make([]int16, 64)
+			for i := range grain {
+				grain[i] = int16(cdefGen(iter, 1, i)&2047) - 1024
+			}
+
+			for _, n := range []int{16, 17, 23, 30, 31, 32, 33, 48} {
+				for shift := 8; shift <= 11; shift++ {
+					for _, lim := range [2][2]int{{0, pixMax}, {16 << (bpc - 8), 235 << (bpc - 8)}} {
+						ref := make([]uint16, 64)
+						got := make([]uint16, 64)
+						fgApplyRow(ref, 4, src, 2, scaling, grain, n, shift, lim[0], lim[1])
+						d.fgApplyRow(got, 4, src, 2, scaling, grain, n, shift, lim[0], lim[1])
+
+						for i := range ref {
+							if got[i] == ref[i] {
+								continue
+							}
+							t.Fatalf("bpc=%d n=%d shift=%d clip=%v: dst[%d] = %d, want %d",
+								bpc, n, shift, lim, i, got[i], ref[i])
+						}
+						cases++
+					}
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+// TestFilmGrainUV16Asm checks the chroma noise row at high bit depth, over both
+// subsampling and both ways the scaling index is built.
+func TestFilmGrainUV16Asm(t *testing.T) {
+	d := newDsp[uint16]()
+	cases := 0
+
+	for _, bpc := range []int{10, 12} {
+		size := 1 << bpc
+		scaling := make([]uint8, size+4)[:size]
+		for i := range scaling {
+			scaling[i] = uint8(cdefGen(7, 3, i))
+		}
+		pixMax := int(1<<bpc - 1)
+
+		for iter := range 4 {
+			src := make([]uint16, 64)
+			luma := make([]uint16, 128)
+			for i := range src {
+				src[i] = uint16(int(cdefGen(iter, 0, i)) & pixMax)
+			}
+			for i := range luma {
+				luma[i] = uint16(int(cdefGen(iter, 4, i)) & pixMax)
+			}
+			grain := make([]int16, 64)
+			for i := range grain {
+				grain[i] = int16(cdefGen(iter, 1, i)&2047) - 1024
+			}
+
+			for _, n := range []int{16, 17, 23, 31, 32, 33} {
+				for _, sx := range []int{0, 1} {
+					for _, csfl := range []bool{false, true} {
+						for shift := 8; shift <= 11; shift++ {
+							ref := make([]uint16, 64)
+							got := make([]uint16, 64)
+							args := func(dst []uint16) {
+								fguvApplyRow(dst, 4, src, 2, luma, 3, scaling, grain,
+									n, shift, 16<<(bpc-8), 235<<(bpc-8), sx,
+									58, -68, 1<<(bpc-1), pixMax, csfl)
+							}
+							args(ref)
+							d.fguvApplyRow(got, 4, src, 2, luma, 3, scaling, grain,
+								n, shift, 16<<(bpc-8), 235<<(bpc-8), sx,
+								58, -68, 1<<(bpc-1), pixMax, csfl)
+
+							for i := range ref {
+								if got[i] == ref[i] {
+									continue
+								}
+								t.Fatalf("bpc=%d n=%d sx=%d csfl=%v shift=%d: dst[%d] = %d, want %d",
+									bpc, n, sx, csfl, shift, i, got[i], ref[i])
+							}
+							cases++
+						}
+					}
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
+
 // TestFilmGrainUVAsm checks the chroma noise row, whose scaling index comes
 // from the co-located luma, against the pure Go one.
 func TestFilmGrainUVAsm(t *testing.T) {

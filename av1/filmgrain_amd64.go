@@ -52,3 +52,53 @@ func fguvApplyRow8AVX2(dst []uint8, dstOff int, src []uint8, srcOff int,
 	fguvApplyRowAVX2(&dst[dstOff], &src[srcOff], &luma[lumaOff], &scaling[0],
 		&grain[0], n, 1<<(15-shift), minValue, maxValue, &p)
 }
+
+//go:noescape
+func fgApplyRow16AVX2(dst, src *uint16, scaling *uint8, grain *int16,
+	n, shift, minValue, maxValue int)
+
+func fgApplyRow16AVX2Row(dst []uint16, dstOff int, src []uint16, srcOff int,
+	scaling []uint8, grain []int16, n, shift, minValue, maxValue int,
+) {
+	if n8 := n &^ 7; n8 > 0 {
+		fgApplyRow16AVX2(&dst[dstOff], &src[srcOff], &scaling[0], &grain[0],
+			n8, shift, minValue, maxValue)
+		dstOff, srcOff, grain, n = dstOff+n8, srcOff+n8, grain[n8:], n-n8
+	}
+	if n > 0 {
+		fgApplyRow(dst, dstOff, src, srcOff, scaling, grain, n, shift, minValue, maxValue)
+	}
+}
+
+// fguv16Params carries what the chroma row needs beyond its pointers.
+type fguv16Params struct {
+	n, shift, minValue, maxValue int
+	csfl                         int
+	lumaMult, mult, offset       int
+	pixelMax                     int
+	sx                           int
+}
+
+//go:noescape
+func fguvApplyRow16AVX2(dst, src, luma *uint16, scaling *uint8, grain *int16, p *fguv16Params)
+
+func fguvApplyRow16AVX2Row(dst []uint16, dstOff int, src []uint16, srcOff int,
+	luma []uint16, lumaOff int, scaling []uint8, grain []int16,
+	n, shift, minValue, maxValue int, sx, lumaMult, mult, offset, pixelMax int, csfl bool,
+) {
+	if n8 := n &^ 7; n8 > 0 {
+		p := fguv16Params{
+			n: n8, shift: shift, minValue: minValue, maxValue: maxValue,
+			csfl: b2i(csfl), lumaMult: lumaMult, mult: mult, offset: offset,
+			pixelMax: pixelMax, sx: sx,
+		}
+		fguvApplyRow16AVX2(&dst[dstOff], &src[srcOff], &luma[lumaOff],
+			&scaling[0], &grain[0], &p)
+		dstOff, srcOff, lumaOff = dstOff+n8, srcOff+n8, lumaOff+(n8<<sx)
+		grain, n = grain[n8:], n-n8
+	}
+	if n > 0 {
+		fguvApplyRow(dst, dstOff, src, srcOff, luma, lumaOff, scaling, grain,
+			n, shift, minValue, maxValue, sx, lumaMult, mult, offset, pixelMax, csfl)
+	}
+}
