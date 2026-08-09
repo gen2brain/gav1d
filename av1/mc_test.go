@@ -400,3 +400,50 @@ func TestPut8tapAsm(t *testing.T) {
 
 	t.Logf("%d cases", cases)
 }
+
+// TestPut8tap16Asm checks the same filter at high bit depth, where the byte
+// multiply of the 8-bit kernel cannot carry the samples.
+func TestPut8tap16Asm(t *testing.T) {
+	d, ref := newDsp[uint16](), newDspGo[uint16]()
+	base := mcPad*mcStride + mcPad
+	widths := []int{2, 4, 8, 16, 32, 64, 128}
+	heights := []int{2, 4, 8, 16, 64}
+	subpel := []int{0, 1, 7, 15}
+	cases := 0
+	pixMax := 1023
+
+	got := make([]uint16, mcRows*mcStride)
+	want := make([]uint16, mcRows*mcStride)
+
+	for iter := range 2 {
+		m := mcFill[uint16](0, iter, int32(pixMax))
+		for _, filter2d := range filter2dFilterType {
+			for _, mx := range subpel {
+				for _, my := range subpel {
+					for _, w := range widths {
+						for _, h := range heights {
+							copy(got, m.dst)
+							copy(want, m.dst)
+							d.put8tap(got, base, mcStride, m.src, base, mcStride,
+								w, h, mx, my, filter2d, 255)
+							ref.put8tap(want, base, mcStride, m.src, base, mcStride,
+								w, h, mx, my, filter2d, 255)
+
+							for i := range want {
+								if got[i] == want[i] {
+									continue
+								}
+								t.Fatalf("%dx%d mx=%d my=%d filter=%d: [%d,%d] = %d, want %d",
+									w, h, mx, my, filter2d,
+									(i-base)/mcStride, (i-base)%mcStride, got[i], want[i])
+							}
+							cases++
+						}
+					}
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
