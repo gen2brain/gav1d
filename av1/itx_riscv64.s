@@ -113,3 +113,37 @@ cols16:
 	BNEZ X14, rows16
 
 	RET
+
+// func itxTransposeRVV(wide, out *int32, w, sh, n int)
+TEXT ·itxTransposeRVV(SB), NOSPLIT, $0-40
+	MOV  wide+0(FP), X10
+	MOV  out+8(FP), X11
+	MOV  w+16(FP), X12
+	MOV  sh+24(FP), X13
+	MOV  n+32(FP), X14
+	SLLI $2, X13, X13
+	SLLI $2, X12, X15
+
+trtap:
+	MOV X10, X17
+	MOV X11, X18
+	MOV X14, X19
+
+trlane:
+	VSETVLI X19, E32, M1, TA, MA, X5
+	VLE32V  (X17), V0
+	VSSE32V V0, X15, (X18)
+
+	SLLI $2, X5, X20
+	ADD  X20, X17
+	MUL  X15, X5, X21
+	ADD  X21, X18
+	SUB  X5, X19
+	BNEZ X19, trlane
+
+	ADD  X13, X10
+	ADD  $4, X11
+	SUB  $1, X12
+	BNEZ X12, trtap
+
+	RET

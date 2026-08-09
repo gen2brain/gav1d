@@ -177,6 +177,24 @@ func itxTailCase[P pixel](t *testing.T, d *dspContext[P], iter, w, h int,
 		}
 	}
 
+	sh := min(h, 32)
+	wide := make([]int32, w*sh)
+	for i := range wide {
+		wide[i] = int32(gen(2, i)) >> 8
+	}
+	for _, n := range []int{sh, min(8, sh), 4} {
+		tref := make([]int32, w*h)
+		tgot := make([]int32, w*h)
+		itxTransposeGo(wide, tref, w, sh, n)
+		d.itxTranspose(wide, tgot, w, sh, n)
+		for i := range tref {
+			if tgot[i] != tref[i] {
+				t.Fatalf("%dx%d transpose n=%d buf[%d] = %d, want %d",
+					w, h, n, i, tgot[i], tref[i])
+			}
+		}
+	}
+
 	dref := make([]P, stride*(h+2))
 	dgot := make([]P, stride*(h+2))
 	for i := range dref {

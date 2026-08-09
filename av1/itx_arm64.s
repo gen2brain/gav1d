@@ -121,3 +121,58 @@ cols16:
 	CBNZ R4, rows16
 
 	RET
+
+// func itxTransposeNEON(wide, out *int32, w, sh, n int)
+TEXT ·itxTransposeNEON(SB), NOSPLIT, $0-40
+	MOVD wide+0(FP), R0
+	MOVD out+8(FP), R1
+	MOVD w+16(FP), R2
+	MOVD sh+24(FP), R3
+	MOVD n+32(FP), R4
+	LSL  $2, R3, R3
+	LSL  $2, R2, R5
+
+trlane:
+	MOVD R0, R6
+	MOVD R1, R7
+	MOVD R2, R8
+
+trtap:
+	MOVD R6, R9
+	VLD1 (R9), [V0.S4]
+	ADD  R3, R9
+	VLD1 (R9), [V1.S4]
+	ADD  R3, R9
+	VLD1 (R9), [V2.S4]
+	ADD  R3, R9
+	VLD1 (R9), [V3.S4]
+
+	VZIP1 V2.S4, V0.S4, V4.S4
+	VZIP1 V3.S4, V1.S4, V5.S4
+	VZIP2 V2.S4, V0.S4, V6.S4
+	VZIP2 V3.S4, V1.S4, V7.S4
+	VZIP1 V5.S4, V4.S4, V0.S4
+	VZIP2 V5.S4, V4.S4, V1.S4
+	VZIP1 V7.S4, V6.S4, V2.S4
+	VZIP2 V7.S4, V6.S4, V3.S4
+
+	MOVD R7, R9
+	VST1 [V0.S4], (R9)
+	ADD  R5, R9
+	VST1 [V1.S4], (R9)
+	ADD  R5, R9
+	VST1 [V2.S4], (R9)
+	ADD  R5, R9
+	VST1 [V3.S4], (R9)
+
+	ADD  R3<<2, R6, R6
+	ADD  $16, R7
+	SUB  $4, R8
+	CBNZ R8, trtap
+
+	ADD  $16, R0
+	ADD  R5<<2, R1, R1
+	SUB  $4, R4
+	CBNZ R4, trlane
+
+	RET
