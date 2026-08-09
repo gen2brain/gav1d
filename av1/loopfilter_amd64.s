@@ -9,6 +9,12 @@ DATA lpfShuf<>+0(SB)/8, $0x0d0905010c080400
 DATA lpfShuf<>+8(SB)/8, $0x0f0b07030e0a0602
 GLOBL lpfShuf<>(SB), RODATA|NOPTR, $16
 
+// At sixteen bits the transpose deinterleaves words rather than bytes, and
+// that permutation is not an involution, so the way back needs lpfShuf.
+DATA lpfWord<>+0(SB)/8, $0x0d0c090805040100
+DATA lpfWord<>+8(SB)/8, $0x0f0e0b0a07060302
+GLOBL lpfWord<>(SB), RODATA|NOPTR, $16
+
 #define E      0(DI)
 #define I      4(DI)
 #define H      8(DI)
@@ -103,6 +109,187 @@ GLOBL lpfShuf<>(SB), RODATA|NOPTR, $16
 	VPUNPCKHQDQ T2, T0, B; \
 	VPUNPCKLQDQ T3, T1, C; \
 	VPUNPCKHQDQ T3, T1, D
+
+// LPFBODY masks the lanes and layers the filters, working in 32-bit lanes
+// throughout, which is why both bit depths share it.
+#define LPFBODY \
+	VMOVDQU      SP1, X0; \
+	VMOVDQU      SP0, X1; \
+	VMOVDQU      SQ0, X2; \
+	VMOVDQU      SQ1, X3; \
+	VPBROADCASTD I, X8; \
+	VPBROADCASTD H, X10; \
+	VPSUBD       X1, X0, X4; \
+	VPABSD       X4, X4; \
+	VPCMPGTD     X8, X4, X15; \
+	VPCMPGTD     X10, X4, X14; \
+	VPSUBD       X2, X3, X4; \
+	VPABSD       X4, X4; \
+	VPCMPGTD     X8, X4, X5; \
+	VPOR         X5, X15, X15; \
+	VPCMPGTD     X10, X4, X5; \
+	VPOR         X5, X14, X14; \
+	VMOVDQU      X14, MHEV; \
+	VPSUBD       X2, X1, X4; \
+	VPABSD       X4, X4; \
+	VPADDD       X4, X4, X4; \
+	VPSUBD       X3, X0, X5; \
+	VPABSD       X5, X5; \
+	VPSRLD       $1, X5, X5; \
+	VPADDD       X5, X4, X4; \
+	VPBROADCASTD E, X9; \
+	VPCMPGTD     X9, X4, X5; \
+	VPOR         X5, X15, X15; \
+	MOVL WD, AX; \
+	CMPL AX, $4; \
+	JLE  fmdone; \
+	ACCGT(X0, SP2, X8, X5, X15); \
+	ACCGT(X3, SQ2, X8, X5, X15); \
+	CMPL AX, $6; \
+	JLE  fmdone; \
+	VMOVDQU SP3, X6; \
+	ACCGT(X6, SP2, X8, X5, X15); \
+	VMOVDQU SQ3, X6; \
+	ACCGT(X6, SQ2, X8, X5, X15); \
+	fmdone:; \
+	VPMOVMSKB X15, AX; \
+	CMPL      AX, $0xffff; \
+	JEQ       scatter; \
+	VMOVDQU      MHEV, X14; \
+	VPBROADCASTD NEGLIM, X8; \
+	VPBROADCASTD LIM1, X9; \
+	VPSUBD       X3, X0, X4; \
+	CLIPD(X4, X8, X9); \
+	VPAND        X14, X4, X4; \
+	VPSUBD       X1, X2, X6; \
+	VPADDD       X6, X6, X7; \
+	VPADDD       X6, X7, X7; \
+	VPADDD       X7, X4, X4; \
+	CLIPD(X4, X8, X9); \
+	VPBROADCASTD C4, X10; \
+	VPADDD       X10, X4, X6; \
+	VPMINSD      X9, X6, X6; \
+	VPSRAD       $3, X6, X6; \
+	VPBROADCASTD C3, X10; \
+	VPADDD       X10, X4, X7; \
+	VPMINSD      X9, X7, X7; \
+	VPSRAD       $3, X7, X7; \
+	VPXOR        X8, X8, X8; \
+	VPBROADCASTD PIXMAX, X9; \
+	VPADDD       X7, X1, X10; \
+	CLIPD(X10, X8, X9); \
+	VPSUBD       X6, X2, X11; \
+	CLIPD(X11, X8, X9); \
+	VPBROADCASTD C1, X12; \
+	VPADDD       X12, X6, X12; \
+	VPSRAD       $1, X12, X12; \
+	VPADDD       X12, X0, X4; \
+	CLIPD(X4, X8, X9); \
+	VPBLENDVB    X14, X0, X4, X4; \
+	VPSUBD       X12, X3, X5; \
+	CLIPD(X5, X8, X9); \
+	VPBLENDVB    X14, X3, X5, X5; \
+	VPBLENDVB    X15, X0, X4, X4; \
+	VMOVDQU      X4, OP1; \
+	VPBLENDVB    X15, X1, X10, X10; \
+	VMOVDQU      X10, OP0; \
+	VPBLENDVB    X15, X2, X11, X11; \
+	VMOVDQU      X11, OQ0; \
+	VPBLENDVB    X15, X3, X5, X5; \
+	VMOVDQU      X5, OQ1; \
+	MOVL WD, AX; \
+	CMPL AX, $4; \
+	JLE  scatter; \
+	VPBROADCASTD FTHR, X8; \
+	VMOVDQU      X15, X14; \
+	ACCGT(X1, SP2, X8, X5, X14); \
+	ACCGT(X0, X1, X8, X5, X14); \
+	ACCGT(X3, X2, X8, X5, X14); \
+	ACCGT(X2, SQ2, X8, X5, X14); \
+	CMPL         AX, $8; \
+	JL           flatindone; \
+	ACCGT(X1, SP3, X8, X5, X14); \
+	ACCGT(X2, SQ3, X8, X5, X14); \
+	flatindone:; \
+	VMOVDQU   X14, MFLAT; \
+	VPMOVMSKB X14, DX; \
+	CMPL      DX, $0xffff; \
+	JEQ       scatter; \
+	VPBROADCASTD C4, X13; \
+	CMPL         AX, $6; \
+	JG           eight; \
+	WIDE6(SP2, SP2, X0, X1, X2, OP1); \
+	WIDE6(SP2, X0, X1, X2, X3, OP0); \
+	WIDE6(X0, X1, X2, X3, SQ2, OQ0); \
+	WIDE6(X1, X2, X3, SQ2, SQ2, OQ1); \
+	JMP          scatter; \
+	eight:; \
+	WIDE8(SP3, SP3, SP3, SP2, X0, X1, X2, OP2); \
+	WIDE8(SP3, SP3, SP2, X0, X1, X2, X3, OP1); \
+	WIDE8(SP3, SP2, X0, X1, X2, X3, SQ2, OP0); \
+	WIDE8(SP2, X0, X1, X2, X3, SQ2, SQ3, OQ0); \
+	WIDE8(X0, X1, X2, X3, SQ2, SQ3, SQ3, OQ1); \
+	WIDE8(X1, X2, X3, SQ2, SQ3, SQ3, SQ3, OQ2); \
+	CMPL AX, $16; \
+	JL   scatter; \
+	VPBROADCASTD FTHR, X8; \
+	ACCGT(X1, SP6, X8, X5, X14); \
+	ACCGT(X1, SP5, X8, X5, X14); \
+	ACCGT(X1, SP4, X8, X5, X14); \
+	ACCGT(X2, SQ4, X8, X5, X14); \
+	ACCGT(X2, SQ5, X8, X5, X14); \
+	ACCGT(X2, SQ6, X8, X5, X14); \
+	VPMOVMSKB    X14, DX; \
+	CMPL         DX, $0xffff; \
+	JEQ          scatter; \
+	VMOVDQU SP6, X0; \
+	VMOVDQU X0, -208(BX); \
+	VMOVDQU X0, -192(BX); \
+	VMOVDQU X0, -176(BX); \
+	VMOVDQU X0, -160(BX); \
+	VMOVDQU X0, -144(BX); \
+	VMOVDQU X0, -128(BX); \
+	VMOVDQU SQ6, X0; \
+	VMOVDQU X0, 112(BX); \
+	VMOVDQU X0, 128(BX); \
+	VMOVDQU X0, 144(BX); \
+	VMOVDQU X0, 160(BX); \
+	VMOVDQU X0, 176(BX); \
+	VMOVDQU X0, 192(BX); \
+	LEAQ         -192(BX), CX; \
+	VMOVDQU      (CX), X4; \
+	VPADDD       16(CX), X4, X4; \
+	VPADDD       32(CX), X4, X4; \
+	VPADDD       48(CX), X4, X4; \
+	VPADDD       64(CX), X4, X4; \
+	VPADDD       80(CX), X4, X4; \
+	VPADDD       96(CX), X4, X4; \
+	VPADDD       112(CX), X4, X4; \
+	VPADDD       128(CX), X4, X4; \
+	VPADDD       144(CX), X4, X4; \
+	VPADDD       160(CX), X4, X4; \
+	VPADDD       176(CX), X4, X4; \
+	VPADDD       192(CX), X4, X4; \
+	VPBROADCASTD C4, X13; \
+	VPADDD       X13, X13, X13; \
+	LEAQ         -96(BX), CX; \
+	LEAQ         224(BX), DX; \
+	MOVQ         $12, R14; \
+	fourteen:; \
+	VMOVDQU   -16(CX), X5; \
+	VPADDD    (CX), X5, X5; \
+	VPADDD    16(CX), X5, X5; \
+	VPADDD    X4, X5, X5; \
+	VPADDD    X13, X5, X5; \
+	VPSRAD    $4, X5, X5; \
+	VPBLENDVB X14, (DX), X5, X5; \
+	VMOVDQU   X5, (DX); \
+	VPADDD    112(CX), X4, X4; \
+	VPSUBD    -96(CX), X4, X4; \
+	ADDQ      $16, CX; \
+	ADDQ      $16, DX; \
+	DECQ      R14; \
+	JNZ       fourteen;
 
 // func lpf8AVX2(dst *uint8, stridea, strideb int, p *lpfParams)
 TEXT ·lpf8AVX2(SB), NOSPLIT, $768-32
@@ -208,201 +395,7 @@ widenloop:
 	DECQ      R14
 	JNZ       widenloop
 
-	VMOVDQU      SP1, X0
-	VMOVDQU      SP0, X1
-	VMOVDQU      SQ0, X2
-	VMOVDQU      SQ1, X3
-	VPBROADCASTD I, X8
-	VPBROADCASTD H, X10
-	VPSUBD       X1, X0, X4
-	VPABSD       X4, X4
-	VPCMPGTD     X8, X4, X15
-	VPCMPGTD     X10, X4, X14
-	VPSUBD       X2, X3, X4
-	VPABSD       X4, X4
-	VPCMPGTD     X8, X4, X5
-	VPOR         X5, X15, X15
-	VPCMPGTD     X10, X4, X5
-	VPOR         X5, X14, X14
-	VMOVDQU      X14, MHEV
-	VPSUBD       X2, X1, X4
-	VPABSD       X4, X4
-	VPADDD       X4, X4, X4
-	VPSUBD       X3, X0, X5
-	VPABSD       X5, X5
-	VPSRLD       $1, X5, X5
-	VPADDD       X5, X4, X4
-	VPBROADCASTD E, X9
-	VPCMPGTD     X9, X4, X5
-	VPOR         X5, X15, X15
-
-	MOVL WD, AX
-	CMPL AX, $4
-	JLE  fmdone
-	ACCGT(X0, SP2, X8, X5, X15)
-	ACCGT(X3, SQ2, X8, X5, X15)
-	CMPL AX, $6
-	JLE  fmdone
-	VMOVDQU SP3, X6
-	ACCGT(X6, SP2, X8, X5, X15)
-	VMOVDQU SQ3, X6
-	ACCGT(X6, SQ2, X8, X5, X15)
-
-fmdone:
-	VPMOVMSKB X15, AX
-	CMPL      AX, $0xffff
-	JEQ       scatter
-
-	// The narrow filter runs on every lane that got this far.
-	VMOVDQU      MHEV, X14
-	VPBROADCASTD NEGLIM, X8
-	VPBROADCASTD LIM1, X9
-	VPSUBD       X3, X0, X4
-	CLIPD(X4, X8, X9)
-	VPAND        X14, X4, X4
-	VPSUBD       X1, X2, X6
-	VPADDD       X6, X6, X7
-	VPADDD       X6, X7, X7
-	VPADDD       X7, X4, X4
-	CLIPD(X4, X8, X9)
-	VPBROADCASTD C4, X10
-	VPADDD       X10, X4, X6
-	VPMINSD      X9, X6, X6
-	VPSRAD       $3, X6, X6
-	VPBROADCASTD C3, X10
-	VPADDD       X10, X4, X7
-	VPMINSD      X9, X7, X7
-	VPSRAD       $3, X7, X7
-	VPXOR        X8, X8, X8
-	VPBROADCASTD PIXMAX, X9
-	VPADDD       X7, X1, X10
-	CLIPD(X10, X8, X9)
-	VPSUBD       X6, X2, X11
-	CLIPD(X11, X8, X9)
-	VPBROADCASTD C1, X12
-	VPADDD       X12, X6, X12
-	VPSRAD       $1, X12, X12
-	VPADDD       X12, X0, X4
-	CLIPD(X4, X8, X9)
-	VPBLENDVB    X14, X0, X4, X4
-	VPSUBD       X12, X3, X5
-	CLIPD(X5, X8, X9)
-	VPBLENDVB    X14, X3, X5, X5
-	VPBLENDVB    X15, X0, X4, X4
-	VMOVDQU      X4, OP1
-	VPBLENDVB    X15, X1, X10, X10
-	VMOVDQU      X10, OP0
-	VPBLENDVB    X15, X2, X11, X11
-	VMOVDQU      X11, OQ0
-	VPBLENDVB    X15, X3, X5, X5
-	VMOVDQU      X5, OQ1
-
-	MOVL WD, AX
-	CMPL AX, $4
-	JLE  scatter
-
-	// flat8in decides whether the six or eight tap filter replaces it.
-	VPBROADCASTD FTHR, X8
-	VMOVDQU      X15, X14
-	ACCGT(X1, SP2, X8, X5, X14)
-	ACCGT(X0, X1, X8, X5, X14)
-	ACCGT(X3, X2, X8, X5, X14)
-	ACCGT(X2, SQ2, X8, X5, X14)
-	CMPL         AX, $8
-	JL           flatindone
-	ACCGT(X1, SP3, X8, X5, X14)
-	ACCGT(X2, SQ3, X8, X5, X14)
-
-flatindone:
-	VMOVDQU   X14, MFLAT
-	VPMOVMSKB X14, DX
-	CMPL      DX, $0xffff
-	JEQ       scatter
-
-	VPBROADCASTD C4, X13
-	CMPL         AX, $6
-	JG           eight
-
-	WIDE6(SP2, SP2, X0, X1, X2, OP1)
-	WIDE6(SP2, X0, X1, X2, X3, OP0)
-	WIDE6(X0, X1, X2, X3, SQ2, OQ0)
-	WIDE6(X1, X2, X3, SQ2, SQ2, OQ1)
-	JMP          scatter
-
-eight:
-	WIDE8(SP3, SP3, SP3, SP2, X0, X1, X2, OP2)
-	WIDE8(SP3, SP3, SP2, X0, X1, X2, X3, OP1)
-	WIDE8(SP3, SP2, X0, X1, X2, X3, SQ2, OP0)
-	WIDE8(SP2, X0, X1, X2, X3, SQ2, SQ3, OQ0)
-	WIDE8(X0, X1, X2, X3, SQ2, SQ3, SQ3, OQ1)
-	WIDE8(X1, X2, X3, SQ2, SQ3, SQ3, SQ3, OQ2)
-
-	CMPL AX, $16
-	JL   scatter
-
-	// flat8out narrows it once more, to the fourteen tap filter.
-	VPBROADCASTD FTHR, X8
-	ACCGT(X1, SP6, X8, X5, X14)
-	ACCGT(X1, SP5, X8, X5, X14)
-	ACCGT(X1, SP4, X8, X5, X14)
-	ACCGT(X2, SQ4, X8, X5, X14)
-	ACCGT(X2, SQ5, X8, X5, X14)
-	ACCGT(X2, SQ6, X8, X5, X14)
-	VPMOVMSKB    X14, DX
-	CMPL         DX, $0xffff
-	JEQ          scatter
-
-	// Replicating the ends removes every bounds test from the window.
-	VMOVDQU SP6, X0
-	VMOVDQU X0, -208(BX)
-	VMOVDQU X0, -192(BX)
-	VMOVDQU X0, -176(BX)
-	VMOVDQU X0, -160(BX)
-	VMOVDQU X0, -144(BX)
-	VMOVDQU X0, -128(BX)
-	VMOVDQU SQ6, X0
-	VMOVDQU X0, 112(BX)
-	VMOVDQU X0, 128(BX)
-	VMOVDQU X0, 144(BX)
-	VMOVDQU X0, 160(BX)
-	VMOVDQU X0, 176(BX)
-	VMOVDQU X0, 192(BX)
-
-	LEAQ         -192(BX), CX
-	VMOVDQU      (CX), X4
-	VPADDD       16(CX), X4, X4
-	VPADDD       32(CX), X4, X4
-	VPADDD       48(CX), X4, X4
-	VPADDD       64(CX), X4, X4
-	VPADDD       80(CX), X4, X4
-	VPADDD       96(CX), X4, X4
-	VPADDD       112(CX), X4, X4
-	VPADDD       128(CX), X4, X4
-	VPADDD       144(CX), X4, X4
-	VPADDD       160(CX), X4, X4
-	VPADDD       176(CX), X4, X4
-	VPADDD       192(CX), X4, X4
-	VPBROADCASTD C4, X13
-	VPADDD       X13, X13, X13
-	LEAQ         -96(BX), CX
-	LEAQ         224(BX), DX
-	MOVQ         $12, R14
-
-fourteen:
-	VMOVDQU   -16(CX), X5
-	VPADDD    (CX), X5, X5
-	VPADDD    16(CX), X5, X5
-	VPADDD    X4, X5, X5
-	VPADDD    X13, X5, X5
-	VPSRAD    $4, X5, X5
-	VPBLENDVB X14, (DX), X5, X5
-	VMOVDQU   X5, (DX)
-	VPADDD    112(CX), X4, X4
-	VPSUBD    -96(CX), X4, X4
-	ADDQ      $16, CX
-	ADDQ      $16, DX
-	DECQ      R14
-	JNZ       fourteen
+	LPFBODY
 
 scatter:
 	MOVL WD, AX
@@ -495,3 +488,4 @@ scatterwide:
 done:
 	VZEROUPPER
 	RET
+
