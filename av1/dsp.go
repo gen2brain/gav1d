@@ -15,6 +15,9 @@ type dspContext[P pixel] struct {
 	fguvApplyRow func(dst []P, dstOff int, src []P, srcOff int,
 		luma []P, lumaOff int, scaling []uint8, grain []int16,
 		n, shift, minValue, maxValue int, sx, lumaMult, mult, offset, pixelMax int, csfl bool)
+
+	put8tap func(dst []P, dstOff, dstStride int, src []P, srcOff, srcStride,
+		w, h, mx, my, filterType int, bitdepthMax int32)
 }
 
 // newDspGo builds the table with no assembly, which is both the starting point
@@ -25,6 +28,7 @@ func newDspGo[P pixel]() *dspContext[P] {
 		cdefDir:      cdefFindDir[P],
 		fgApplyRow:   fgApplyRow[P],
 		fguvApplyRow: fguvApplyRow[P],
+		put8tap:      put8tap[P],
 	}
 }
 

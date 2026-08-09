@@ -115,6 +115,7 @@ func TestReconBInter(t *testing.T) {
 			bpc: 8, bitdepthMax: 255, ssHor: ssHor, ssVer: ssVer,
 			bw: recintBW, bh: recintBW,
 			sbStep: 16, sbShift: 4, sb128w: 1,
+			dsp: newDspGo[uint8](),
 		}
 		f.stride[0] = recintStride
 		f.stride[1] = recintStride >> ssHor

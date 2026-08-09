@@ -37,6 +37,7 @@ func recmcFrame(iter, layout int) (*frameContext[uint8, int16], *taskContext[uin
 		bitdepthMax: 255,
 		bw:          recmcCurW / 4,
 		bh:          recmcCurH / 4,
+		dsp:         newDspGo[uint8](),
 	}
 	f.frameHdr.width[0] = recmcCurW
 	f.frameHdr.height = recmcCurH
