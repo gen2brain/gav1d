@@ -17,6 +17,15 @@ func itxColDct32NEON(tmp *int32, lanes, stride int, lo, hi int32)
 //go:noescape
 func itxIdentityNEON(tmp *int32, count, stride, n int, p *[4]int32)
 
+//go:noescape
+func itxColAdst4NEON(tmp *int32, lanes, stride int, lo, hi int32, flip int)
+
+//go:noescape
+func itxColAdst8NEON(tmp *int32, lanes, stride int, lo, hi int32, flip int)
+
+//go:noescape
+func itxColAdst16NEON(tmp *int32, lanes, stride int, lo, hi int32, flip int)
+
 func itxIdentityVec(tmp []int32, lanes, stride, n int) bool {
 	if n > 32 {
 		return false
@@ -39,7 +48,25 @@ func itxColVec(tmp []int32, lanes, stride, n, txtp int, lo, hi int32) bool {
 	if txtp == tx1dIdentity {
 		return itxIdentityVec(tmp, lanes, stride, n)
 	}
-	if txtp != tx1dDct || lanes&3 != 0 {
+	if lanes&3 != 0 {
+		return false
+	}
+	if txtp == tx1dAdst || txtp == tx1dFlipadst {
+		flip := b2i(txtp == tx1dFlipadst)
+		switch n {
+		case 4:
+			itxColAdst4NEON(&tmp[0], lanes, stride, lo, hi, flip)
+		case 8:
+			itxColAdst8NEON(&tmp[0], lanes, stride, lo, hi, flip)
+		case 16:
+			itxColAdst16NEON(&tmp[0], lanes, stride, lo, hi, flip)
+		default:
+			return false
+		}
+
+		return true
+	}
+	if txtp != tx1dDct {
 		return false
 	}
 

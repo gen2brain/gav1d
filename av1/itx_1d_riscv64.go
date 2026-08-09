@@ -17,6 +17,15 @@ func itxColDct32RVV(tmp *int32, lanes, stride int, lo, hi int32)
 //go:noescape
 func itxIdentityRVV(tmp *int32, count, stride, n int, p *[4]int32)
 
+//go:noescape
+func itxColAdst4RVV(tmp *int32, lanes, stride int, lo, hi int32, flip int)
+
+//go:noescape
+func itxColAdst8RVV(tmp *int32, lanes, stride int, lo, hi int32, flip int)
+
+//go:noescape
+func itxColAdst16RVV(tmp *int32, lanes, stride int, lo, hi int32, flip int)
+
 func itxIdentityVec(tmp []int32, lanes, stride, n int) bool {
 	if n > 32 {
 		return false
@@ -35,6 +44,21 @@ func itxIdentityVec(tmp []int32, lanes, stride, n int) bool {
 func itxColVec(tmp []int32, lanes, stride, n, txtp int, lo, hi int32) bool {
 	if txtp == tx1dIdentity {
 		return itxIdentityVec(tmp, lanes, stride, n)
+	}
+	if txtp == tx1dAdst || txtp == tx1dFlipadst {
+		flip := b2i(txtp == tx1dFlipadst)
+		switch n {
+		case 4:
+			itxColAdst4RVV(&tmp[0], lanes, stride, lo, hi, flip)
+		case 8:
+			itxColAdst8RVV(&tmp[0], lanes, stride, lo, hi, flip)
+		case 16:
+			itxColAdst16RVV(&tmp[0], lanes, stride, lo, hi, flip)
+		default:
+			return false
+		}
+
+		return true
 	}
 	if txtp != tx1dDct {
 		return false
