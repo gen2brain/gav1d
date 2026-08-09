@@ -1,5 +1,7 @@
 package av1
 
+import "sync"
+
 type cdfModeContext struct {
 	uvMode            [2][nIntraPredModes][nUvIntraPredModes + 2]uint16
 	partition         [nBlLevels][4][nPartitions + 6]uint16
@@ -375,6 +377,49 @@ func (c *cdfContext) resetCountsInter() {
 		mv.classNHp[1] = 0
 	}
 	c.mv.joint[nMvJoints-1] = 0
+}
+
+// cdfPromise is a reference slot's adapted CDFs, known once the frame that
+// refreshes the slot finishes its context update tile.
+type cdfPromise struct {
+	cdf  cdfContext
+	done chan struct{}
+	once sync.Once
+	err  error
+}
+
+func newCdfPromise() *cdfPromise {
+	return &cdfPromise{done: make(chan struct{})}
+}
+
+func (p *cdfPromise) finish(err error) {
+	p.once.Do(func() {
+		p.err = err
+		close(p.done)
+	})
+}
+
+func (p *cdfPromise) wait() (*cdfContext, error) {
+	<-p.done
+	if p.err != nil {
+		return nil, p.err
+	}
+
+	return &p.cdf, nil
+}
+
+func resolveCdf(hdr *frameHeader, in *cdfPromise) (*cdfContext, error) {
+	if hdr.primaryRefFrame == primaryRefNone {
+		c := new(cdfContext)
+		c.initStatic(hdr.quant.yac)
+
+		return c, nil
+	}
+	if in == nil {
+		return nil, errInvalid
+	}
+
+	return in.wait()
 }
 
 func cdfThreadUpdate(hdr *frameHeader, dst, src *cdfContext) {

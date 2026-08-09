@@ -40,12 +40,27 @@ for _, tu := range temporalUnits {
 `Decoder.Threads` bounds the goroutines decoding a frame's tiles, and defaults to `GOMAXPROCS`. It only helps
 streams that have more than one tile.
 
+For video, `Send` and `Receive` decode several frames at once:
+
+```go
+d := av1.Decoder{}
+
+for _, tu := range temporalUnits {
+    if err := d.Send(tu); err != nil {
+        ...
+    }
+    pic, err := d.Receive()
+    ...
+}
+```
+
+`Receive` returns pictures in output order, and nil once the queue is empty. `Decoder.FrameThreads` bounds
+the frames in flight, and `Flush` drops them to seek. Call `Send` and `Receive` from one goroutine.
+
 ### Supported
 
 8/10/12-bit, 4:2:0/4:2:2/4:4:4/monochrome, film grain, scalable streams, and in the container alpha, `grid`,
 `clap`/`irot`/`imir`, `colr` and image sequences.
-
-Not implemented: Exif and XMP metadata, gain maps, frame-parallel decoding.
 
 ### License
 

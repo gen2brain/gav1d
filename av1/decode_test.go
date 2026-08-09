@@ -55,14 +55,8 @@ func decodeIVF(t *testing.T, path string, threads int) []byte {
 	var out bytes.Buffer
 	d := Decoder{Threads: threads}
 
-	for p := 32; p+12 <= len(data); {
-		n := int(binary.LittleEndian.Uint32(data[p:]))
-		p += 12
-		if n < 0 || p+n > len(data) {
-			break
-		}
-		pics, err := d.DecodeOBUs(data[p : p+n])
-		p += n
+	for _, chunk := range ivfChunks(data) {
+		pics, err := d.DecodeOBUs(chunk)
 		if err != nil {
 			t.Fatalf("%s: decode: %v", filepath.Base(path), err)
 		}
@@ -110,6 +104,71 @@ func TestDecodeStreams(t *testing.T) {
 	if n == 0 {
 		t.Fatal("no streams listed")
 	}
+}
+
+// TestFrameParallel checks that keeping frames in flight decodes to the same
+// bytes as one frame at a time, at several tile and frame thread counts.
+func TestFrameParallel(t *testing.T) {
+	dir := "testdata/streams"
+
+	names, err := filepath.Glob(filepath.Join(dir, "*.ivf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) == 0 {
+		t.Fatal("no streams found")
+	}
+
+	for _, path := range names {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			chunks := ivfChunks(data)
+			want := streamMD5(t, chunks, 1, 1)
+
+			for _, tiles := range []int{1, 0} {
+				for _, frames := range []int{2, 4, 0} {
+					got := streamMD5(t, chunks, tiles, frames)
+					if got != want {
+						t.Fatalf("tiles=%d frames=%d: md5 = %s, want %s",
+							tiles, frames, got, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func streamMD5(t *testing.T, chunks [][]byte, tiles, frames int) string {
+	t.Helper()
+
+	var out bytes.Buffer
+	d := Decoder{Threads: tiles, FrameThreads: frames}
+	emit := func(pic *Picture) { planeRows(pic, &out) }
+	if err := decodeStreaming(&d, chunks, emit); err != nil {
+		t.Fatalf("tiles=%d frames=%d: %v", tiles, frames, err)
+	}
+	sum := md5.Sum(out.Bytes())
+
+	return hex.EncodeToString(sum[:])
+}
+
+func ivfChunks(data []byte) [][]byte {
+	var chunks [][]byte
+
+	for p := 32; p+12 <= len(data); {
+		n := int(binary.LittleEndian.Uint32(data[p:]))
+		p += 12
+		if n < 0 || p+n > len(data) {
+			break
+		}
+		chunks = append(chunks, data[p:p+n])
+		p += n
+	}
+
+	return chunks
 }
 
 // TestDecodeExternal decodes an arbitrary stream and compares against a live
@@ -302,6 +361,39 @@ func section5Chunks(data []byte) [][]byte {
 	return chunks
 }
 
+// decodeStreaming feeds the decoder the way a player would, keeping several
+// temporal units in flight instead of draining each one.
+func decodeStreaming(d *Decoder, chunks [][]byte, emit func(*Picture)) error {
+	depth := max(d.FrameThreads, 1)
+
+	for i, chunk := range chunks {
+		if err := d.Send(chunk); err != nil {
+			return err
+		}
+		if i < depth {
+			continue
+		}
+		pic, err := d.Receive()
+		if err != nil {
+			return err
+		}
+		if pic != nil {
+			emit(pic)
+		}
+	}
+
+	for {
+		pic, err := d.Receive()
+		if err != nil {
+			return err
+		}
+		if pic == nil {
+			return nil
+		}
+		emit(pic)
+	}
+}
+
 func conformanceOne(path string) (res string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -316,28 +408,28 @@ func conformanceOne(path string) (res string) {
 
 	var chunks [][]byte
 	if len(data) >= 32 && string(data[:4]) == "DKIF" {
-		for p := 32; p+12 <= len(data); {
-			n := int(binary.LittleEndian.Uint32(data[p:]))
-			p += 12
-			if n < 0 || p+n > len(data) {
-				break
-			}
-			chunks = append(chunks, data[p:p+n])
-			p += n
-		}
+		chunks = ivfChunks(data)
 	} else if chunks = obuChunks(data); chunks == nil {
 		return "unknown container"
 	}
 
 	var out bytes.Buffer
 	var d Decoder
-	for _, chunk := range chunks {
-		pics, err := d.DecodeOBUs(chunk)
-		if err != nil {
+	if n, _ := strconv.Atoi(os.Getenv("FRAME_THREADS")); n != 0 {
+		d.FrameThreads = n
+		emit := func(pic *Picture) { planeRows(pic, &out) }
+		if err := decodeStreaming(&d, chunks, emit); err != nil {
 			return "decode: " + err.Error()
 		}
-		for _, pic := range pics {
-			planeRows(pic, &out)
+	} else {
+		for _, chunk := range chunks {
+			pics, err := d.DecodeOBUs(chunk)
+			if err != nil {
+				return "decode: " + err.Error()
+			}
+			for _, pic := range pics {
+				planeRows(pic, &out)
+			}
 		}
 	}
 
@@ -366,23 +458,15 @@ func BenchmarkDecode(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	var chunks [][]byte
-	for p := 32; p+12 <= len(data); {
-		n := int(binary.LittleEndian.Uint32(data[p:]))
-		p += 12
-		chunks = append(chunks, data[p:p+n])
-		p += n
-	}
+	chunks := ivfChunks(data)
 
-	for _, n := range []int{1, 2, 4, 8, 0} {
-		name := "threads=" + strconv.Itoa(n)
-		if n == 0 {
-			name = "threads=max"
-		}
-		b.Run(name, func(b *testing.B) {
+	counts := []int{1, 2, 4, 8, 0}
+
+	for _, n := range counts {
+		b.Run("tiles="+countName(n), func(b *testing.B) {
 			var pixels int64
 			for b.Loop() {
-				d := Decoder{Threads: n}
+				d := Decoder{Threads: n, FrameThreads: 1}
 				for _, chunk := range chunks {
 					pics, err := d.DecodeOBUs(chunk)
 					if err != nil {
@@ -396,6 +480,34 @@ func BenchmarkDecode(b *testing.B) {
 			b.ReportMetric(float64(pixels)/b.Elapsed().Seconds()/1e6, "Mpixel/s")
 		})
 	}
+
+	stream := func(b *testing.B, tiles, frames int) {
+		var pixels int64
+		emit := func(pic *Picture) { pixels += int64(pic.Width * pic.Height) }
+		for b.Loop() {
+			d := Decoder{Threads: tiles, FrameThreads: frames}
+			if err := decodeStreaming(&d, chunks, emit); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.ReportMetric(float64(pixels)/b.Elapsed().Seconds()/1e6, "Mpixel/s")
+	}
+
+	for _, n := range counts {
+		b.Run("frames="+countName(n), func(b *testing.B) { stream(b, 1, n) })
+	}
+
+	for _, n := range counts {
+		b.Run("both="+countName(n), func(b *testing.B) { stream(b, n, n) })
+	}
+}
+
+func countName(n int) string {
+	if n == 0 {
+		return "max"
+	}
+
+	return strconv.Itoa(n)
 }
 
 func firstLine(v any) string {

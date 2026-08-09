@@ -3,6 +3,8 @@ package av1
 import (
 	"errors"
 	"math"
+	"runtime"
+	"sync"
 )
 
 var errInvalid = errors.New("av1: invalid bitstream")
@@ -26,19 +28,42 @@ var defaultWmParams = warpedMotionParams{
 }
 
 type refPicture[P pixel] struct {
-	planes [3][]P
-	stride [3]int
-	w, h   int
+	planes   [3][]P
+	stride   [3]int
+	w, h     int
+	progress *frameProgress
 }
 
 type refState struct {
 	frameHdr *frameHeader
-	out      *Picture
+	out      *pendingFrame
 	pic      any
 	segmap   []uint8
 	refmvs   []refmvsTemporalBlock
 	refpoc   [7]uint8
 	codedW   int
+}
+
+// pendingFrame is the output slot a frame is given when it is dispatched.
+type pendingFrame struct {
+	done chan struct{}
+	pic  *Picture
+	err  error
+}
+
+func newPendingFrame() *pendingFrame {
+	return &pendingFrame{done: make(chan struct{})}
+}
+
+func (p *pendingFrame) finish(pic *Picture, err error) {
+	p.pic, p.err = pic, err
+	close(p.done)
+}
+
+func (p *pendingFrame) wait() (*Picture, error) {
+	<-p.done
+
+	return p.pic, p.err
 }
 
 type Decoder struct {
@@ -48,6 +73,11 @@ type Decoder struct {
 
 	// OperatingPoint selects a scalable stream's operating point.
 	OperatingPoint int
+
+	// FrameThreads bounds how many frames decode at once, each holding its
+	// own buffers. Zero derives a default from GOMAXPROCS, one decodes a
+	// frame at a time. Only Send and Receive benefit from it.
+	FrameThreads int
 
 	// FrameSizeLimit bounds a frame's area in pixels, so that a corrupt or
 	// hostile header cannot ask for an unbounded allocation. Zero means
@@ -67,8 +97,12 @@ type Decoder struct {
 	frameHdrHook func(*frameHeader)
 
 	tiles []tileGroup
-	cdf   [numRefFrames]*cdfContext
+	cdf   [numRefFrames]*cdfPromise
+	queue []*pendingFrame
 	out   []*Picture
+
+	sem chan struct{}
+	wg  sync.WaitGroup
 }
 
 func seqHdrEqual(a, b *sequenceHeader) bool {
@@ -1493,7 +1527,7 @@ func (d *Decoder) showExistingFrame() error {
 		if ref.out == nil {
 			return errInvalid
 		}
-		d.out = append(d.out, ref.out)
+		d.queue = append(d.queue, ref.out)
 	}
 
 	if ref.frameHdr.frameType != frameTypeKey {
@@ -1575,60 +1609,148 @@ func (d *Decoder) submitFrame() error {
 		return nil
 	}
 
-	var inCdf cdfContext
-	if hdr.primaryRefFrame == primaryRefNone {
-		inCdf.initStatic(hdr.quant.yac)
-	} else {
-		ref := d.cdf[hdr.refidx[hdr.primaryRefFrame]]
-		if ref == nil {
+	var in *cdfPromise
+	if hdr.primaryRefFrame != primaryRefNone {
+		if in = d.cdf[hdr.refidx[hdr.primaryRefFrame]]; in == nil {
 			return errInvalid
 		}
-		inCdf = *ref
 	}
+	out := newCdfPromise()
 
-	outCdf := new(cdfContext)
-	*outCdf = inCdf
+	p := newPendingFrame()
 
-	var pic *Picture
+	var fd frameDecoder
 	var err error
 	if d.seqHdr.hbd != 0 {
-		pic, err = decodeFrameBD[uint16, int32](d, &inCdf, outCdf)
+		fd, err = setupFrame[uint16, int32](d, d.tiles, p)
 	} else {
-		pic, err = decodeFrameBD[uint8, int16](d, &inCdf, outCdf)
+		fd, err = setupFrame[uint8, int16](d, d.tiles, p)
 	}
 	if err != nil {
 		return err
 	}
 
 	if hdr.showFrame != 0 {
-		d.out = append(d.out, pic)
+		d.queue = append(d.queue, p)
 	}
 
 	for i := range numRefFrames {
 		if hdr.refreshFrameFlags&(1<<i) != 0 {
-			d.cdf[i] = outCdf
+			d.cdf[i] = out
 		}
+	}
+
+	d.dispatch(fd, p, in, out)
+
+	return nil
+}
+
+const maxFrameThreads = 8
+
+// frameThreads picks a frame count for n cores, kept well under n because tile
+// and frame threading multiply.
+func frameThreads(n int) int {
+	f := 1
+	for f*f < n {
+		f++
+	}
+
+	return min(f, maxFrameThreads)
+}
+
+// dispatch hands a frame to a worker, blocking while FrameThreads frames are
+// already in flight.
+func (d *Decoder) dispatch(fd frameDecoder, p *pendingFrame, in, out *cdfPromise) {
+	n := d.FrameThreads
+	if n == 0 {
+		n = frameThreads(runtime.GOMAXPROCS(0))
+	}
+	if n <= 1 {
+		p.finish(fd.decode(in, out))
+
+		return
+	}
+
+	if cap(d.sem) != n {
+		d.wg.Wait()
+		d.sem = make(chan struct{}, n)
+	}
+
+	d.sem <- struct{}{}
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		defer func() { <-d.sem }()
+		p.finish(fd.decode(in, out))
+	}()
+}
+
+// Send decodes a temporal unit. The pictures it produces are queued for
+// Receive, in output order.
+func (d *Decoder) Send(data []byte) error {
+	for len(data) > 0 {
+		n, err := d.parseOBU(data)
+		if err != nil {
+			return err
+		}
+		if n <= 0 {
+			return errInvalid
+		}
+		data = data[n:]
 	}
 
 	return nil
 }
 
-func decodeFrameBD[P pixel, C coef](d *Decoder, inCdf, outCdf *cdfContext) (*Picture, error) {
-	return decodeFrame[P, C](d, inCdf, outCdf, d.tiles)
+// Receive returns the next decoded picture, blocking until it is ready. It
+// returns a nil picture when nothing more has been sent.
+func (d *Decoder) Receive() (*Picture, error) {
+	if len(d.queue) == 0 {
+		return nil, nil
+	}
+
+	p := d.queue[0]
+	d.queue = d.queue[1:]
+
+	return p.wait()
+}
+
+// Flush drops every queued picture and forgets the reference frames, so that
+// decoding can resume at the next keyframe.
+func (d *Decoder) Flush() {
+	d.wg.Wait()
+	d.queue = nil
+
+	d.seqHdr = nil
+	d.frameHdr = nil
+	d.tiles = d.tiles[:0]
+	d.nTiles = 0
+	for i := range numRefFrames {
+		d.refs[i] = refState{}
+		d.cdf[i] = nil
+	}
 }
 
 // DecodeOBUs decodes a temporal unit and returns the pictures it shows, in output order.
 func (d *Decoder) DecodeOBUs(data []byte) ([]*Picture, error) {
 	d.out = d.out[:0]
-	for len(data) > 0 {
-		n, err := d.parseOBU(data)
+	serr := d.Send(data)
+
+	for {
+		pic, err := d.Receive()
 		if err != nil {
+			d.queue = nil
+
 			return nil, err
 		}
-		if n <= 0 {
-			return nil, errInvalid
+		if pic == nil {
+			break
 		}
-		data = data[n:]
+		d.out = append(d.out, pic)
+	}
+
+	if serr != nil {
+		return nil, serr
 	}
 
 	return d.out, nil

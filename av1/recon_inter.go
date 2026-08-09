@@ -29,6 +29,10 @@ func recMc[P pixel, C coef](t *taskContext[P, C], dst8 []P, dst8Off int,
 			h = f.bh * 4 >> ssVer
 		}
 
+		if err := f.waitRef(refp, (dy+bh4*vMul+b2i(my != 0)*4)<<ssVer); err != nil {
+			return err
+		}
+
 		if dx < b2i(mx != 0)*3 || dy < b2i(my != 0)*3 ||
 			dx+bw4*hMul+b2i(mx != 0)*4 > w ||
 			dy+bh4*vMul+b2i(my != 0)*4 > h {
@@ -63,6 +67,10 @@ func recMc[P pixel, C coef](t *taskContext[P, C], dst8 []P, dst8Off int,
 	left, top := posX>>10, posY>>10
 	right := ((posX + (bw4*hMul-1)*f.svc[refidx][0].step) >> 10) + 1
 	bottom := ((posY + (bh4*vMul-1)*f.svc[refidx][1].step) >> 10) + 1
+
+	if err := f.waitRef(refp, (bottom+4)<<ssVer); err != nil {
+		return err
+	}
 
 	w := (refp.w + ssHor) >> ssHor
 	h := (refp.h + ssVer) >> ssVer
@@ -192,6 +200,10 @@ func recWarpAffine[P pixel, C coef](t *taskContext[P, C], dst8 []P, dst8Off int,
 			var ref []P
 			var refOff int
 			refStride := refp.stride[b2i(pl != 0)]
+
+			if err := f.waitRef(refp, (dy+12)<<ssVer); err != nil {
+				return err
+			}
 
 			if dx < 3 || dx+8+4 > width || dy < 3 || dy+8+4 > height {
 				buf := t.scratch.emuEdge[:]

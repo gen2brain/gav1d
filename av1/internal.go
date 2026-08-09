@@ -150,6 +150,8 @@ type frameContext[P pixel, C coef] struct {
 
 	nThreads  int
 	lfEnabled bool
+	progress  *frameProgress
+	tileData  [][]byte
 
 	a      []blockContext
 	lflvl  []av1Filter
