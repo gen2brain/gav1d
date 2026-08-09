@@ -9,5 +9,6 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.cdefFilter = cdefFilterBlockNEON
 		d8.fgApplyRow = fgApplyRow8NEON
 		d8.fguvApplyRow = fguvApplyRow8NEON
+		d8.put8tap = put8tap8NEON
 	}
 }
