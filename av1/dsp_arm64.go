@@ -6,6 +6,7 @@ package av1
 // NEON is part of the architecture, so there is nothing to detect.
 func dspInit[P pixel](d *dspContext[P]) {
 	if d8, ok := any(d).(*dspContext[uint8]); ok {
+		d8.cdefFilter = cdefFilterBlockNEON
 		d8.fgApplyRow = fgApplyRow8NEON
 		d8.fguvApplyRow = fguvApplyRow8NEON
 	}
