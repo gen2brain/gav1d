@@ -1,0 +1,49 @@
+//go:build riscv64 && riscv64.rva23u64 && !noasm
+
+package av1
+
+//go:noescape
+func put8tapHRVV(dst *uint8, dstStride int, src *uint8, srcStride int, f *[8]int8, w, h int)
+
+//go:noescape
+func put8tapVRVV(dst *uint8, dstStride int, src *uint8, srcStride int, f *[8]int8, w, h int)
+
+//go:noescape
+func put8tapHVRVV(dst *uint8, dstStride int, src *uint8, srcStride int, mid *int16,
+	fh, fv *[8]int8, w, h int)
+
+// mcMidCols bounds the strip the two-dimensional filter works in. The kernel
+// takes the smaller of this and the hardware vector length, so the scratch is
+// cheap to clear and one vector covers a strip.
+const mcMidCols = 16
+
+func put8tap8RVV(dst []uint8, dstOff, dstStride int, src []uint8, srcOff, srcStride,
+	w, h, mx, my, filterType int, bitdepthMax int32,
+) {
+	fh := hFilter(mx, w, filterType)
+	fv := vFilter(my, h, filterType)
+
+	if w >= 8 {
+		switch {
+		case fh != nil && fv != nil:
+			var mid [135 * mcMidCols]int16
+
+			put8tapHVRVV(&dst[dstOff], dstStride, &src[srcOff-3*srcStride-3],
+				srcStride, &mid[0], fh, fv, w, h)
+
+			return
+		case fh != nil:
+			put8tapHRVV(&dst[dstOff], dstStride, &src[srcOff-3], srcStride, fh, w, h)
+
+			return
+		case fv != nil:
+			put8tapVRVV(&dst[dstOff], dstStride, &src[srcOff-3*srcStride], srcStride,
+				fv, w, h)
+
+			return
+		}
+	}
+
+	put8tap(dst, dstOff, dstStride, src, srcOff, srcStride, w, h, mx, my,
+		filterType, bitdepthMax)
+}
