@@ -247,7 +247,30 @@ func fgy32x32xn[P pixel](dsp *dspContext[P], dstRow []P, dstOff int, srcRow []P,
 	}
 }
 
-func fguv32x32xn[P pixel](dstRow []P, dstOff int, srcRow []P, srcOff, stride int,
+// fguvApplyRow is fgApplyRow for chroma, where the scaling index comes from the
+// co-located luma rather than the pixel itself.
+func fguvApplyRow[P pixel](dst []P, dstOff int, src []P, srcOff int,
+	luma []P, lumaOff int, scaling []uint8, grain []int16,
+	n, shift, minValue, maxValue int, sx, lumaMult, mult, offset, pixelMax int, csfl bool,
+) {
+	for i := range n {
+		l := lumaOff + i<<sx
+		avg := int(luma[l])
+		if sx != 0 {
+			avg = (avg + int(luma[l+1]) + 1) >> 1
+		}
+
+		val := avg
+		if !csfl {
+			val = clip((avg*lumaMult+int(src[srcOff+i])*mult)>>6+offset, 0, pixelMax)
+		}
+
+		noise := fgRound2(int(scaling[val])*int(grain[i]), shift)
+		dst[dstOff+i] = P(clip(int(src[srcOff+i])+noise, minValue, maxValue))
+	}
+}
+
+func fguv32x32xn[P pixel](dsp *dspContext[P], dstRow []P, dstOff int, srcRow []P, srcOff, stride int,
 	data *filmGrainData, pw int, scaling []uint8, lut *grainLut, bh, rowNum int,
 	lumaRow []P, lumaOff, lumaStride, uv int, isID bool, sx, sy, bpc int,
 ) {
@@ -314,10 +337,18 @@ func fguv32x32xn[P pixel](dstRow []P, dstOff int, srcRow []P, srcOff, stride int
 
 		wx, wy := &fgOverlapWeights[sx], &fgOverlapWeights[sy]
 
+		randval := offsets[0][0]
+		offx := 3 + (2>>sx)*(3+(randval>>4))
+		offy := 3 + (2>>sy)*(3+(randval&0xf))
+
 		for y := ystart; y < bh; y++ {
-			for x := xstart; x < bw; x++ {
-				addNoise(x, y, fgSampleLut(lut, &offsets, sx, sy, 0, 0, x, y))
-			}
+			off := y*stride + bx + xstart
+			dsp.fguvApplyRow(dstRow, dstOff+off, srcRow, srcOff+off,
+				lumaRow, lumaOff+(y<<sy)*lumaStride+(bx+xstart)<<sx,
+				scaling, lut[offy+y][offx+xstart:], bw-xstart, shift,
+				minValue, maxValue, sx, data.uvLumaMult[uv], data.uvMult[uv],
+				data.uvOffset[uv]*(1<<bitdepthMin8), 1<<bpc-1,
+				data.chromaScalingFromLuma != 0)
 			for x := range xstart {
 				grain := fgSampleLut(lut, &offsets, sx, sy, 0, 0, x, y)
 				old := fgSampleLut(lut, &offsets, sx, sy, 1, 0, x, y)
@@ -492,7 +523,7 @@ func applyGrainRow[P pixel](dsp *dspContext[P], fg *filmGrainCtx, data *filmGrai
 		} else if data.numUvPoints[pl] == 0 {
 			continue
 		}
-		fguv32x32xn(dst[1+pl], uvOff, src[1+pl], uvOff, stride[1], data, cpw,
+		fguv32x32xn(dsp, dst[1+pl], uvOff, src[1+pl], uvOff, stride[1], data, cpw,
 			scaling, &fg.lut[1+pl], bh, row, src[0], lumaSrc, stride[0], pl,
 			isID, ssHor, ssVer, bpc)
 	}

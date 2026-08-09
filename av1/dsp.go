@@ -11,14 +11,25 @@ type dspContext[P pixel] struct {
 
 	fgApplyRow func(dst []P, dstOff int, src []P, srcOff int,
 		scaling []uint8, grain []int16, n, shift, minValue, maxValue int)
+
+	fguvApplyRow func(dst []P, dstOff int, src []P, srcOff int,
+		luma []P, lumaOff int, scaling []uint8, grain []int16,
+		n, shift, minValue, maxValue int, sx, lumaMult, mult, offset, pixelMax int, csfl bool)
+}
+
+// newDspGo builds the table with no assembly, which is both the starting point
+// for newDsp and the reference the assembly is tested against.
+func newDspGo[P pixel]() *dspContext[P] {
+	return &dspContext[P]{
+		cdefFilter:   cdefFilterBlock[P],
+		cdefDir:      cdefFindDir[P],
+		fgApplyRow:   fgApplyRow[P],
+		fguvApplyRow: fguvApplyRow[P],
+	}
 }
 
 func newDsp[P pixel]() *dspContext[P] {
-	d := &dspContext[P]{
-		cdefFilter: cdefFilterBlock[P],
-		cdefDir:    cdefFindDir[P],
-		fgApplyRow: fgApplyRow[P],
-	}
+	d := newDspGo[P]()
 	dspInit(d)
 
 	return d

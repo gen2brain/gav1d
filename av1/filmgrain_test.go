@@ -136,7 +136,7 @@ func runFilmGrain[P pixel](iter, bpc, layout, w, h int, isID bool) fgResult {
 	}
 
 	var fg filmGrainCtx
-	goDsp := &dspContext[P]{fgApplyRow: fgApplyRow[P]}
+	goDsp := newDspGo[P]()
 	prepGrain(&fg, &data, layout, bpc, w, h, &dst, &src, &stride)
 	for row := range (h + fgBlockSize - 1) / fgBlockSize {
 		applyGrainRow(goDsp, &fg, &data, layout, bpc, w, h, isID, &dst, &src, &stride, row)
@@ -198,6 +198,59 @@ func TestFilmGrainAsm(t *testing.T) {
 							n, shift, lim, i, got[i], ref[i])
 					}
 					cases++
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+// TestFilmGrainUVAsm checks the chroma noise row, whose scaling index comes
+// from the co-located luma, against the pure Go one.
+func TestFilmGrainUVAsm(t *testing.T) {
+	d := newDsp[uint8]()
+	scaling := make([]uint8, 256+4)[:256]
+	for i := range scaling {
+		scaling[i] = uint8(cdefGen(7, 3, i))
+	}
+
+	cases := 0
+
+	for iter := range 6 {
+		src := make([]uint8, 96)
+		luma := make([]uint8, 192)
+		for i := range src {
+			src[i] = uint8(cdefGen(iter, 0, i))
+		}
+		for i := range luma {
+			luma[i] = uint8(cdefGen(iter, 4, i))
+		}
+		grain := make([]int16, 96)
+		for i := range grain {
+			grain[i] = int16(cdefGen(iter, 1, i)&255) - 128
+		}
+
+		for _, n := range []int{8, 9, 15, 16, 19, 30, 32, 33} {
+			for _, sx := range []int{0, 1} {
+				for _, csfl := range []bool{false, true} {
+					for _, m := range [3][3]int{{64, 0, 0}, {-32, 96, 8}, {127, -128, -16}} {
+						ref := make([]uint8, 96)
+						got := make([]uint8, 96)
+						fguvApplyRow(ref, 4, src, 2, luma, 6, scaling, grain,
+							n, 9, 16, 235, sx, m[0], m[1], m[2], 255, csfl)
+						d.fguvApplyRow(got, 4, src, 2, luma, 6, scaling, grain,
+							n, 9, 16, 235, sx, m[0], m[1], m[2], 255, csfl)
+
+						for i := range ref {
+							if got[i] == ref[i] {
+								continue
+							}
+							t.Fatalf("n=%d sx=%d csfl=%v mults=%v: dst[%d] = %d, want %d",
+								n, sx, csfl, m, i, got[i], ref[i])
+						}
+						cases++
+					}
 				}
 			}
 		}
