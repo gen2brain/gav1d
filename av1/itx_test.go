@@ -83,7 +83,7 @@ func TestItx(t *testing.T) {
 			if txtp == whtWht {
 				invTxfmAddWht4x4(dst, 0, stride, coeff, eob, bitdepthMax)
 			} else {
-				invTxfmAdd(dst, 0, stride, coeff, eob, tx, txtp, bitdepthMax)
+				invTxfmAdd(dst, 0, stride, coeff, make([]int32, 64*64), eob, tx, txtp, bitdepthMax)
 			}
 			check(func(y, x int) int { return int(dst[y*stride+x]) },
 				func(i int) int { return int(coeff[i]) })
@@ -101,7 +101,7 @@ func TestItx(t *testing.T) {
 			if txtp == whtWht {
 				invTxfmAddWht4x4(dst, 0, stride, coeff, eob, bitdepthMax)
 			} else {
-				invTxfmAdd(dst, 0, stride, coeff, eob, tx, txtp, bitdepthMax)
+				invTxfmAdd(dst, 0, stride, coeff, make([]int32, 64*64), eob, tx, txtp, bitdepthMax)
 			}
 			check(func(y, x int) int { return int(dst[y*stride+x]) },
 				func(i int) int { return int(coeff[i]) })

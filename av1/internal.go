@@ -93,6 +93,7 @@ type scratch[P pixel] struct {
 	segMask    [128 * 128]uint8
 	interintra [64 * 64]P
 	txtpMap    [32 * 32]uint8
+	itx        [64 * 64]int32
 }
 
 type frameContext[P pixel, C coef] struct {

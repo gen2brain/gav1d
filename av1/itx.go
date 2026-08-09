@@ -70,7 +70,7 @@ var itxTxtpSwap = [nTxTypes]uint8{
 	hFlipadst:        vFlipadst,
 }
 
-func invTxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
+func invTxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C, tmp []int32,
 	eob, tx, txtp int, bitdepthMax int32,
 ) {
 	txtp = int(itxTxtpSwap[txtp])
@@ -115,8 +115,6 @@ func invTxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
 	}
 	rowClipMax, colClipMax := ^rowClipMin, ^colClipMin
 
-	var tmp [64 * 64]int32
-
 	var lastNonzeroCol int
 	switch {
 	case txtps[1] == tx1dIdentity && txtps[0] != tx1dIdentity:
@@ -138,7 +136,10 @@ func invTxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
 				tmp[c+x] = int32(coeff[y+x*sh])
 			}
 		}
-		first1d(tmp[:], c, 1, rowClipMin, rowClipMax)
+		for x := sw; x < w; x++ {
+			tmp[c+x] = 0
+		}
+		first1d(tmp, c, 1, rowClipMin, rowClipMax)
 	}
 	if lastNonzeroCol+1 < sh {
 		clearTail := tmp[(lastNonzeroCol+1)*w : sh*w]
@@ -154,9 +155,12 @@ func invTxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
 	for i := range w * sh {
 		tmp[i] = clip((tmp[i]+rnd)>>shift, colClipMin, colClipMax)
 	}
+	for i := sh * w; i < h*w; i++ {
+		tmp[i] = 0
+	}
 
 	for x := range w {
-		second1d(tmp[:], x, w, colClipMin, colClipMax)
+		second1d(tmp, x, w, colClipMin, colClipMax)
 	}
 
 	for y := range h {
@@ -195,7 +199,7 @@ func invTxfmAddWht4x4[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
 	}
 }
 
-func itxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
+func itxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C, tmp []int32,
 	eob, tx, txtp int, bitdepthMax int32,
 ) {
 	if txtp == whtWht {
@@ -203,5 +207,5 @@ func itxfmAdd[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
 
 		return
 	}
-	invTxfmAdd(dst, dstOff, stride, coeff, eob, tx, txtp, bitdepthMax)
+	invTxfmAdd(dst, dstOff, stride, coeff, tmp, eob, tx, txtp, bitdepthMax)
 }
