@@ -11,6 +11,8 @@ func dspInit[P pixel](d *dspContext[P]) {
 	if d16, ok := any(d).(*dspContext[uint16]); ok {
 		d16.cdefFilter = cdefFilterBlock16NEON
 		d16.itxAdd = itxAdd16Vec
+		d16.wienerH = wienerH16NEONRow
+		d16.wienerV = wienerV16NEONRow
 	}
 
 	if d8, ok := any(d).(*dspContext[uint8]); ok {
@@ -19,5 +21,7 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.fguvApplyRow = fguvApplyRow8NEON
 		d8.put8tap = put8tap8NEON
 		d8.itxAdd = itxAdd8Vec
+		d8.wienerH = wienerH8NEONRow
+		d8.wienerV = wienerV8NEONRow
 	}
 }

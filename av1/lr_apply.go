@@ -14,9 +14,9 @@ func lrStripe[P pixel, C coef](t *taskContext[P, C], p []P, pOff int,
 
 	params := &t.scratch.lrParams
 	*params = looprestorationParams{}
-	var fn func(dst []P, dstOff, stride int, left []P, leftOff int,
-		lpf []P, lpfOff, w, h int, params *looprestorationParams, edges int,
-		bitdepthMax int32)
+	var fn func(dsp *dspContext[P], dst []P, dstOff, stride int,
+		left []P, leftOff int, lpf []P, lpfOff, w, h int,
+		params *looprestorationParams, edges int, bitdepthMax int32)
 
 	if lr.typ == restorationWiener {
 		flt := &params.filter
@@ -59,7 +59,7 @@ func lrStripe[P pixel, C coef](t *taskContext[P, C], p []P, pOff int,
 			edges &^= lrHaveBottom
 		}
 
-		fn(p, pOff, stride, left, leftOff, f.lf.lrLineBuf, lpfOff,
+		fn(f.dsp, p, pOff, stride, left, leftOff, f.lf.lrLineBuf, lpfOff,
 			unitW, stripeH, params, edges, f.bitdepthMax)
 
 		leftOff += stripeH * 4

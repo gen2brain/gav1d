@@ -21,37 +21,44 @@ func lrGen(iter, kind, i int) uint16 {
 	return uint16(v >> 16)
 }
 
-func runLR[P pixel, C coef](b, iter, kind, w, h, edges int,
-	params *looprestorationParams, bitdepthMax int32,
-) []int {
-	dst := make([]P, lrRows*lrStride)
+func lrBuffers[P pixel](b, iter int, bitdepthMax int32) (dst, lpf, left []P) {
+	dst = make([]P, lrRows*lrStride)
 	for i := range dst {
 		dst[i] = P(lrGen(iter, b*8+0, i) & uint16(bitdepthMax))
 	}
-	lpf := make([]P, lrLpfRows*lrStride)
+	lpf = make([]P, lrLpfRows*lrStride)
 	for i := range lpf {
 		lpf[i] = P(lrGen(iter, b*8+1, i) & uint16(bitdepthMax))
 	}
-	left := make([]P, lrRows*4)
+	left = make([]P, lrRows*4)
 	for i := range left {
 		left[i] = P(lrGen(iter, b*8+2, i) & uint16(bitdepthMax))
 	}
 
+	return dst, lpf, left
+}
+
+func runLR[P pixel, C coef](b, iter, kind, w, h, edges int,
+	params *looprestorationParams, bitdepthMax int32,
+) []int {
+	dst, lpf, left := lrBuffers[P](b, iter, bitdepthMax)
+
 	base := lrPad*lrStride + lrPad
 	lpfBase := 2*lrStride + lrPad
+	d := newDsp[P]()
 
 	switch kind {
 	case 0:
-		lrWiener[P, C](dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+		lrWiener[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
 			params, edges, bitdepthMax)
 	case 1:
-		lrSgr5x5[P, C](dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+		lrSgr5x5[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
 			params, edges, bitdepthMax)
 	case 2:
-		lrSgr3x3[P, C](dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+		lrSgr3x3[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
 			params, edges, bitdepthMax)
 	default:
-		lrSgrMix[P, C](dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+		lrSgrMix[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
 			params, edges, bitdepthMax)
 	}
 
@@ -144,4 +151,87 @@ func TestLoopRestoration(t *testing.T) {
 	}
 
 	t.Logf("%d cases", cases)
+}
+
+func wienerTaps(iter, k int, bitdepthMax int32) looprestorationParams {
+	var params looprestorationParams
+	f := &params.filter
+
+	for p := range 2 {
+		f[p][0] = int16(lrGen(iter, 9+p, 3*k+0)%16) - 5
+		f[p][1] = int16(lrGen(iter, 9+p, 3*k+1)%32) - 23
+		f[p][2] = int16(lrGen(iter, 9+p, 3*k+2)%64) - 17
+		f[p][6], f[p][5], f[p][4] = f[p][0], f[p][1], f[p][2]
+	}
+
+	f[0][3] = -(f[0][0] + f[0][1] + f[0][2]) * 2
+	if bitdepthMax != 255 {
+		f[0][3] += 128
+	}
+	f[1][3] = 128 - (f[1][0]+f[1][1]+f[1][2])*2
+
+	return params
+}
+
+func runWiener[P pixel, C coef](d *dspContext[P], b, iter, w, h, edges int,
+	params *looprestorationParams, bitdepthMax int32,
+) []P {
+	dst, lpf, left := lrBuffers[P](b, iter, bitdepthMax)
+
+	lrWiener[P, C](d, dst, lrPad*lrStride+lrPad, lrStride, left, 0,
+		lpf, 2*lrStride+lrPad, w, h, params, edges, bitdepthMax)
+
+	return dst
+}
+
+// TestWienerAsm checks the architecture-specific Wiener filter against the pure
+// Go one over every edge combination and a spread of widths that straddle the
+// vector width. The whole buffer is compared, so a kernel that writes outside
+// the unit fails.
+func TestWienerAsm(t *testing.T) {
+	cases := 0
+	for _, bpc := range []int{8, 10, 12} {
+		bitdepthMax := int32(1<<bpc - 1)
+		if bpc == 8 {
+			cases += wienerAsmDepth[uint8, int16](t, bitdepthMax)
+
+			continue
+		}
+		cases += wienerAsmDepth[uint16, int32](t, bitdepthMax)
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+func wienerAsmDepth[P pixel, C coef](t *testing.T, bitdepthMax int32) int {
+	t.Helper()
+
+	ref, got := newDspGo[P](), newDsp[P]()
+	b := (bitdepthFromMax(bitdepthMax) - 8) / 2
+	widths := []int{1, 2, 5, 6, 7, 8, 15, 16, 17, 31, 32, 33, 47, 64, 253, 256}
+	heights := []int{1, 2, 3, 4, 5, 8, 17, 48}
+	cases := 0
+
+	for iter := range 2 {
+		for k, w := range widths {
+			params := wienerTaps(iter, k, bitdepthMax)
+			for _, h := range heights {
+				for edges := range 16 {
+					want := runWiener[P, C](ref, b, iter, w, h, edges, &params, bitdepthMax)
+					have := runWiener[P, C](got, b, iter, w, h, edges, &params, bitdepthMax)
+					for i := range want {
+						if have[i] == want[i] {
+							continue
+						}
+						t.Fatalf("bpc=%d %dx%d edges=%d iter=%d: buf[%d] = %d, want %d",
+							bitdepthFromMax(bitdepthMax), w, h, edges, iter,
+							i, have[i], want[i])
+					}
+					cases++
+				}
+			}
+		}
+	}
+
+	return cases
 }
