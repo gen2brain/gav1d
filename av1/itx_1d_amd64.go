@@ -18,6 +18,9 @@ func itxColDct32AVX2(tmp *int32, lanes, stride int, lo, hi int32)
 func itxIdentityAVX2(tmp *int32, count, stride, n int, p *[4]int32)
 
 //go:noescape
+func itxColDct64AVX2(tmp *int32, lanes, stride int, lo, hi int32, scratch *int32)
+
+//go:noescape
 func itxColAdst4AVX2(tmp *int32, lanes, stride int, lo, hi int32, flip int)
 
 //go:noescape
@@ -44,7 +47,7 @@ func itxIdentityVec(tmp []int32, lanes, stride, n int) bool {
 	return true
 }
 
-func itxColVec(tmp []int32, lanes, stride, n, txtp int, lo, hi int32) bool {
+func itxColVec(tmp []int32, lanes, stride, n, txtp int, lo, hi int32, scratch []int32) bool {
 	if txtp == tx1dIdentity {
 		return itxIdentityVec(tmp, lanes, stride, n)
 	}
@@ -80,6 +83,10 @@ func itxColVec(tmp []int32, lanes, stride, n, txtp int, lo, hi int32) bool {
 	case 32:
 		itxColDct16AVX2(&tmp[0], lanes, stride*2, lo, hi)
 		itxColDct32AVX2(&tmp[0], lanes, stride, lo, hi)
+	case 64:
+		itxColDct16AVX2(&tmp[0], lanes, stride*4, lo, hi)
+		itxColDct32AVX2(&tmp[0], lanes, stride*2, lo, hi)
+		itxColDct64AVX2(&tmp[0], lanes, stride, lo, hi, &scratch[0])
 	default:
 		return false
 	}

@@ -6,7 +6,10 @@ type pixel interface{ ~uint8 | ~uint16 }
 
 type coef interface{ ~int16 | ~int32 }
 
-const itxScratchLen = 64*64 + 64*32
+const (
+	itxDct64Scratch = 64*64 + 64*32
+	itxScratchLen   = itxDct64Scratch + 256
+)
 
 var txfmDimensions = [nRectTxSizes]txfmInfo{
 	tx4x4:    {w: 1, h: 1, lw: 0, lh: 0, min: 0, max: 0, sub: tx4x4, ctx: 0},
@@ -154,7 +157,7 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 
 	clear(coeff[:sw*sh])
 
-	if dsp.itxCol == nil || !dsp.itxCol(wide, lanes, sh, w, int(txtps[0]), rowClipMin, rowClipMax) {
+	if dsp.itxCol == nil || !dsp.itxCol(wide, lanes, sh, w, int(txtps[0]), rowClipMin, rowClipMax, tmp[itxDct64Scratch:]) {
 		for y := range n {
 			first1d(wide, y, sh, rowClipMin, rowClipMax)
 		}
@@ -165,7 +168,7 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 	dsp.itxClip(tmp[:lanes*w], rnd, shift, colClipMin, colClipMax)
 	clear(tmp[lanes*w : h*w])
 
-	if dsp.itxCol == nil || !dsp.itxCol(tmp, w, w, h, int(txtps[1]), colClipMin, colClipMax) {
+	if dsp.itxCol == nil || !dsp.itxCol(tmp, w, w, h, int(txtps[1]), colClipMin, colClipMax, tmp[itxDct64Scratch:]) {
 		for x := range w {
 			second1d(tmp, x, w, colClipMin, colClipMax)
 		}

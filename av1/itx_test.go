@@ -229,6 +229,7 @@ func TestItxColAsm(t *testing.T) {
 				}
 				for _, n := range []int{4, 8, 16, 32, 64} {
 					for _, txtp := range []int{tx1dDct, tx1dAdst, tx1dIdentity, tx1dFlipadst} {
+						scratch := make([]int32, 256)
 						lo, hi := int32(math.MinInt16), int32(math.MaxInt16)
 						ref := make([]int32, n*stride)
 						got := make([]int32, n*stride)
@@ -238,8 +239,12 @@ func TestItxColAsm(t *testing.T) {
 							ref[i] = int32(v*2654435761)>>18 | 1
 							got[i] = ref[i]
 						}
+						if n == 64 {
+							clear(ref[32*stride:])
+							clear(got[32*stride:])
+						}
 
-						if !d.itxCol(got, lanes, stride, n, txtp, lo, hi) {
+						if !d.itxCol(got, lanes, stride, n, txtp, lo, hi, scratch) {
 							continue
 						}
 						fn := tx1dFns[ulog2(uint32(n))-2][txtp]

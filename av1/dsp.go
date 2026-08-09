@@ -27,7 +27,7 @@ type dspContext[P pixel] struct {
 
 	itxClip func(tmp []int32, rnd int32, shift int, lo, hi int32)
 	itxAdd  func(dst []P, dstOff, stride int, tmp []int32, w, h int, bitdepthMax int32)
-	itxCol  func(tmp []int32, lanes, stride, n, txtp int, lo, hi int32) bool
+	itxCol  func(tmp []int32, lanes, stride, n, txtp int, lo, hi int32, scratch []int32) bool
 
 	itxTranspose func(wide, tmp []int32, w, sh, n int)
 
