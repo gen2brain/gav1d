@@ -12,6 +12,9 @@ type dspContext[P pixel] struct {
 	cdefDir  func(img []P, imgOff, stride int, bitdepthMax int32) (int, uint32)
 	cdefCopy cdefCopyFn[P]
 
+	loopFilter func(dst []P, dstOff int, e, i, h int32,
+		stridea, strideb int, wd int, bitdepthMax int32)
+
 	fgApplyRow func(dst []P, dstOff int, src []P, srcOff int,
 		scaling []uint8, grain []int16, n, shift, minValue, maxValue int)
 
@@ -46,6 +49,7 @@ func newDspGo[P pixel]() *dspContext[P] {
 	d := &dspContext[P]{
 		cdefDir:      cdefFindDir[P],
 		cdefCopy:     cdefCopyRows[P],
+		loopFilter:   loopFilter[P],
 		fgApplyRow:   fgApplyRow[P],
 		fguvApplyRow: fguvApplyRow[P],
 		put8tap:      put8tap[P],

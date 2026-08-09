@@ -44,13 +44,17 @@ func runLF[P pixel](t *testing.T, line, dir, plane int, vmask *[3]uint32,
 
 	switch {
 	case plane == 0 && dir == 0:
-		loopFilterHSb128y(buf, base, lfStride, vmask, l, lOff, lfB4S, lut, bitdepthMax)
+		loopFilterHSb128y(newDspGo[P](), buf, base, lfStride, vmask, l, lOff,
+			lfB4S, lut, bitdepthMax)
 	case plane == 0:
-		loopFilterVSb128y(buf, base, lfStride, vmask, l, lOff, lfB4S, lut, bitdepthMax)
+		loopFilterVSb128y(newDspGo[P](), buf, base, lfStride, vmask, l, lOff,
+			lfB4S, lut, bitdepthMax)
 	case dir == 0:
-		loopFilterHSb128uv(buf, base, lfStride, (*[2]uint32)(vmask[:2]), l, lOff, lfB4S, lut, bitdepthMax)
+		loopFilterHSb128uv(newDspGo[P](), buf, base, lfStride, (*[2]uint32)(vmask[:2]),
+			l, lOff, lfB4S, lut, bitdepthMax)
 	default:
-		loopFilterVSb128uv(buf, base, lfStride, (*[2]uint32)(vmask[:2]), l, lOff, lfB4S, lut, bitdepthMax)
+		loopFilterVSb128uv(newDspGo[P](), buf, base, lfStride, (*[2]uint32)(vmask[:2]),
+			l, lOff, lfB4S, lut, bitdepthMax)
 	}
 
 	idx = 0
@@ -140,4 +144,92 @@ func TestLoopFilter(t *testing.T) {
 	}
 
 	t.Logf("%d cases", cases)
+}
+
+func runLFEdge[P pixel](d *dspContext[P], iter, wd, stridea, strideb int,
+	bitdepthMax int32, e, i, h int32,
+) []P {
+	min8 := bitdepthFromMax(bitdepthMax) - 8
+	flat := int32(128) << min8
+	buf := make([]P, lfRows*lfStride)
+	for k := range buf {
+		v := int32(lrGen(iter, 5, k))
+		switch iter & 3 {
+		case 0:
+			buf[k] = P(v & bitdepthMax)
+		case 1:
+			// Flat enough that flat8in and flat8out both hold, which is the
+			// only way the six, eight and fourteen tap filters ever run.
+			buf[k] = P(flat + (v & 1))
+		case 2:
+			buf[k] = P(flat + (v & 3))
+		default:
+			buf[k] = P(flat + (v & 7) - 4 + int32(k%lfStride)/16)
+		}
+	}
+
+	// One call filters four lines; walking the edge gives a single mutation
+	// far more chances to change a rounded output.
+	off := lfPad*lfStride + lfPad
+	for range 12 {
+		d.loopFilter(buf, off, e, i, h, stridea, strideb, wd, bitdepthMax)
+		off += 4 * stridea
+	}
+
+	return buf
+}
+
+// TestLoopFilterAsm checks the architecture-specific deblocking filter against
+// the pure Go one for both edge directions, every tap width and thresholds that
+// span from filtering nothing to filtering everything. The whole buffer is
+// compared, so a kernel that writes outside its span fails.
+func TestLoopFilterAsm(t *testing.T) {
+	cases := 0
+	for _, bpc := range []int{8, 10, 12} {
+		bitdepthMax := int32(1<<bpc - 1)
+		if bpc == 8 {
+			cases += lfAsmDepth[uint8](t, bitdepthMax)
+
+			continue
+		}
+		cases += lfAsmDepth[uint16](t, bitdepthMax)
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+func lfAsmDepth[P pixel](t *testing.T, bitdepthMax int32) int {
+	t.Helper()
+
+	ref, got := newDspGo[P](), newDsp[P]()
+	cases := 0
+
+	for iter := range 8 {
+		for _, wd := range []int{4, 6, 8, 16} {
+			for _, dir := range [][2]int{{1, lfStride}, {lfStride, 1}} {
+				for _, e := range []int32{0, 3, 20, 100} {
+					for _, i := range []int32{0, 1, 6, 40} {
+						for _, h := range []int32{0, 2, 30} {
+							want := runLFEdge(ref, iter, wd, dir[0], dir[1],
+								bitdepthMax, e, i, h)
+							have := runLFEdge(got, iter, wd, dir[0], dir[1],
+								bitdepthMax, e, i, h)
+							for k := range want {
+								if have[k] == want[k] {
+									continue
+								}
+								t.Fatalf("bpc=%d wd=%d stridea=%d e=%d i=%d h=%d iter=%d: "+
+									"buf[%d] = %d, want %d",
+									bitdepthFromMax(bitdepthMax), wd, dir[0], e, i, h,
+									iter, k, have[k], want[k])
+							}
+							cases++
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return cases
 }

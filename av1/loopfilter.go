@@ -129,8 +129,9 @@ func loopFilter[P pixel](dst []P, dstOff int, e, i, h int32,
 	}
 }
 
-func loopFilterHSb128y[P pixel](dst []P, dstOff, stride int, vmask *[3]uint32,
-	l []uint8, lOff, b4Stride int, lut *filterLUT, bitdepthMax int32,
+func loopFilterHSb128y[P pixel](dsp *dspContext[P], dst []P, dstOff, stride int,
+	vmask *[3]uint32, l []uint8, lOff, b4Stride int, lut *filterLUT,
+	bitdepthMax int32,
 ) {
 	vm := vmask[0] | vmask[1] | vmask[2]
 	for y := uint32(1); vm&^(y-1) != 0; y, dstOff, lOff = y<<1, dstOff+4*stride, lOff+b4Stride*4 {
@@ -153,12 +154,13 @@ func loopFilterHSb128y[P pixel](dst []P, dstOff, stride int, vmask *[3]uint32,
 		case vmask[1]&y != 0:
 			idx = 1
 		}
-		loopFilter(dst, dstOff, e, i, h, stride, 1, 4<<idx, bitdepthMax)
+		dsp.loopFilter(dst, dstOff, e, i, h, stride, 1, 4<<idx, bitdepthMax)
 	}
 }
 
-func loopFilterVSb128y[P pixel](dst []P, dstOff, stride int, vmask *[3]uint32,
-	l []uint8, lOff, b4Stride int, lut *filterLUT, bitdepthMax int32,
+func loopFilterVSb128y[P pixel](dsp *dspContext[P], dst []P, dstOff, stride int,
+	vmask *[3]uint32, l []uint8, lOff, b4Stride int, lut *filterLUT,
+	bitdepthMax int32,
 ) {
 	vm := vmask[0] | vmask[1] | vmask[2]
 	for x := uint32(1); vm&^(x-1) != 0; x, dstOff, lOff = x<<1, dstOff+4, lOff+4 {
@@ -181,12 +183,13 @@ func loopFilterVSb128y[P pixel](dst []P, dstOff, stride int, vmask *[3]uint32,
 		case vmask[1]&x != 0:
 			idx = 1
 		}
-		loopFilter(dst, dstOff, e, i, h, 1, stride, 4<<idx, bitdepthMax)
+		dsp.loopFilter(dst, dstOff, e, i, h, 1, stride, 4<<idx, bitdepthMax)
 	}
 }
 
-func loopFilterHSb128uv[P pixel](dst []P, dstOff, stride int, vmask *[2]uint32,
-	l []uint8, lOff, b4Stride int, lut *filterLUT, bitdepthMax int32,
+func loopFilterHSb128uv[P pixel](dsp *dspContext[P], dst []P, dstOff, stride int,
+	vmask *[2]uint32, l []uint8, lOff, b4Stride int, lut *filterLUT,
+	bitdepthMax int32,
 ) {
 	vm := vmask[0] | vmask[1]
 	for y := uint32(1); vm&^(y-1) != 0; y, dstOff, lOff = y<<1, dstOff+4*stride, lOff+b4Stride*4 {
@@ -203,12 +206,13 @@ func loopFilterHSb128uv[P pixel](dst []P, dstOff, stride int, vmask *[2]uint32,
 		h := int32(lv >> 4)
 		e, i := int32(lut.e[lv]), int32(lut.i[lv])
 		idx := b2i(vmask[1]&y != 0)
-		loopFilter(dst, dstOff, e, i, h, stride, 1, 4+2*idx, bitdepthMax)
+		dsp.loopFilter(dst, dstOff, e, i, h, stride, 1, 4+2*idx, bitdepthMax)
 	}
 }
 
-func loopFilterVSb128uv[P pixel](dst []P, dstOff, stride int, vmask *[2]uint32,
-	l []uint8, lOff, b4Stride int, lut *filterLUT, bitdepthMax int32,
+func loopFilterVSb128uv[P pixel](dsp *dspContext[P], dst []P, dstOff, stride int,
+	vmask *[2]uint32, l []uint8, lOff, b4Stride int, lut *filterLUT,
+	bitdepthMax int32,
 ) {
 	vm := vmask[0] | vmask[1]
 	for x := uint32(1); vm&^(x-1) != 0; x, dstOff, lOff = x<<1, dstOff+4, lOff+4 {
@@ -225,6 +229,6 @@ func loopFilterVSb128uv[P pixel](dst []P, dstOff, stride int, vmask *[2]uint32,
 		h := int32(lv >> 4)
 		e, i := int32(lut.e[lv]), int32(lut.i[lv])
 		idx := b2i(vmask[1]&x != 0)
-		loopFilter(dst, dstOff, e, i, h, 1, stride, 4+2*idx, bitdepthMax)
+		dsp.loopFilter(dst, dstOff, e, i, h, 1, stride, 4+2*idx, bitdepthMax)
 	}
 }

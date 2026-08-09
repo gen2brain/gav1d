@@ -23,7 +23,7 @@ func filterPlaneColsY[P pixel, C coef](f *frameContext[P, C], haveLeft bool,
 			hmask[1] = uint32(mask[x][1][1])
 			hmask[2] = uint32(mask[x][2][1])
 		}
-		loopFilterHSb128y(dst, dstOff+x*4, ls, &hmask, lvl, lvlOff+x*4,
+		loopFilterHSb128y(f.dsp, dst, dstOff+x*4, ls, &hmask, lvl, lvlOff+x*4,
 			b4Stride, &f.lf.limLut, f.bitdepthMax)
 	}
 }
@@ -41,7 +41,7 @@ func filterPlaneRowsY[P pixel, C coef](f *frameContext[P, C], haveTop bool,
 			uint32(mask[y][1][0]) | uint32(mask[y][1][1])<<16,
 			uint32(mask[y][2][0]) | uint32(mask[y][2][1])<<16,
 		}
-		loopFilterVSb128y(dst, dstOff, ls, &vmask, lvl, lvlOff+1,
+		loopFilterVSb128y(f.dsp, dst, dstOff, ls, &vmask, lvl, lvlOff+1,
 			b4Stride, &f.lf.limLut, f.bitdepthMax)
 	}
 }
@@ -66,9 +66,9 @@ func filterPlaneColsUV[P pixel, C coef](f *frameContext[P, C], haveLeft bool,
 			hmask[0] = uint32(mask[x][0][1])
 			hmask[1] = uint32(mask[x][1][1])
 		}
-		loopFilterHSb128uv(u, uvOff+x*4, ls, &hmask, lvl, lvlOff+x*4+2,
+		loopFilterHSb128uv(f.dsp, u, uvOff+x*4, ls, &hmask, lvl, lvlOff+x*4+2,
 			b4Stride, &f.lf.limLut, f.bitdepthMax)
-		loopFilterHSb128uv(v, uvOff+x*4, ls, &hmask, lvl, lvlOff+x*4+3,
+		loopFilterHSb128uv(f.dsp, v, uvOff+x*4, ls, &hmask, lvl, lvlOff+x*4+3,
 			b4Stride, &f.lf.limLut, f.bitdepthMax)
 	}
 }
@@ -86,9 +86,9 @@ func filterPlaneRowsUV[P pixel, C coef](f *frameContext[P, C], haveTop bool,
 			uint32(mask[y][0][0]) | uint32(mask[y][0][1])<<(16>>ssHor),
 			uint32(mask[y][1][0]) | uint32(mask[y][1][1])<<(16>>ssHor),
 		}
-		loopFilterVSb128uv(u, uvOff+offL, ls, &vmask, lvl, lvlOff+2,
+		loopFilterVSb128uv(f.dsp, u, uvOff+offL, ls, &vmask, lvl, lvlOff+2,
 			b4Stride, &f.lf.limLut, f.bitdepthMax)
-		loopFilterVSb128uv(v, uvOff+offL, ls, &vmask, lvl, lvlOff+3,
+		loopFilterVSb128uv(f.dsp, v, uvOff+offL, ls, &vmask, lvl, lvlOff+3,
 			b4Stride, &f.lf.limLut, f.bitdepthMax)
 	}
 }

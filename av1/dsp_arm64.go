@@ -25,6 +25,7 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.itxAdd = itxAdd8Vec
 		d8.cdefDir = cdefFindDir8NEON
 		d8.cdefCopy = cdefCopy8NEONRows
+		d8.loopFilter = loopFilter8NEON
 		d8.wienerH = wienerH8NEONRow
 		d8.wienerV = wienerV8NEONRow
 	}
