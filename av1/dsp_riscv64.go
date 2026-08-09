@@ -6,8 +6,11 @@ package av1
 // build tag already required the vector extension, so there is nothing to
 // detect.
 func dspInit[P pixel](d *dspContext[P]) {
+	d.itxClip = itxClipVec
+
 	if d16, ok := any(d).(*dspContext[uint16]); ok {
 		d16.cdefFilter = cdefFilterBlock16RVV
+		d16.itxAdd = itxAdd16Vec
 	}
 
 	if d8, ok := any(d).(*dspContext[uint8]); ok {
@@ -15,5 +18,6 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.fgApplyRow = fgApplyRow8RVV
 		d8.fguvApplyRow = fguvApplyRow8RVV
 		d8.put8tap = put8tap8RVV
+		d8.itxAdd = itxAdd8Vec
 	}
 }
