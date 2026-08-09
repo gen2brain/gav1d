@@ -94,7 +94,8 @@ func cdefBrow[P pixel, C coef](t *taskContext[P, C], p *[3]int, lflvl []av1Filte
 			backup2lines(f, &f.lf.cdefLine[1-tf], &ptrs)
 		}
 
-		var lrBak [2][3][16]P
+		lrBak := &t.scratch.cdefLrBak
+		*lrBak = [2][3][16]P{}
 		iptrs := ptrs
 		edges &^= cdefHaveLeft
 		edges |= cdefHaveRight

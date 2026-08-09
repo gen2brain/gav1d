@@ -80,7 +80,8 @@ func backup4xU[P pixel](dst []P, dstOff int, src []P, srcOff, srcStride, u int) 
 	}
 }
 
-func lrSbrowPlane[P pixel, C coef](f *frameContext[P, C], pOff, y, w, h, rowH, plane int) {
+func lrSbrowPlane[P pixel, C coef](t *taskContext[P, C], pOff, y, w, h, rowH, plane int) {
+	f := t.f
 	chroma := b2i(plane != 0)
 	ssVer := chroma & b2i(f.layout == pixelLayoutI420)
 	ssHor := chroma & b2i(f.layout != pixelLayoutI444)
@@ -94,7 +95,8 @@ func lrSbrowPlane[P pixel, C coef](f *frameContext[P, C], pOff, y, w, h, rowH, p
 	rowY := y + (8>>ssVer)*b2i(y != 0)
 	shiftHor := 7 - ssHor
 
-	var preLrBorder [2][(128 + 8) * 4]P
+	preLrBorder := &t.scratch.lrBorder
+	*preLrBorder = [2][(128 + 8) * 4]P{}
 	var lr [2]*av1RestorationUnit
 
 	edges := lrHaveRight
@@ -141,7 +143,8 @@ func lrSbrowPlane[P pixel, C coef](f *frameContext[P, C], pOff, y, w, h, rowH, p
 	}
 }
 
-func lrSbrow[P pixel, C coef](f *frameContext[P, C], sby int) {
+func lrSbrow[P pixel, C coef](t *taskContext[P, C], sby int) {
+	f := t.f
 	offsetY := 8 * b2i(sby != 0)
 	restorePlanes := f.lf.restorePlanes
 	sb128 := int(f.seqHdr.sb128)
@@ -153,7 +156,7 @@ func lrSbrow[P pixel, C coef](f *frameContext[P, C], sby int) {
 		w := f.srWidth
 		rowH := min((sby+1)<<(6+sb128)-8*notLast, h)
 		yStripe := (sby << (6 + sb128)) - offsetY
-		lrSbrowPlane(f, (y-offsetY)*f.srStride[0], yStripe, w, h, rowH, 0)
+		lrSbrowPlane(t, (y-offsetY)*f.srStride[0], yStripe, w, h, rowH, 0)
 	}
 
 	if restorePlanes&(lrRestoreU|lrRestoreV) == 0 {
@@ -172,6 +175,6 @@ func lrSbrow[P pixel, C coef](f *frameContext[P, C], sby int) {
 		if restorePlanes&(1<<pl) == 0 {
 			continue
 		}
-		lrSbrowPlane(f, uvOff, yStripe, w, h, rowH, pl)
+		lrSbrowPlane(t, uvOff, yStripe, w, h, rowH, pl)
 	}
 }

@@ -290,7 +290,7 @@ func (f *frameContext[P, C]) decode(in, out *cdfPromise) (*Picture, error) {
 			filterSbrowResize(f, sby)
 		}
 		if f.lf.restorePlanes != 0 {
-			lrSbrow(f, sby)
+			lrSbrow(pt, sby)
 		}
 	}
 
