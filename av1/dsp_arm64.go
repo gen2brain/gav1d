@@ -6,6 +6,7 @@ package av1
 // NEON is part of the architecture, so there is nothing to detect.
 func dspInit[P pixel](d *dspContext[P]) {
 	d.itxClip = itxClipVec
+	d.itxCol = itxColVec
 
 	if d16, ok := any(d).(*dspContext[uint16]); ok {
 		d16.cdefFilter = cdefFilterBlock16NEON
