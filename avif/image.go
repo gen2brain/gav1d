@@ -31,7 +31,58 @@ func alphaState(alpha *av1.Picture, outDepth int, full bool) *colorState {
 	return s
 }
 
-func toImage(f *file, it *item, pic, alpha *av1.Picture) (image.Image, error) {
+// planar wraps the decoded planes without converting them, which is what the
+// bitstream already holds. image.YCbCr reads them as full-range BT.601, so a
+// file signalling anything else is exact as data but not as color.
+func planar(pic, alpha *av1.Picture) (image.Image, bool) {
+	if pic.BitDepth != 8 {
+		return nil, false
+	}
+
+	rect := image.Rect(0, 0, pic.Width, pic.Height)
+
+	if pic.Layout == av1.LayoutI400 {
+		if alpha != nil {
+			return nil, false
+		}
+
+		return &image.Gray{Pix: pic.Data[0], Stride: pic.Stride[0], Rect: rect}, true
+	}
+
+	var ratio image.YCbCrSubsampleRatio
+	switch pic.Layout {
+	case av1.LayoutI420:
+		ratio = image.YCbCrSubsampleRatio420
+	case av1.LayoutI422:
+		ratio = image.YCbCrSubsampleRatio422
+	case av1.LayoutI444:
+		ratio = image.YCbCrSubsampleRatio444
+	default:
+		return nil, false
+	}
+
+	y := image.YCbCr{
+		Y: pic.Data[0], Cb: pic.Data[1], Cr: pic.Data[2],
+		YStride: pic.Stride[0], CStride: pic.Stride[1],
+		SubsampleRatio: ratio, Rect: rect,
+	}
+	if alpha == nil {
+		return &y, true
+	}
+	if alpha.BitDepth != 8 || alpha.Layout != av1.LayoutI400 {
+		return nil, false
+	}
+
+	return &image.NYCbCrA{YCbCr: y, A: alpha.Data[0], AStride: alpha.Stride[0]}, true
+}
+
+func toImage(f *file, it *item, pic, alpha *av1.Picture, ycbcr bool) (image.Image, error) {
+	if ycbcr {
+		if img, ok := planar(pic, alpha); ok {
+			return img, nil
+		}
+	}
+
 	outDepth := 8
 	if pic.BitDepth > 8 {
 		outDepth = 16

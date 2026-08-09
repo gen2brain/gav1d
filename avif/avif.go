@@ -367,11 +367,18 @@ type AVIF struct {
 
 // Options are the decoding parameters.
 type Options struct {
-	// AutoRotate applies the clap/irot/imir transforms to the decoded image.
+	// AutoRotate applies the clap/irot/imir transforms, forcing NRGBA output
+	// when it transforms.
 	AutoRotate bool
 	// FrameSizeLimit bounds a frame's area in pixels. Zero means
 	// av1.DefaultFrameSizeLimit; a negative value removes the limit.
 	FrameSizeLimit int
+	// ToYCbCr forces the image's native color space instead of NRGBA:
+	// *image.YCbCr, *image.NYCbCrA when there is alpha, or *image.Gray when
+	// the image is monochrome. Above 8 bits NRGBA64 is returned anyway.
+	// image.YCbCr reads the planes as full-range BT.601 whatever the file
+	// signals, so this is for reaching the samples, not for display.
+	ToYCbCr bool
 }
 
 // Decode reads an AVIF image as *image.NRGBA, or *image.NRGBA64 above 8 bits.
@@ -440,6 +447,11 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 	return image.Config{Width: w, Height: h, ColorModel: colorModelFor(f, it)}, nil
 }
 
+// ycbcrFor drops the native form when a transform has to run over the pixels.
+func (o Options) ycbcrFor(f *file, it *item) bool {
+	return o.ToYCbCr && !(o.AutoRotate && f.hasTransform(it))
+}
+
 func options(opts []Options) Options {
 	if len(opts) > 0 {
 		return opts[0]
@@ -454,7 +466,7 @@ func (f *file) decodeStill(o Options) (image.Image, error) {
 		return nil, err
 	}
 	it := f.primary()
-	img, err := toImage(f, it, pic, alpha)
+	img, err := toImage(f, it, pic, alpha, o.ycbcrFor(f, it))
 	if err != nil {
 		return nil, err
 	}

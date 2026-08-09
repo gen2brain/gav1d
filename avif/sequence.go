@@ -301,7 +301,7 @@ func (f *file) decodeSequence(o Options) (*AVIF, error) {
 		if i < len(alphas) {
 			alpha = alphas[i]
 		}
-		img, err := toImage(f, f.primary(), pic, alpha)
+		img, err := toImage(f, f.primary(), pic, alpha, o.ycbcrFor(f, f.primary()))
 		if err != nil {
 			return nil, err
 		}

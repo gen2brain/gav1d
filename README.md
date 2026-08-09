@@ -18,10 +18,15 @@ img, err := avif.Decode(r)
 `avif.Decode` returns `*image.NRGBA`, or `*image.NRGBA64` above 8 bits. The package registers itself with
 `image.RegisterFormat`, so `image.Decode` works once it is imported for side effects.
 
+`ToYCbCr` skips the conversion and hands back the planes the bitstream carries — `*image.YCbCr`,
+`*image.NYCbCrA` with alpha, `*image.Gray` for monochrome. Note that `image.YCbCr` reads them as
+full-range BT.601 whatever the file signals.
+
 ```go
 opts := avif.Options{
     AutoRotate:     true,    // apply the clap/irot/imir transforms
     FrameSizeLimit: 1 << 24, // bound a frame's area, in pixels
+    ToYCbCr:        true,    // return the planes instead of converting
 }
 
 anim, err := avif.DecodeAll(r, opts)

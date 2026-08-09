@@ -136,6 +136,12 @@ func cropRect(clap *[8]uint32, w, h int) (int, int, int, int, bool) {
 }
 
 // applyTransforms runs clean aperture, then rotation, then mirroring, per MIAF 7.3.6.7.
+// hasTransform reports whether AutoRotate would have to touch the pixels.
+func (f *file) hasTransform(it *item) bool {
+	return f.meta.prop(it, "clap") != nil || f.meta.prop(it, "irot") != nil ||
+		f.meta.prop(it, "imir") != nil
+}
+
 func (f *file) applyTransforms(img image.Image, it *item) (image.Image, error) {
 	clap := f.meta.prop(it, "clap")
 	irot := f.meta.prop(it, "irot")

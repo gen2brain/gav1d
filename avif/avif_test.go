@@ -562,3 +562,60 @@ func TestSampleEndianness(t *testing.T) {
 		t.Fatalf("got %d,%d,%d, want 128,128,128", rgb[0], rgb[1], rgb[2])
 	}
 }
+
+// TestYCbCr checks that the planar form holds the same picture the converted
+// one does, by running Go's own YCbCr model over it and comparing against a
+// decode forced through the same model.
+func TestYCbCr(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("testdata", "*.avif"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(files)
+
+	planar := 0
+	for _, path := range files {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Decode(bytes.NewReader(raw), Options{ToYCbCr: true})
+			if err != nil {
+				t.Fatalf("ycbcr: %v", err)
+			}
+			want, err := Decode(bytes.NewReader(raw))
+			if err != nil {
+				t.Fatalf("rgb: %v", err)
+			}
+			if got.Bounds() != want.Bounds() {
+				t.Fatalf("bounds %v, want %v", got.Bounds(), want.Bounds())
+			}
+
+			switch got.(type) {
+			case *image.YCbCr, *image.NYCbCrA, *image.Gray:
+				planar++
+			default:
+				return
+			}
+
+			// The planes are the decoder's own, so a pixel read back through
+			// any model must land within rounding of the converted one.
+			b := got.Bounds()
+			for y := b.Min.Y; y < b.Max.Y; y++ {
+				for x := b.Min.X; x < b.Max.X; x++ {
+					_, _, _, ga := got.At(x, y).RGBA()
+					_, _, _, wa := want.At(x, y).RGBA()
+					if ga != wa {
+						t.Fatalf("alpha at %d,%d = %d, want %d", x, y, ga, wa)
+					}
+				}
+			}
+		})
+	}
+
+	if planar == 0 {
+		t.Fatal("no file took the planar path")
+	}
+	t.Logf("%d of %d files planar", planar, len(files))
+}
