@@ -555,8 +555,10 @@ func TestSampleEndianness(t *testing.T) {
 	binary.NativeEndian.PutUint16(pic.Data[0], 512)
 
 	cs := newColorState(pic, nil, 8)
-	r, g, b := cs.rgb(pic, 0, 0)
-	if r != 128 || g != 128 || b != 128 {
-		t.Fatalf("got %d,%d,%d, want 128,128,128", r, g, b)
+	cs.prepare(1)
+	rgb := make([]uint16, 3)
+	cs.rgbRow(pic, 0, rgb)
+	if rgb[0] != 128 || rgb[1] != 128 || rgb[2] != 128 {
+		t.Fatalf("got %d,%d,%d, want 128,128,128", rgb[0], rgb[1], rgb[2])
 	}
 }

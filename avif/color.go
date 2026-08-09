@@ -46,10 +46,19 @@ type colorState struct {
 
 	kr, kg, kb       float32
 	tableY, tableUV  []float32
+	tw0, tw1, tw2    []float32
+	pixLUT           []uint16
+	crCoef, cbCoef   float32
+	gcr, gcb         float32
 	outMax           float32
 	ssHor, ssVer     int
 	hasColor         bool
 	unsupportedSpace bool
+
+	uvIdx, uvAdj []int32
+	yRow         []uint16
+	uRow, vRow   [2][]uint16
+	cbRow, crRow []float32
 }
 
 // newColorState resolves the color description, preferring nclx over the sequence header.
@@ -112,16 +121,174 @@ func newColorState(pic *av1.Picture, nclx *colorInfo, outDepth int) *colorState 
 		}
 	}
 
+	s.derive()
+
 	return s
 }
 
-func (s *colorState) sample(data []byte, stride, x, y int) int {
-	if s.depth == 8 {
-		return int(data[y*stride+x])
-	}
-	v := int(binary.NativeEndian.Uint16(data[y*stride+x*2:]))
+// derive folds the upsample weights and the matrix constants into tables. Each
+// is the same float32 the per-pixel expression would have produced, so the
+// output is unchanged.
+func (s *colorState) derive() {
+	const w0, w1, w2 = 9.0 / 16.0, 3.0 / 16.0, 1.0 / 16.0
 
-	return min(v, s.maxChannel)
+	n := len(s.tableUV)
+	s.tw0 = make([]float32, n)
+	s.tw1 = make([]float32, n)
+	s.tw2 = make([]float32, n)
+	for i := range n {
+		s.tw0[i] = s.tableUV[i] * w0
+		s.tw1[i] = s.tableUV[i] * w1
+		s.tw2[i] = s.tableUV[i] * w2
+	}
+
+	s.pixLUT = make([]uint16, len(s.tableY))
+	for i := range s.tableY {
+		s.pixLUT[i] = uint16(0.5 + clampF(s.tableY[i])*s.outMax)
+	}
+
+	s.crCoef, s.cbCoef = 2*(1-s.kr), 2*(1-s.kb)
+	s.gcr, s.gcb = s.kr*(1-s.kr), s.kb*(1-s.kb)
+}
+
+// prepare sizes the row scratch and precomputes the chroma column indices,
+// which depend only on x and the width.
+func (s *colorState) prepare(w int) {
+	uw := (w + s.ssHor) >> s.ssHor
+
+	s.yRow = make([]uint16, w)
+	for i := range s.uRow {
+		s.uRow[i] = make([]uint16, uw)
+		s.vRow[i] = make([]uint16, uw)
+	}
+	s.cbRow = make([]float32, w)
+	s.crRow = make([]float32, w)
+
+	s.uvIdx = make([]int32, w)
+	s.uvAdj = make([]int32, w)
+	for x := range w {
+		uvX := x >> s.ssHor
+		adj := 0
+		if x != 0 && !(x == w-1 && x%2 != 0) {
+			if x%2 != 0 {
+				adj = 1
+			} else {
+				adj = -1
+			}
+		}
+		s.uvIdx[x] = int32(uvX)
+		s.uvAdj[x] = int32(uvX + adj)
+	}
+}
+
+// fillIdx widens one plane row into sample indices, so the inner loops index
+// tables without a depth test per pixel.
+func (s *colorState) fillIdx(data []byte, stride, y, n int, dst []uint16) {
+	if s.depth == 8 {
+		row := data[y*stride : y*stride+n]
+		for i, v := range row {
+			dst[i] = uint16(v)
+		}
+
+		return
+	}
+
+	row := data[y*stride : y*stride+2*n]
+	maxCh := uint16(s.maxChannel)
+	for i := range n {
+		dst[i] = min(binary.NativeEndian.Uint16(row[2*i:]), maxCh)
+	}
+}
+
+// chromaRow gathers Cb and Cr for one output row, upsampling a subsampled plane
+// from the closest sample, the adjacent column, the adjacent row and the
+// diagonal.
+func (s *colorState) chromaRow(pic *av1.Picture, y, w int) {
+	uvY := y >> s.ssVer
+	uw := (w + s.ssHor) >> s.ssHor
+
+	s.fillIdx(pic.Data[1], pic.Stride[1], uvY, uw, s.uRow[0])
+	s.fillIdx(pic.Data[2], pic.Stride[2], uvY, uw, s.vRow[0])
+
+	if s.ssHor == 0 {
+		u, v := s.uRow[0], s.vRow[0]
+		for x := range w {
+			s.cbRow[x] = s.tableUV[u[x]]
+			s.crRow[x] = s.tableUV[v[x]]
+		}
+
+		return
+	}
+
+	adjRow := 0
+	if s.ssVer != 0 && y != 0 && !(y == pic.Height-1 && y%2 != 0) {
+		if y%2 != 0 {
+			adjRow = 1
+		} else {
+			adjRow = -1
+		}
+	}
+
+	u0, v0 := s.uRow[0], s.vRow[0]
+	u1, v1 := u0, v0
+	if adjRow != 0 {
+		s.fillIdx(pic.Data[1], pic.Stride[1], uvY+adjRow, uw, s.uRow[1])
+		s.fillIdx(pic.Data[2], pic.Stride[2], uvY+adjRow, uw, s.vRow[1])
+		u1, v1 = s.uRow[1], s.vRow[1]
+	}
+
+	for x := range w {
+		i, j := s.uvIdx[x], s.uvAdj[x]
+		s.cbRow[x] = s.tw0[u0[i]] + s.tw1[u0[j]] + s.tw1[u1[i]] + s.tw2[u1[j]]
+		s.crRow[x] = s.tw0[v0[i]] + s.tw1[v0[j]] + s.tw1[v1[i]] + s.tw2[v1[j]]
+	}
+}
+
+// rgbRow converts one row into r, g, b triples scaled to the output depth.
+func (s *colorState) rgbRow(pic *av1.Picture, y int, dst []uint16) {
+	w := pic.Width
+	s.fillIdx(pic.Data[0], pic.Stride[0], y, w, s.yRow)
+
+	if !s.hasColor {
+		for x, v := range s.yRow {
+			g := s.pixLUT[v]
+			dst[3*x], dst[3*x+1], dst[3*x+2] = g, g, g
+		}
+
+		return
+	}
+
+	s.chromaRow(pic, y, w)
+
+	for x := range w {
+		yy := s.tableY[s.yRow[x]]
+		cb, cr := s.cbRow[x], s.crRow[x]
+
+		var r, g, b float32
+		switch s.matrix {
+		case mcIdentity:
+			g, b, r = yy, cb, cr
+		case mcYCgCo:
+			t := yy - cb
+			g, b, r = yy+cb, t-cr, t+cr
+		default:
+			r = yy + s.crCoef*cr
+			b = yy + s.cbCoef*cb
+			g = yy - (2*((s.gcr*cr)+(s.gcb*cb)))/s.kg
+		}
+
+		dst[3*x] = uint16(0.5 + clampF(r)*s.outMax)
+		dst[3*x+1] = uint16(0.5 + clampF(g)*s.outMax)
+		dst[3*x+2] = uint16(0.5 + clampF(b)*s.outMax)
+	}
+}
+
+// alphaRow reads one row of the alpha plane straight through the sample table.
+func (s *colorState) alphaRow(pic *av1.Picture, y, w int, dst []uint16) {
+	s.fillIdx(pic.Data[0], pic.Stride[0], y, w, s.yRow)
+	for x, v := range s.yRow {
+		dst[x] = s.pixLUT[v]
+	}
 }
 
 func clampF(v float32) float32 {
@@ -133,80 +300,6 @@ func clampF(v float32) float32 {
 	}
 
 	return v
-}
-
-// rgb converts one pixel, returning components scaled to the output depth.
-func (s *colorState) rgb(pic *av1.Picture, x, y int) (uint16, uint16, uint16) {
-	unormY := s.sample(pic.Data[0], pic.Stride[0], x, y)
-	yy := s.tableY[unormY]
-
-	if !s.hasColor {
-		g := uint16(0.5 + clampF(yy)*s.outMax)
-
-		return g, g, g
-	}
-
-	cb, cr := s.chroma(pic, x, y)
-
-	var r, g, b float32
-	switch s.matrix {
-	case mcIdentity:
-		g, b, r = yy, cb, cr
-	case mcYCgCo:
-		t := yy - cb
-		g, b, r = yy+cb, t-cr, t+cr
-	default:
-		r = yy + 2*(1-s.kr)*cr
-		b = yy + 2*(1-s.kb)*cb
-		g = yy - (2*((s.kr*(1-s.kr)*cr)+(s.kb*(1-s.kb)*cb)))/s.kg
-	}
-
-	return uint16(0.5 + clampF(r)*s.outMax),
-		uint16(0.5 + clampF(g)*s.outMax),
-		uint16(0.5 + clampF(b)*s.outMax)
-}
-
-// chroma reads Cb and Cr, bilinearly upsampling a subsampled plane from the
-// closest sample, the adjacent column, the adjacent row and the diagonal.
-func (s *colorState) chroma(pic *av1.Picture, x, y int) (float32, float32) {
-	uvX, uvY := x>>s.ssHor, y>>s.ssVer
-	if s.ssHor == 0 {
-		return s.tableUV[s.sample(pic.Data[1], pic.Stride[1], uvX, uvY)],
-			s.tableUV[s.sample(pic.Data[2], pic.Stride[2], uvX, uvY)]
-	}
-
-	adjCol := 0
-	if x != 0 && !(x == pic.Width-1 && x%2 != 0) {
-		if x%2 != 0 {
-			adjCol = 1
-		} else {
-			adjCol = -1
-		}
-	}
-	adjRow := 0
-	if s.ssVer != 0 && y != 0 && !(y == pic.Height-1 && y%2 != 0) {
-		if y%2 != 0 {
-			adjRow = 1
-		} else {
-			adjRow = -1
-		}
-	}
-
-	at := func(pl, dx, dy int) float32 {
-		return s.tableUV[s.sample(pic.Data[pl], pic.Stride[pl], uvX+dx, uvY+dy)]
-	}
-
-	const w0, w1, w2 = 9.0 / 16.0, 3.0 / 16.0, 1.0 / 16.0
-	cb := at(1, 0, 0)*w0 + at(1, adjCol, 0)*w1 + at(1, 0, adjRow)*w1 + at(1, adjCol, adjRow)*w2
-	cr := at(2, 0, 0)*w0 + at(2, adjCol, 0)*w1 + at(2, 0, adjRow)*w1 + at(2, adjCol, adjRow)*w2
-
-	return cb, cr
-}
-
-func (s *colorState) alpha(pic *av1.Picture, x, y int) uint16 {
-	v := s.tableY[s.sample(pic.Data[0], pic.Stride[0], x, y)]
-
-	return uint16(0.5 + clampF(v)*s.outMax)
 }
 
 // lumaTable builds the luma normalization, which alpha uses too.

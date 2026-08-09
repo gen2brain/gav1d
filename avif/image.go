@@ -19,12 +19,16 @@ func colorModelFor(f *file, it *item) color.Model {
 }
 
 func alphaState(alpha *av1.Picture, outDepth int, full bool) *colorState {
-	return &colorState{
+	s := &colorState{
 		depth:      alpha.BitDepth,
 		maxChannel: int(1)<<alpha.BitDepth - 1,
 		outMax:     float32(int(1)<<outDepth - 1),
 		tableY:     lumaTable(alpha.BitDepth, full),
 	}
+	s.tableUV = s.tableY
+	s.derive()
+
+	return s
 }
 
 func toImage(f *file, it *item, pic, alpha *av1.Picture) (image.Image, error) {
@@ -51,21 +55,33 @@ func toImage(f *file, it *item, pic, alpha *av1.Picture) (image.Image, error) {
 	}
 
 	rect := image.Rect(0, 0, pic.Width, pic.Height)
+	w := pic.Width
+
+	cs.prepare(w)
+	rgb := make([]uint16, 3*w)
+
+	aRow := make([]uint16, w)
+	if as != nil {
+		as.prepare(w)
+	} else {
+		for x := range aRow {
+			aRow[x] = 0xffff
+		}
+	}
 
 	if outDepth == 8 {
 		dst := image.NewNRGBA(rect)
 		for y := range pic.Height {
+			cs.rgbRow(pic, y, rgb)
+			if as != nil {
+				as.alphaRow(alpha, y, w, aRow)
+			}
 			o := y * dst.Stride
-			for x := range pic.Width {
-				r, g, b := cs.rgb(pic, x, y)
-				a := uint16(0xff)
-				if as != nil {
-					a = as.alpha(alpha, x, y)
-				}
-				dst.Pix[o] = uint8(r)
-				dst.Pix[o+1] = uint8(g)
-				dst.Pix[o+2] = uint8(b)
-				dst.Pix[o+3] = uint8(a)
+			for x := range w {
+				dst.Pix[o] = uint8(rgb[3*x])
+				dst.Pix[o+1] = uint8(rgb[3*x+1])
+				dst.Pix[o+2] = uint8(rgb[3*x+2])
+				dst.Pix[o+3] = uint8(aRow[x])
 				o += 4
 			}
 		}
@@ -75,13 +91,14 @@ func toImage(f *file, it *item, pic, alpha *av1.Picture) (image.Image, error) {
 
 	dst := image.NewNRGBA64(rect)
 	for y := range pic.Height {
+		cs.rgbRow(pic, y, rgb)
+		if as != nil {
+			as.alphaRow(alpha, y, w, aRow)
+		}
 		o := y * dst.Stride
-		for x := range pic.Width {
-			r, g, b := cs.rgb(pic, x, y)
-			a := uint16(0xffff)
-			if as != nil {
-				a = as.alpha(alpha, x, y)
-			}
+		for x := range w {
+			r, g, b := rgb[3*x], rgb[3*x+1], rgb[3*x+2]
+			a := aRow[x]
 			dst.Pix[o] = uint8(r >> 8)
 			dst.Pix[o+1] = uint8(r)
 			dst.Pix[o+2] = uint8(g >> 8)
