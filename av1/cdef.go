@@ -86,13 +86,11 @@ func cdefPadding[P pixel](copyRows cdefCopyFn[P], tmp []int16, tmpOff, tmpStride
 	}
 }
 
-func cdefFilterBlock[P pixel](dsp *dspContext[P], dst []P, dstOff, dstStride int,
+func cdefFilterBlock[P pixel](dsp *dspContext[P], tmp []int16, dst []P, dstOff, dstStride int,
 	left []P, leftOff int, top []P, topOff int, bottom []P, bottomOff int,
 	priStrength, secStrength, dir, damping, w, h, edges int, bitdepthMax int32,
 ) {
 	const tmpStride = 12
-	var tmpBuf [144]int16
-	tmp := tmpBuf[:]
 	tmpOff := 2*tmpStride + 2
 
 	cdefPadding(dsp.cdefCopy, tmp, tmpOff, tmpStride, dst, dstOff, dstStride,

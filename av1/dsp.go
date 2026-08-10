@@ -6,7 +6,7 @@ import "sync"
 // built per frame, so the entries are already concrete for the bit depth, and
 // assembly never has to reach through a type parameter.
 type dspContext[P pixel] struct {
-	cdefFilter func(dst []P, dstOff, dstStride int,
+	cdefFilter func(tmp []int16, dst []P, dstOff, dstStride int,
 		left []P, leftOff int, top []P, topOff int, bottom []P, bottomOff int,
 		priStrength, secStrength, dir, damping, w, h, edges int, bitdepthMax int32)
 	cdefDir  func(img []P, imgOff, stride int, bitdepthMax int32) (int, uint32)
@@ -72,11 +72,11 @@ func newDspGo[P pixel]() *dspContext[P] {
 	}
 	// Bound once here, since cdefFilterBlock reaches the padding copy
 	// through the table.
-	d.cdefFilter = func(dst []P, dstOff, dstStride int,
+	d.cdefFilter = func(tmp []int16, dst []P, dstOff, dstStride int,
 		left []P, leftOff int, top []P, topOff int, bottom []P, bottomOff int,
 		priStrength, secStrength, dir, damping, w, h, edges int, bitdepthMax int32,
 	) {
-		cdefFilterBlock(d, dst, dstOff, dstStride, left, leftOff, top, topOff,
+		cdefFilterBlock(d, tmp, dst, dstOff, dstStride, left, leftOff, top, topOff,
 			bottom, bottomOff, priStrength, secStrength, dir, damping, w, h,
 			edges, bitdepthMax)
 	}

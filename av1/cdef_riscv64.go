@@ -14,46 +14,44 @@ func cdefFilter16RVV(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
 //go:noescape
 func cdefFilterClip16RVV(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
 
-func cdefFilterBlockRVV(dst []uint8, dstOff, dstStride int,
+func cdefFilterBlockRVV(tmp []int16, dst []uint8, dstOff, dstStride int,
 	left []uint8, leftOff int, top []uint8, topOff int, bottom []uint8, bottomOff int,
 	priStrength, secStrength, dir, damping, w, h, edges int, bitdepthMax int32,
 ) {
 	const tmpStride = 12
-	var tmpBuf [144]int16
 	tmpOff := 2*tmpStride + 2
 
-	cdefPadding(cdefCopy8RVVRows, tmpBuf[:], tmpOff, tmpStride, dst, dstOff, dstStride,
+	cdefPadding(cdefCopy8RVVRows, tmp, tmpOff, tmpStride, dst, dstOff, dstStride,
 		left, leftOff, top, topOff, bottom, bottomOff, w, h, edges)
 
 	p := cdefParamsFor(priStrength, secStrength, dir, damping, w, h, bitdepthMax)
 
 	if priStrength != 0 && secStrength != 0 {
-		cdefFilterClipRVV(&dst[dstOff], dstStride, &tmpBuf[tmpOff], &p)
+		cdefFilterClipRVV(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
 
 		return
 	}
 
-	cdefFilterRVV(&dst[dstOff], dstStride, &tmpBuf[tmpOff], &p)
+	cdefFilterRVV(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
 }
 
-func cdefFilterBlock16RVV(dst []uint16, dstOff, dstStride int,
+func cdefFilterBlock16RVV(tmp []int16, dst []uint16, dstOff, dstStride int,
 	left []uint16, leftOff int, top []uint16, topOff int, bottom []uint16, bottomOff int,
 	priStrength, secStrength, dir, damping, w, h, edges int, bitdepthMax int32,
 ) {
 	const tmpStride = 12
-	var tmpBuf [144]int16
 	tmpOff := 2*tmpStride + 2
 
-	cdefPadding(cdefCopy16RVVRows, tmpBuf[:], tmpOff, tmpStride, dst, dstOff, dstStride,
+	cdefPadding(cdefCopy16RVVRows, tmp, tmpOff, tmpStride, dst, dstOff, dstStride,
 		left, leftOff, top, topOff, bottom, bottomOff, w, h, edges)
 
 	p := cdefParamsFor(priStrength, secStrength, dir, damping, w, h, bitdepthMax)
 
 	if priStrength != 0 && secStrength != 0 {
-		cdefFilterClip16RVV(&dst[dstOff], dstStride, &tmpBuf[tmpOff], &p)
+		cdefFilterClip16RVV(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
 
 		return
 	}
 
-	cdefFilter16RVV(&dst[dstOff], dstStride, &tmpBuf[tmpOff], &p)
+	cdefFilter16RVV(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
 }

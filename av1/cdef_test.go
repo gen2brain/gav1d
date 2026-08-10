@@ -46,7 +46,7 @@ func runCdefFilter[P pixel](t *testing.T, b, iter, w, h, edges, pri, sec, dir, d
 	}
 
 	base := cdefPad*cdefStride + cdefPad
-	cdefFilterBlock(newDspGo[P](), buf, base, cdefStride, left, 0,
+	cdefFilterBlock(newDspGo[P](), dirtyCdefTmp(3), buf, base, cdefStride, left, 0,
 		buf, base-2*cdefStride, buf, base+h*cdefStride,
 		pri, sec, dir, damping, w, h, edges, bitdepthMax)
 
@@ -145,14 +145,29 @@ func cdefAsmCase[P pixel](d *dspContext[P], iter, w, h, edges, pri, sec, dir, da
 	ref = append([]P(nil), got...)
 
 	base := cdefPad*cdefStride + cdefPad
-	cdefFilterBlock(newDspGo[P](), ref, base, cdefStride, left, 0,
+	cdefFilterBlock(newDspGo[P](), dirtyCdefTmp(3), ref, base, cdefStride, left, 0,
 		ref, base-2*cdefStride, ref, base+h*cdefStride,
 		pri, sec, dir, damping, w, h, edges, bitdepthMax)
-	d.cdefFilter(got, base, cdefStride, left, 0,
+	d.cdefFilter(dirtyCdefTmp(250), got, base, cdefStride, left, 0,
 		got, base-2*cdefStride, got, base+h*cdefStride,
 		pri, sec, dir, damping, w, h, edges, bitdepthMax)
 
 	return ref, got
+}
+
+// dirtyCdefTmp returns a padding buffer full of one plausible sample value.
+// The buffer is reused across blocks, so a block that reads any part of it the
+// padding did not write has to be caught here rather than in a decode. The
+// value has to be one a sample could take: the filter neutralises anything far
+// outside the range the same way it neutralises the unavailable marker, so a
+// wild value would hide the very thing this is here to find.
+func dirtyCdefTmp(v int16) []int16 {
+	tmp := make([]int16, 144)
+	for i := range tmp {
+		tmp[i] = v
+	}
+
+	return tmp
 }
 
 func TestCdef(t *testing.T) {
