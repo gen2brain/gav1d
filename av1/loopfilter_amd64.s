@@ -672,6 +672,102 @@ GLOBL lpfWordInv<>(SB), RODATA|NOPTR, $16
 	JNZ       packloop;       \
 	VZEROUPPER
 
+// TRANSPOSE8B turns eight rows of eight bytes into eight taps of eight lines,
+// two taps to a register. It is its own inverse, so the scatter reuses it.
+#define TRANSPOSE8B(R0, R1, R2, R3, R4, R5, R6, R7, D0, D1, D2, D3) \
+	VPUNPCKLBW R1, R0, D0; \
+	VPUNPCKLBW R3, R2, D1; \
+	VPUNPCKLBW R5, R4, D2; \
+	VPUNPCKLBW R7, R6, D3; \
+	VPUNPCKLWD D1, D0, R0; \
+	VPUNPCKHWD D1, D0, R1; \
+	VPUNPCKLWD D3, D2, R2; \
+	VPUNPCKHWD D3, D2, R3; \
+	VPUNPCKLDQ R2, R0, D0; \
+	VPUNPCKHDQ R2, R0, D1; \
+	VPUNPCKLDQ R3, R1, D2; \
+	VPUNPCKHDQ R3, R1, D3
+
+// LPF8HW filters eight rows of a vertical edge. The taps run along each row, so
+// the lines are transposed on the way in and back out; only the narrower tap
+// widths come here, which fixes the span at eight.
+#define LPF8HW(FILTER) \
+	MOVQ dst+0(FP), SI;        \
+	MOVQ stridea+8(FP), R8;    \
+	MOVQ p+24(FP), DI;         \
+	LEAQ 13*LW(SP), BX;        \
+	MOVQ $-4, R12;             \
+	MOVQ $8, R13;              \
+	LEAQ (R8)(R8*2), R10;      \
+	VMOVQ -4(SI), X0;          \
+	VMOVQ -4(SI)(R8*1), X1;    \
+	VMOVQ -4(SI)(R8*2), X2;    \
+	VMOVQ -4(SI)(R10*1), X3;   \
+	LEAQ (SI)(R8*4), CX;       \
+	VMOVQ -4(CX), X4;          \
+	VMOVQ -4(CX)(R8*1), X5;    \
+	VMOVQ -4(CX)(R8*2), X6;    \
+	VMOVQ -4(CX)(R10*1), X7;   \
+	TRANSPOSE8B(X0, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11); \
+	VMOVDQU X8, 31*LW+0(BX);   \
+	VMOVDQU X9, 31*LW+16(BX);  \
+	VMOVDQU X10, 31*LW+32(BX); \
+	VMOVDQU X11, 31*LW+48(BX); \
+	LEAQ  31*LW(BX), CX;       \
+	MOVQ  R12, AX;             \
+	IMULQ $LW, AX;             \
+	LEAQ  (BX)(AX*1), DX;      \
+	MOVQ  R13, R14;            \
+	widenloop:;                \
+	VPMOVZXBD (CX), V0;        \
+	VMOVDQU   V0, (DX);        \
+	VMOVDQU   V0, 20*LW(DX);   \
+	ADDQ      $8, CX;          \
+	ADDQ      $LW, DX;         \
+	DECQ      R14;             \
+	JNZ       widenloop;       \
+	FILTER;                    \
+	scatter:;                  \
+	LEAQ  31*LW(BX), CX;       \
+	MOVQ  $-4, AX;             \
+	IMULQ $LW, AX;             \
+	LEAQ  (BX)(AX*1), DX;      \
+	MOVQ  $8, R14;             \
+	packloop:;                 \
+	VMOVDQU   20*LW(DX), V0;   \
+	VPACKUSDW V0, V0, V0;      \
+	VPERMQ    $0x08, V0, V0;   \
+	VPACKUSWB X0, X0, X0;      \
+	VMOVQ     X0, (CX);        \
+	ADDQ      $8, CX;          \
+	ADDQ      $LW, DX;         \
+	DECQ      R14;             \
+	JNZ       packloop;        \
+	VMOVQ 31*LW+0(BX), X0;     \
+	VMOVQ 31*LW+8(BX), X1;     \
+	VMOVQ 31*LW+16(BX), X2;    \
+	VMOVQ 31*LW+24(BX), X3;    \
+	VMOVQ 31*LW+32(BX), X4;    \
+	VMOVQ 31*LW+40(BX), X5;    \
+	VMOVQ 31*LW+48(BX), X6;    \
+	VMOVQ 31*LW+56(BX), X7;    \
+	TRANSPOSE8B(X0, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11); \
+	LEAQ (R8)(R8*2), R10;      \
+	VMOVQ   X8, -4(SI);        \
+	VPEXTRQ $1, X8, AX;        \
+	MOVQ    AX, -4(SI)(R8*1);  \
+	VMOVQ   X9, -4(SI)(R8*2);  \
+	VPEXTRQ $1, X9, AX;        \
+	MOVQ    AX, -4(SI)(R10*1); \
+	LEAQ (SI)(R8*4), CX;       \
+	VMOVQ   X10, -4(CX);       \
+	VPEXTRQ $1, X10, AX;       \
+	MOVQ    AX, -4(CX)(R8*1);  \
+	VMOVQ   X11, -4(CX)(R8*2); \
+	VPEXTRQ $1, X11, AX;       \
+	MOVQ    AX, -4(CX)(R10*1); \
+	VZEROUPPER
+
 // LPF8 and LPF16 gather the four lines, run FILTER over them and scatter the
 // result back, so the two filter bodies share all of the plumbing.
 #define LPF8(FILTER) \
@@ -1121,4 +1217,14 @@ TEXT ·lpf16WAVX2(SB), 0, $1408-32
 // func lpf16WAVX512(dst *uint16, stridea, strideb int, p *lpfParams)
 TEXT ·lpf16WAVX512(SB), 0, $1408-32
 	LPF16W(LPFBODY512)
+	RET
+
+// func lpf8HWAVX2(dst *uint8, stridea, strideb int, p *lpfParams)
+TEXT ·lpf8HWAVX2(SB), 0, $1536-32
+	LPF8HW(LPFBODY)
+	RET
+
+// func lpf8HWAVX512(dst *uint8, stridea, strideb int, p *lpfParams)
+TEXT ·lpf8HWAVX512(SB), 0, $1536-32
+	LPF8HW(LPFBODY512)
 	RET

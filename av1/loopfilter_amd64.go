@@ -8,13 +8,21 @@ func lpf8AVX2(dst *uint8, stridea, strideb int, p *lpfParams)
 //go:noescape
 func lpf8WAVX2(dst *uint8, stridea, strideb int, p *lpfParams)
 
+//go:noescape
+func lpf8HWAVX2(dst *uint8, stridea, strideb int, p *lpfParams)
+
 func loopFilter8AVX2(dst []uint8, dstOff int, e, i, h int32,
 	stridea, strideb int, wd, lines int, bitdepthMax int32,
 ) {
 	p := lpfParamsFor(e, i, h, wd, bitdepthMax)
-	if stridea == 1 {
+	switch {
+	case stridea == 1:
 		for ; lines >= 8; lines, dstOff = lines-8, dstOff+8 {
 			lpf8WAVX2(&dst[dstOff], stridea, strideb, &p)
+		}
+	case wd < 16:
+		for ; lines >= 8; lines, dstOff = lines-8, dstOff+8*stridea {
+			lpf8HWAVX2(&dst[dstOff], stridea, strideb, &p)
 		}
 	}
 	for ; lines > 0; lines, dstOff = lines-4, dstOff+4*stridea {
@@ -28,13 +36,21 @@ func lpf8AVX512(dst *uint8, stridea, strideb int, p *lpfParams)
 //go:noescape
 func lpf8WAVX512(dst *uint8, stridea, strideb int, p *lpfParams)
 
+//go:noescape
+func lpf8HWAVX512(dst *uint8, stridea, strideb int, p *lpfParams)
+
 func loopFilter8AVX512(dst []uint8, dstOff int, e, i, h int32,
 	stridea, strideb int, wd, lines int, bitdepthMax int32,
 ) {
 	p := lpfParamsFor(e, i, h, wd, bitdepthMax)
-	if stridea == 1 {
+	switch {
+	case stridea == 1:
 		for ; lines >= 8; lines, dstOff = lines-8, dstOff+8 {
 			lpf8WAVX512(&dst[dstOff], stridea, strideb, &p)
+		}
+	case wd < 16:
+		for ; lines >= 8; lines, dstOff = lines-8, dstOff+8*stridea {
+			lpf8HWAVX512(&dst[dstOff], stridea, strideb, &p)
 		}
 	}
 	for ; lines > 0; lines, dstOff = lines-4, dstOff+4*stridea {
