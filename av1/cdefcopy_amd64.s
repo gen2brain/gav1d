@@ -15,8 +15,11 @@ TEXT ·cdefCopy8AVX2(SB), NOSPLIT, $0-48
 	MOVQ n+32(FP), CX
 	MOVQ h+40(FP), DX
 
+	CMPQ CX, $2
+	JEQ  two8
 	CMPQ CX, $8
 	JLT  mid8
+	JEQ  exact8
 	LEAQ -8(SI)(CX*1), R10
 	LEAQ -16(DI)(CX*2), R11
 
@@ -33,9 +36,32 @@ wide8:
 	JNZ       wide8
 	RET
 
+exact8:
+	VPMOVZXBW (SI), X0
+	VMOVDQU   X0, (DI)
+	ADDQ      R9, SI
+	ADDQ      R8, DI
+	DECQ      DX
+	JNZ       exact8
+	RET
+
+// A two wide column reads exactly its two bytes, so it never runs past a
+// left or right edge array.
+two8:
+	MOVWLZX   (SI), AX
+	VMOVD     AX, X0
+	VPMOVZXBW X0, X0
+	VMOVD     X0, (DI)
+	ADDQ      R9, SI
+	ADDQ      R8, DI
+	DECQ      DX
+	JNZ       two8
+	RET
+
 mid8:
 	CMPQ CX, $4
 	JLT  slow8
+	JEQ  exact48
 	LEAQ -4(SI)(CX*1), R10
 	LEAQ -8(DI)(CX*2), R11
 
@@ -50,6 +76,15 @@ loopmid8:
 	ADDQ      R8, R11
 	DECQ      DX
 	JNZ       loopmid8
+	RET
+
+exact48:
+	VPMOVZXBW (SI), X0
+	VMOVQ     X0, (DI)
+	ADDQ      R9, SI
+	ADDQ      R8, DI
+	DECQ      DX
+	JNZ       exact48
 	RET
 
 slow8:
@@ -84,8 +119,11 @@ TEXT ·cdefCopy16AVX2(SB), NOSPLIT, $0-48
 	MOVQ n+32(FP), CX
 	MOVQ h+40(FP), DX
 
+	CMPQ CX, $2
+	JEQ  two16
 	CMPQ CX, $8
 	JLT  mid16
+	JEQ  exact816
 	LEAQ -16(SI)(CX*2), R10
 	LEAQ -16(DI)(CX*2), R11
 
@@ -102,9 +140,28 @@ wide16:
 	JNZ     wide16
 	RET
 
+exact816:
+	VMOVDQU (SI), X0
+	VMOVDQU X0, (DI)
+	ADDQ    R9, SI
+	ADDQ    R8, DI
+	DECQ    DX
+	JNZ     exact816
+	RET
+
+two16:
+	MOVL (SI), AX
+	MOVL AX, (DI)
+	ADDQ R9, SI
+	ADDQ R8, DI
+	DECQ DX
+	JNZ  two16
+	RET
+
 mid16:
 	CMPQ CX, $4
 	JLT  slow16
+	JEQ  exact416
 	LEAQ -8(SI)(CX*2), R10
 	LEAQ -8(DI)(CX*2), R11
 
@@ -119,6 +176,15 @@ loopmid16:
 	ADDQ R8, R11
 	DECQ DX
 	JNZ  loopmid16
+	RET
+
+exact416:
+	MOVQ (SI), AX
+	MOVQ AX, (DI)
+	ADDQ R9, SI
+	ADDQ R8, DI
+	DECQ DX
+	JNZ  exact416
 	RET
 
 slow16:
