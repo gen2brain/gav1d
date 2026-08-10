@@ -429,3 +429,57 @@ fiCol:
 	ADD $2, X17, X17
 	BLT X17, X13, fiRow
 	RET
+
+#define Z1_ROW                \
+	AND       $0x3E, X17, X21; \
+	MOV       $64, X22;       \
+	SUB       X21, X22, X22;  \
+	SRA       $6, X17, X23;   \
+	ADD       X23, X7, X23;   \
+	MOV       $0, X15;        \
+	MOV       X12, X14
+
+// func z1Full8RVV(dst *uint8, stride int, top *uint8, w, rows, dx, xpos int)
+TEXT ·z1Full8RVV(SB), NOSPLIT, $0-56
+	MOV dst+0(FP), X5
+	MOV stride+8(FP), X6
+	MOV top+16(FP), X7
+	MOV w+24(FP), X12
+	MOV rows+32(FP), X13
+	MOV dx+40(FP), X18
+	MOV xpos+48(FP), X17
+
+	MOV $32, X26
+
+z1row:
+	Z1_ROW
+	ADD X15, X5, X20
+
+z1col:
+	VSETVLI X14, E8, M1, TA, MA, X16
+
+	VMVVX X22, V2
+	VMVVX X21, V3
+	VMVVX X26, V4
+
+	ADD    X15, X23, X25
+	VLE8V  (X25), V0
+	ADD    $1, X25, X25
+	VLE8V  (X25), V1
+
+	VWMULUVV  V0, V2, V8
+	VWMACCUVV V1, V3, V8
+	VWADDUWV  V4, V8, V8
+	VNSRLWI   $6, V8, V7
+	VSE8V     V7, (X20)
+
+	ADD X16, X20, X20
+	ADD X16, X15, X15
+	SUB X16, X14, X14
+	BNE X0, X14, z1col
+
+	ADD X6, X5, X5
+	ADD X18, X17, X17
+	SUB $1, X13, X13
+	BNE X0, X13, z1row
+	RET

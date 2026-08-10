@@ -586,3 +586,69 @@ fiCol:
 	CMP  R5, R7
 	BLT  fiRow
 	RET
+
+#define URSHR6H(Vd, Vn) WORD $(0x6F002400 | ((32 - 6) << 16) | ((Vn) << 5) | (Vd))
+
+#define Z1_WEIGHTS       \
+	AND  $0x3E, R11, R20; \
+	MOVD $64, R21;       \
+	SUB  R20, R21, R21;  \
+	VDUP R21, V2.B8;     \
+	VDUP R20, V3.B8;     \
+	ASR  $6, R11, R22;   \
+	ADD  R22, R2, R23
+
+#define Z1_TAP           \
+	UMULL8(4, 0, 2);     \
+	UMLAL8(4, 1, 3);     \
+	URSHR6H(4, 4);       \
+	XTN8(5, 4)
+
+// func z1Full8NEON(dst *uint8, stride int, top *uint8, w, rows, dx, xpos int)
+TEXT ·z1Full8NEON(SB), NOSPLIT, $0-56
+	MOVD dst+0(FP), R0
+	MOVD stride+8(FP), R1
+	MOVD top+16(FP), R2
+	MOVD w+24(FP), R4
+	MOVD rows+32(FP), R5
+	MOVD dx+40(FP), R9
+	MOVD xpos+48(FP), R11
+
+	CMP $4, R4
+	BEQ z1w4
+
+z1w8:
+	Z1_WEIGHTS
+	MOVD R0, R10
+	MOVD $0, R6
+
+z1w8col:
+	ADD  R6, R23, R24
+	VLD1 (R24), [V0.B8]
+	ADD  $1, R24, R24
+	VLD1 (R24), [V1.B8]
+	Z1_TAP
+	ADD   R6, R10, R24
+	FMOVD F5, (R24)
+	ADD   $8, R6, R6
+	CMP   R4, R6
+	BLT   z1w8col
+
+	ADD  R1, R0, R0
+	ADD  R9, R11, R11
+	SUBS $1, R5, R5
+	BNE  z1w8
+	RET
+
+z1w4:
+	Z1_WEIGHTS
+	VLD1  (R23), [V0.B8]
+	ADD   $1, R23, R23
+	VLD1  (R23), [V1.B8]
+	Z1_TAP
+	FMOVS F5, (R0)
+	ADD   R1, R0, R0
+	ADD   R9, R11, R11
+	SUBS  $1, R5, R5
+	BNE   z1w4
+	RET

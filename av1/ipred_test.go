@@ -176,11 +176,30 @@ func ipredFillTl[P pixel](tl []P, iter int, bitdepthMax int32) {
 	}
 }
 
+var z1Angles = []int{36, 39, 42, 45, 48, 51, 54, 58, 61, 64, 67, 70, 73, 76, 81, 84, 87}
+
+func ipredAngles(mode int) []int {
+	switch mode {
+	case z1Pred:
+		var a []int
+		for _, ang := range z1Angles {
+			a = append(a, ang, ang|angleSmoothEdgeFlag|angleUseEdgeFilterFlag,
+				ang|angleUseEdgeFilterFlag)
+		}
+
+		return a
+	case filterPred:
+		return []int{0, 1, 2, 3, 4}
+	}
+
+	return []int{0}
+}
+
 func TestIpredAsm(t *testing.T) {
 	d, ref := newDsp[uint8](), newDspGo[uint8]()
 
 	modes := []int{smoothPred, smoothVPred, smoothHPred, paethPred, vertPred,
-		horPred, dcPred, topDcPred, leftDcPred, dc128Pred, filterPred}
+		horPred, dcPred, topDcPred, leftDcPred, dc128Pred, filterPred, z1Pred}
 	sizes := []int{4, 8, 16, 32, 64}
 	cases := 0
 
@@ -194,33 +213,25 @@ func TestIpredAsm(t *testing.T) {
 		for _, m := range modes {
 			for _, w := range sizes {
 				for _, h := range sizes {
-					for i := range got {
-						got[i] = 0xA5
-						want[i] = 0xA5
-					}
+					for _, angle := range ipredAngles(m) {
+						for i := range got {
+							got[i] = 0xA5
+							want[i] = 0xA5
+						}
 
-					for filt := range 5 {
-						d.ipred[m](got, 0, ipredStride, tl, ipredTL, w, h, filt, 0, 0, 255)
-						ref.ipred[m](want, 0, ipredStride, tl, ipredTL, w, h, filt, 0, 0, 255)
+						d.ipred[m](got, 0, ipredStride, tl, ipredTL, w, h, angle, 0, 0, 255)
+						ref.ipred[m](want, 0, ipredStride, tl, ipredTL, w, h, angle, 0, 0, 255)
 
 						for i := range want {
 							if got[i] == want[i] {
 								continue
 							}
-							t.Fatalf("iter=%d mode=%d %dx%d filt=%d: [%d,%d] = %d, want %d",
-								iter, m, w, h, filt, i/ipredStride, i%ipredStride,
+							t.Fatalf("iter=%d mode=%d %dx%d angle=%d: [%d,%d] = %d, want %d",
+								iter, m, w, h, angle, i/ipredStride, i%ipredStride,
 								got[i], want[i])
 						}
 						cases++
-						if m != filterPred {
-							break
-						}
-						for i := range got {
-							got[i] = 0xA5
-							want[i] = 0xA5
-						}
 					}
-
 				}
 			}
 		}
@@ -233,12 +244,15 @@ func BenchmarkIpred(b *testing.B) {
 	d := newDsp[uint8]()
 
 	modes := []struct {
-		mode int
-		name string
+		mode  int
+		name  string
+		angle int
 	}{
-		{smoothPred, "smooth"}, {smoothVPred, "smoothV"}, {smoothHPred, "smoothH"},
-		{paethPred, "paeth"}, {vertPred, "v"}, {horPred, "h"}, {dcPred, "dc"},
-		{filterPred, "filter"},
+		{smoothPred, "smooth", 0}, {smoothVPred, "smoothV", 0},
+		{smoothHPred, "smoothH", 0}, {paethPred, "paeth", 0},
+		{vertPred, "v", 0}, {horPred, "h", 0}, {dcPred, "dc", 0},
+		{filterPred, "filter", 0},
+		{z1Pred, "z1", 45 | angleUseEdgeFilterFlag},
 	}
 	sizes := []int{4, 8, 16, 32}
 
@@ -251,7 +265,7 @@ func BenchmarkIpred(b *testing.B) {
 			fn := d.ipred[m.mode]
 			b.Run(m.name+"/"+strconv.Itoa(w), func(b *testing.B) {
 				for b.Loop() {
-					fn(dst, 0, ipredStride, tl, ipredTL, w, w, 0, 0, 0, 255)
+					fn(dst, 0, ipredStride, tl, ipredTL, w, w, m.angle, 0, 0, 255)
 				}
 			})
 		}

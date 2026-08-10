@@ -105,3 +105,35 @@ func ipredFilter8NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
 	filterIntra8NEON(&dst[dstOff], stride, &tl[tlOff],
 		&filterIntraTapsW[filtIdx&511][0], width, height)
 }
+
+//go:noescape
+func z1Full8NEON(dst *uint8, stride int, top *uint8, w, rows, dx, xpos int)
+
+func ipredZ18NEON(dst []uint8, dstOff, stride int, tlIn []uint8, tlInOff,
+	width, height, angle, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	var topOut [64 + 64]uint8
+	top, topOff, maxBaseX, dx, baseInc := z1Edge(tlIn, tlInOff, width, height,
+		angle, bitdepthMax, topOut[:])
+
+	if baseInc != 1 || dx <= 0 {
+		z1Sample(dst, dstOff, stride, top, topOff, width, height, dx, baseInc, maxBaseX, dx)
+
+		return
+	}
+
+	y1 := z1Rows(maxBaseX-width, dx, height)
+	y2 := z1Rows(maxBaseX-1, dx, height)
+
+	if y1 > 0 {
+		z1Full8NEON(&dst[dstOff], stride, &top[topOff], width, y1, dx, dx)
+	}
+	if y2 > y1 {
+		z1Sample(dst, dstOff+y1*stride, stride, top, topOff, width, y2-y1,
+			dx, 1, maxBaseX, (y1+1)*dx)
+	}
+	if y2 < height {
+		splatDc8NEON(&dst[dstOff+y2*stride], stride, width, height-y2,
+			top[topOff+maxBaseX])
+	}
+}

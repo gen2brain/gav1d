@@ -44,5 +44,6 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.ipred[leftDcPred] = ipredDcLeft8NEON
 		d8.ipred[dc128Pred] = ipredDc1288NEON
 		d8.ipred[filterPred] = ipredFilter8NEON
+		d8.ipred[z1Pred] = ipredZ18NEON
 	}
 }

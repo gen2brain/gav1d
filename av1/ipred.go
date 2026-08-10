@@ -298,20 +298,51 @@ var filterEdgeKernel = [3][5]uint8{
 	{2, 4, 4, 4, 2},
 }
 
+func filterEdgeRun[P pixel](out []P, outOff int, in []P, inOff, n int, k *[5]uint8) {
+	for i := range n {
+		s := int(in[inOff+i])*int(k[0]) + int(in[inOff+i+1])*int(k[1]) +
+			int(in[inOff+i+2])*int(k[2]) + int(in[inOff+i+3])*int(k[3]) +
+			int(in[inOff+i+4])*int(k[4])
+		out[outOff+i] = P((s + 8) >> 4)
+	}
+}
+
 func filterEdge[P pixel](out []P, outOff, sz, limFrom, limTo int,
 	in []P, inOff, from, to, strength int,
 ) {
+	k := &filterEdgeKernel[strength-1]
+
 	i := 0
 	for ; i < min(sz, limFrom); i++ {
 		out[outOff+i] = in[inOff+clip(i, from, to-1)]
 	}
-	for ; i < min(limTo, sz); i++ {
+
+	end := min(limTo, sz)
+	lo := min(max(i, from+2), end)
+	hi := max(min(end, to-2), lo)
+	if hi-lo < 8 {
+		lo, hi = end, end
+	}
+
+	for ; i < lo; i++ {
 		s := 0
 		for j := range 5 {
-			s += int(in[inOff+clip(i-2+j, from, to-1)]) * int(filterEdgeKernel[strength-1][j])
+			s += int(in[inOff+clip(i-2+j, from, to-1)]) * int(k[j])
 		}
 		out[outOff+i] = P((s + 8) >> 4)
 	}
+	if hi > i {
+		filterEdgeRun(out, outOff+i, in, inOff+i-2, hi-i, k)
+		i = hi
+	}
+	for ; i < end; i++ {
+		s := 0
+		for j := range 5 {
+			s += int(in[inOff+clip(i-2+j, from, to-1)]) * int(k[j])
+		}
+		out[outOff+i] = P((s + 8) >> 4)
+	}
+
 	for ; i < sz; i++ {
 		out[outOff+i] = in[inOff+clip(i, from, to-1)]
 	}
@@ -343,26 +374,22 @@ func upsampleEdge[P pixel](out []P, outOff, hsz int, in []P, inOff, from, to int
 	out[outOff+i*2] = in[inOff+clip(i, from, to-1)]
 }
 
-func ipredZ1[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,
-	width, height, angle, maxWidth, maxHeight int, bitdepthMax int32,
-) {
+func z1Edge[P pixel](tlIn []P, tlInOff, width, height, angle int,
+	bitdepthMax int32, out []P,
+) (top []P, topOff, maxBaseX, dx, baseInc int) {
 	isSm := (angle >> 9) & 1
 	enableEdgeFilter := angle >> 10
 	angle &= 511
-	dx := int(drIntraDerivative[angle>>1])
-
-	var topOut [64 + 64]P
-	var top []P
-	var topOff, maxBaseX int
+	dx = int(drIntraDerivative[angle>>1])
 
 	upsampleAbove := 0
 	if enableEdgeFilter != 0 {
 		upsampleAbove = getUpsample(width+height, 90-angle, isSm)
 	}
 	if upsampleAbove != 0 {
-		upsampleEdge(topOut[:], 0, width+height, tlIn, tlInOff+1, -1,
+		upsampleEdge(out, 0, width+height, tlIn, tlInOff+1, -1,
 			width+min(width, height), bitdepthMax)
-		top, topOff = topOut[:], 0
+		top, topOff = out, 0
 		maxBaseX = 2*(width+height) - 2
 		dx <<= 1
 	} else {
@@ -371,9 +398,9 @@ func ipredZ1[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,
 			filterStrength = getFilterStrength(width+height, 90-angle, isSm)
 		}
 		if filterStrength != 0 {
-			filterEdge(topOut[:], 0, width+height, 0, width+height,
+			filterEdge(out, 0, width+height, 0, width+height,
 				tlIn, tlInOff+1, -1, width+min(width, height), filterStrength)
-			top, topOff = topOut[:], 0
+			top, topOff = out, 0
 			maxBaseX = width + height - 1
 		} else {
 			top, topOff = tlIn, tlInOff+1
@@ -381,8 +408,20 @@ func ipredZ1[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,
 		}
 	}
 
-	baseInc := 1 + upsampleAbove
-	xpos := dx
+	return top, topOff, maxBaseX, dx, 1 + upsampleAbove
+}
+
+func z1Rows(t, dx, height int) int {
+	if t < 0 {
+		return 0
+	}
+
+	return min(height, ((t+1)*64-1)/dx)
+}
+
+func z1Sample[P pixel](dst []P, dstOff, stride int, top []P, topOff,
+	width, height, dx, baseInc, maxBaseX, xpos int,
+) {
 	for y := range height {
 		row := dstOff + y*stride
 		frac := int32(xpos & 0x3E)
@@ -403,6 +442,16 @@ func ipredZ1[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,
 		}
 		xpos += dx
 	}
+}
+
+func ipredZ1[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,
+	width, height, angle, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	var topOut [64 + 64]P
+	top, topOff, maxBaseX, dx, baseInc := z1Edge(tlIn, tlInOff, width, height,
+		angle, bitdepthMax, topOut[:])
+
+	z1Sample(dst, dstOff, stride, top, topOff, width, height, dx, baseInc, maxBaseX, dx)
 }
 
 func ipredZ2[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,

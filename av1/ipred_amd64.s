@@ -672,3 +672,98 @@ fiCol:
 	CMPQ R11, R8
 	JLT  fiRow
 	RET
+
+DATA pw32<>+0(SB)/4, $0x00200020
+GLOBL pw32<>(SB), RODATA|NOPTR, $4
+
+#define Z1_WEIGHTS         \
+	MOVQ  R11, AX;         \
+	ANDQ  $0x3E, AX;       \
+	MOVQ  $64, BX;         \
+	SUBQ  AX, BX;          \
+	SHLQ  $8, AX;          \
+	ORQ   BX, AX;          \
+	VMOVD AX, X5;          \
+	VPBROADCASTW X5, Y5;   \
+	MOVQ  R11, R13;        \
+	SARQ  $6, R13;         \
+	LEAQ  (DX)(R13*1), BX
+
+// func z1Full8AVX2(dst *uint8, stride int, top *uint8, w, rows, dx, xpos int)
+TEXT ·z1Full8AVX2(SB), NOSPLIT, $0-56
+	MOVQ dst+0(FP), DI
+	MOVQ stride+8(FP), SI
+	MOVQ top+16(FP), DX
+	MOVQ w+24(FP), CX
+	MOVQ rows+32(FP), R8
+	MOVQ dx+40(FP), R9
+	MOVQ xpos+48(FP), R11
+
+	VPBROADCASTD pw32<>(SB), Y7
+
+	CMPQ CX, $4
+	JEQ  z1w4
+	CMPQ CX, $8
+	JEQ  z1w8
+
+z1w16:
+	Z1_WEIGHTS
+	MOVQ DI, R15
+	XORQ R14, R14
+
+z1w16col:
+	VMOVDQU     (BX)(R14*1), X0
+	VMOVDQU     1(BX)(R14*1), X1
+	VPUNPCKLBW  X1, X0, X2
+	VPUNPCKHBW  X1, X0, X3
+	VINSERTI128 $1, X3, Y2, Y2
+	VPMADDUBSW  Y5, Y2, Y2
+	VPADDW      Y7, Y2, Y2
+	VPSRLW      $6, Y2, Y2
+	VPACKUSWB   Y2, Y2, Y2
+	VPERMQ      $0xD8, Y2, Y2
+	VMOVDQU     X2, (R15)(R14*1)
+	ADDQ        $16, R14
+	CMPQ        R14, CX
+	JLT         z1w16col
+
+	ADDQ SI, DI
+	ADDQ R9, R11
+	DECQ R8
+	JNZ  z1w16
+	VZEROUPPER
+	RET
+
+z1w4:
+	Z1_WEIGHTS
+	VMOVD      (BX), X0
+	VMOVD      1(BX), X1
+	VPUNPCKLBW X1, X0, X2
+	VPMADDUBSW X5, X2, X2
+	VPADDW     X7, X2, X2
+	VPSRLW     $6, X2, X2
+	VPACKUSWB  X2, X2, X2
+	VMOVD      X2, (DI)
+	ADDQ       SI, DI
+	ADDQ       R9, R11
+	DECQ       R8
+	JNZ        z1w4
+	VZEROUPPER
+	RET
+
+z1w8:
+	Z1_WEIGHTS
+	VMOVQ      (BX), X0
+	VMOVQ      1(BX), X1
+	VPUNPCKLBW X1, X0, X2
+	VPMADDUBSW X5, X2, X2
+	VPADDW     X7, X2, X2
+	VPSRLW     $6, X2, X2
+	VPACKUSWB  X2, X2, X2
+	VMOVQ      X2, (DI)
+	ADDQ       SI, DI
+	ADDQ       R9, R11
+	DECQ       R8
+	JNZ        z1w8
+	VZEROUPPER
+	RET
