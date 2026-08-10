@@ -17,6 +17,8 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d16.loopFilter = loopFilter16NEON
 		d16.put8tap = put8tap16NEON
 		d16.prep8tap = prep8tap16NEON
+		d16.putBilin = putBilin16NEON
+		d16.prepBilin = prepBilin16NEON
 		d16.fgApplyRow = fgApplyRow16NEONRow
 		d16.fguvApplyRow = fguvApplyRow16NEONRow
 		d16.cdefCopy = cdefCopy16NEONRows

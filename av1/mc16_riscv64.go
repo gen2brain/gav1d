@@ -88,3 +88,79 @@ func prep8tap16RVV(mid []int16, tmp []int16, src []uint16, srcOff, srcStride,
 			&ft, w, h, rnd, 6-ib, 0)
 	}
 }
+
+//go:noescape
+func mcBilin16RVV(dst *uint16, dstStride int, src *uint16, srcStride, tapStride int,
+	mxy int32, w, h int, rnd int32, shift int, rnd2 int32, shift2 int, maxv int32)
+
+//go:noescape
+func mcBilinMid16RVV(dst *int16, dstStride int, src *uint16, srcStride, tapStride int,
+	mxy int32, w, h int, rnd int32, shift int, rnd2 int32, shift2 int, maxv int32)
+
+//go:noescape
+func mcBilinFromMid16RVV(dst *uint16, dstStride int, src *int16, srcStride, tapStride int,
+	mxy int32, w, h int, rnd int32, shift int, rnd2 int32, shift2 int, maxv int32)
+
+//go:noescape
+func mcBilinPrepMid16RVV(dst *int16, dstStride int, src *int16, srcStride, tapStride int,
+	mxy int32, w, h int, rnd int32, shift int, rnd2 int32, shift2 int, maxv int32)
+
+func putBilin16RVV(mid []int16, dst []uint16, dstOff, dstStride int, src []uint16,
+	srcOff, srcStride, w, h, mx, my int, bitdepthMax int32,
+) {
+	if w < 8 || w&7 != 0 || (mx == 0 && my == 0) {
+		putBilin(mid, dst, dstOff, dstStride, src, srcOff, srcStride, w, h, mx, my, bitdepthMax)
+
+		return
+	}
+
+	ib := intermediateBits(bitdepthMax)
+	hrnd := int32(1<<(4-ib)) >> 1
+
+	switch {
+	case mx != 0 && my != 0:
+		mcBilinMid16RVV(&mid[0], mcMidStride, &src[srcOff], srcStride, 1,
+			int32(mx), w, h+1, hrnd, 4-ib, 0, 0, 0)
+		mcBilinFromMid16RVV(&dst[dstOff], dstStride, &mid[0], mcMidStride, mcMidStride,
+			int32(my), w, h, int32(1<<(4+ib))>>1, 4+ib, 0, 0, bitdepthMax)
+
+	case mx != 0:
+		mcBilin16RVV(&dst[dstOff], dstStride, &src[srcOff], srcStride, 1,
+			int32(mx), w, h, hrnd, 4-ib, int32(1<<ib)>>1, ib, bitdepthMax)
+
+	default:
+		mcBilin16RVV(&dst[dstOff], dstStride, &src[srcOff], srcStride, srcStride,
+			int32(my), w, h, 8, 4, 0, 0, bitdepthMax)
+	}
+}
+
+func prepBilin16RVV(mid []int16, tmp []int16, src []uint16, srcOff, srcStride,
+	w, h, mx, my int, bitdepthMax int32,
+) {
+	if w < 8 || w&7 != 0 || (mx == 0 && my == 0) {
+		prepBilin(mid, tmp, src, srcOff, srcStride, w, h, mx, my, bitdepthMax)
+
+		return
+	}
+
+	ib := intermediateBits(bitdepthMax)
+	bias := prepBias(bitdepthMax)
+	hrnd := int32(1<<(4-ib)) >> 1
+	rnd := hrnd - bias<<(4-ib)
+
+	switch {
+	case mx != 0 && my != 0:
+		mcBilinMid16RVV(&mid[0], mcMidStride, &src[srcOff], srcStride, 1,
+			int32(mx), w, h+1, hrnd, 4-ib, 0, 0, 0)
+		mcBilinPrepMid16RVV(&tmp[0], w, &mid[0], mcMidStride, mcMidStride,
+			int32(my), w, h, 8-bias<<4, 4, 0, 0, 0)
+
+	case mx != 0:
+		mcBilinMid16RVV(&tmp[0], w, &src[srcOff], srcStride, 1,
+			int32(mx), w, h, rnd, 4-ib, 0, 0, 0)
+
+	default:
+		mcBilinMid16RVV(&tmp[0], w, &src[srcOff], srcStride, srcStride,
+			int32(my), w, h, rnd, 4-ib, 0, 0, 0)
+	}
+}

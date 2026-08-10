@@ -77,6 +77,58 @@
 	DECQ R12;                  \
 	JNZ  NAME
 
+// The bilinear filter is two taps, and its horizontal put rounds twice at
+// twelve bits, so it carries a second shift the eight tap kernels do not.
+#define BSETUP                              \
+	MOVL         mxy+40(FP), AX;        \
+	MOVL         $16, BX;               \
+	SUBL         AX, BX;                \
+	VMOVD        BX, X8;                \
+	VPBROADCASTD X8, Y8;                \
+	VMOVD        AX, X9;                \
+	VPBROADCASTD X9, Y9;                \
+	MOVQ         dst+0(FP), DI;         \
+	MOVQ         src+16(FP), SI;        \
+	MOVQ         tapStride+32(FP), R10; \
+	SHLQ         $1, R10;               \
+	MOVQ         rnd+64(FP), AX;        \
+	VMOVD        AX, X7;                \
+	VPBROADCASTD X7, Y7;                \
+	MOVQ         shift+72(FP), AX;      \
+	VMOVD        AX, X6;                \
+	MOVQ         rnd2+80(FP), AX;       \
+	VMOVD        AX, X3;                \
+	VPBROADCASTD X3, Y3;                \
+	MOVQ         shift2+88(FP), AX;     \
+	VMOVD        AX, X2;                \
+	MOVQ         maxv+96(FP), AX;       \
+	VMOVD        AX, X5;                \
+	VPBROADCASTD X5, Y5;                \
+	VPXOR        Y4, Y4, Y4;            \
+	MOVQ         h+56(FP), R12
+
+#define TAPS2(WIDEN)    \
+	WIDEN (CX), Y1; \
+	VPMULLD Y8, Y1, Y0; \
+	ADDQ  R10, CX;  \
+	WIDEN (CX), Y1; \
+	VPMULLD Y9, Y1, Y1; \
+	VPADDD Y1, Y0, Y0; \
+	VPADDD Y7, Y0, Y0; \
+	VPSRAD X6, Y0, Y0; \
+	VPADDD Y3, Y0, Y0; \
+	VPSRAD X2, Y0, Y0
+
+#define BROWSTEP(NAME)             \
+	MOVQ srcStride+24(FP), AX; \
+	SHLQ $1, AX;               \
+	ADDQ AX, SI;               \
+	MOVQ dstStride+8(FP), AX;  \
+	SHLQ $1, AX;               \
+	ADDQ AX, DI;               \
+	DECQ R12;                  \
+	JNZ  NAME
+
 // func mcTap16AVX2(dst *uint16, dstStride int, src *uint16, srcStride, tapStride int, f *[8]int32, w, h int, rnd int32, shift int, maxv int32)
 TEXT ·mcTap16AVX2(SB), NOSPLIT, $0-84
 	FSETUP
@@ -175,5 +227,105 @@ cols4:
 	JNZ       cols4
 
 	ROWSTEP(rows4)
+	VZEROUPPER
+	RET
+
+// func mcBilin16AVX2(dst *uint16, dstStride int, src *uint16, srcStride, tapStride int, mxy int32, w, h int, rnd int32, shift int, rnd2 int32, shift2 int, maxv int32)
+TEXT ·mcBilin16AVX2(SB), NOSPLIT, $0-100
+	BSETUP
+
+brows1:
+	MOVQ w+48(FP), DX
+	MOVQ SI, R11
+	MOVQ DI, R13
+
+bcols1:
+	MOVQ R11, CX
+	TAPS2(VPMOVZXWD)
+	VPMAXSD   Y4, Y0, Y0
+	VPMINSD   Y5, Y0, Y0
+	VPACKUSDW Y0, Y0, Y0
+	VPERMQ    $0x08, Y0, Y0
+	VMOVDQU   X0, (R13)
+	ADDQ      $16, R11
+	ADDQ      $16, R13
+	SUBQ      $8, DX
+	JNZ       bcols1
+
+	BROWSTEP(brows1)
+	VZEROUPPER
+	RET
+
+// func mcBilinMid16AVX2(dst *int16, dstStride int, src *uint16, srcStride, tapStride int, mxy int32, w, h int, rnd int32, shift int, rnd2 int32, shift2 int, maxv int32)
+TEXT ·mcBilinMid16AVX2(SB), NOSPLIT, $0-100
+	BSETUP
+
+brows2:
+	MOVQ w+48(FP), DX
+	MOVQ SI, R11
+	MOVQ DI, R13
+
+bcols2:
+	MOVQ R11, CX
+	TAPS2(VPMOVZXWD)
+	VPACKSSDW Y0, Y0, Y0
+	VPERMQ    $0x08, Y0, Y0
+	VMOVDQU   X0, (R13)
+	ADDQ      $16, R11
+	ADDQ      $16, R13
+	SUBQ      $8, DX
+	JNZ       bcols2
+
+	BROWSTEP(brows2)
+	VZEROUPPER
+	RET
+
+// func mcBilinFromMid16AVX2(dst *uint16, dstStride int, src *int16, srcStride, tapStride int, mxy int32, w, h int, rnd int32, shift int, rnd2 int32, shift2 int, maxv int32)
+TEXT ·mcBilinFromMid16AVX2(SB), NOSPLIT, $0-100
+	BSETUP
+
+brows3:
+	MOVQ w+48(FP), DX
+	MOVQ SI, R11
+	MOVQ DI, R13
+
+bcols3:
+	MOVQ R11, CX
+	TAPS2(VPMOVSXWD)
+	VPMAXSD   Y4, Y0, Y0
+	VPMINSD   Y5, Y0, Y0
+	VPACKUSDW Y0, Y0, Y0
+	VPERMQ    $0x08, Y0, Y0
+	VMOVDQU   X0, (R13)
+	ADDQ      $16, R11
+	ADDQ      $16, R13
+	SUBQ      $8, DX
+	JNZ       bcols3
+
+	BROWSTEP(brows3)
+	VZEROUPPER
+	RET
+
+// func mcBilinPrepMid16AVX2(dst *int16, dstStride int, src *int16, srcStride, tapStride int, mxy int32, w, h int, rnd int32, shift int, rnd2 int32, shift2 int, maxv int32)
+TEXT ·mcBilinPrepMid16AVX2(SB), NOSPLIT, $0-100
+	BSETUP
+
+brows4:
+	MOVQ w+48(FP), DX
+	MOVQ SI, R11
+	MOVQ DI, R13
+
+bcols4:
+	MOVQ R11, CX
+	TAPS2(VPMOVSXWD)
+	VPACKSSDW Y0, Y0, Y0
+	VPERMQ    $0x08, Y0, Y0
+	VMOVDQU   X0, (R13)
+	ADDQ      $16, R11
+	ADDQ      $16, R13
+	SUBQ      $8, DX
+	JNZ       bcols4
+
+	BROWSTEP(brows4)
 	VZEROUPPER
 	RET

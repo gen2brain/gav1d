@@ -18,6 +18,8 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d16.loopFilter = loopFilter16RVV
 		d16.put8tap = put8tap16RVV
 		d16.prep8tap = prep8tap16RVV
+		d16.putBilin = putBilin16RVV
+		d16.prepBilin = prepBilin16RVV
 		d16.fgApplyRow = fgApplyRow16RVVRow
 		d16.fguvApplyRow = fguvApplyRow16RVVRow
 		d16.cdefCopy = cdefCopy16RVVRows

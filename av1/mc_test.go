@@ -450,6 +450,68 @@ func TestPut8tap16Asm(t *testing.T) {
 	t.Logf("%d cases", cases)
 }
 
+func TestBilin16Asm(t *testing.T) {
+	d, ref := newDsp[uint16](), newDspGo[uint16]()
+	base := mcPad*mcStride + mcPad
+	widths := []int{2, 4, 8, 16, 32, 64, 128}
+	heights := []int{2, 4, 8, 16, 64}
+	subpel := []int{0, 1, 7, 15}
+	cases := 0
+
+	got := make([]uint16, mcRows*mcStride)
+	want := make([]uint16, mcRows*mcStride)
+	gotT := make([]int16, 128*128+64)
+	wantT := make([]int16, 128*128+64)
+
+	for _, pixMax := range []int32{1023, 4095} {
+		for iter := range 2 {
+			m := mcFill[uint16](0, iter, pixMax)
+			for _, mx := range subpel {
+				for _, my := range subpel {
+					for _, w := range widths {
+						for _, h := range heights {
+							copy(got, m.dst)
+							copy(want, m.dst)
+							d.putBilin(mcMidBuf[:], got, base, mcStride, m.src, base,
+								mcStride, w, h, mx, my, pixMax)
+							ref.putBilin(mcMidBuf[:], want, base, mcStride, m.src, base,
+								mcStride, w, h, mx, my, pixMax)
+
+							for i := range want {
+								if got[i] == want[i] {
+									continue
+								}
+								t.Fatalf("put bpc=%d %dx%d mx=%d my=%d: [%d,%d] = %d, want %d",
+									pixMax, w, h, mx, my, (i-base)/mcStride,
+									(i-base)%mcStride, got[i], want[i])
+							}
+
+							for i := range gotT {
+								gotT[i], wantT[i] = -1, -1
+							}
+							d.prepBilin(mcMidBuf[:], gotT, m.src, base, mcStride,
+								w, h, mx, my, pixMax)
+							ref.prepBilin(mcMidBuf[:], wantT, m.src, base, mcStride,
+								w, h, mx, my, pixMax)
+
+							for i := range wantT {
+								if gotT[i] == wantT[i] {
+									continue
+								}
+								t.Fatalf("prep bpc=%d %dx%d mx=%d my=%d: [%d,%d] = %d, want %d",
+									pixMax, w, h, mx, my, i/w, i%w, gotT[i], wantT[i])
+							}
+							cases++
+						}
+					}
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
+
 func BenchmarkPut8tap(b *testing.B) {
 	d := newDsp[uint8]()
 	base := mcPad*mcStride + mcPad
