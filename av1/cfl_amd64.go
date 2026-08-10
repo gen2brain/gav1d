@@ -12,6 +12,9 @@ func cflPredict16AVX2(dst *uint16, stride, w, h int, dc int32, ac *int16, alpha,
 func cflAcNormAVX2(ac *int16, n int, log2sz int)
 
 //go:noescape
+func cflAcMain8AVX2(ac *int16, acStride int, ypx *uint8, stride, n, rows, ssHor, ssVer int)
+
+//go:noescape
 func z2Top8AVX2(dst *uint8, edge *uint8, n int, frac int32)
 
 //go:noescape
@@ -25,6 +28,7 @@ func init() {
 	cflPredict8Asm = cflPredict8AVX2
 	cflPredict16Asm = cflPredict16AVX2
 	cflAcNorm = cflAcNormAVX2
+	cflAcMain8Asm = cflAcMain8AVX2
 	z2Top8Asm = z2Top8AVX2
 	z2Top16Asm = z2Top16AVX2
 }

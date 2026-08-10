@@ -245,3 +245,91 @@ z2t16:
 
 	VZEROUPPER
 	RET
+
+DATA cflOnes<>+0(SB)/8, $0x0101010101010101
+GLOBL cflOnes<>(SB), RODATA|NOPTR, $8
+
+// The subsampled luma sum is a pairwise add of adjacent bytes, which is what
+// VPMADDUBSW against ones does, and the shift that follows is the one the
+// layout implies: three for full chroma, two for a horizontal pair, one when
+// both directions pair.
+// func cflAcMain8AVX2(ac *int16, acStride int, ypx *uint8, stride, n, rows, ssHor, ssVer int)
+TEXT ·cflAcMain8AVX2(SB), NOSPLIT, $0-64
+	MOVQ ac+0(FP), DI
+	MOVQ acStride+8(FP), R8
+	MOVQ ypx+16(FP), SI
+	MOVQ stride+24(FP), R9
+	MOVQ n+32(FP), CX
+	MOVQ rows+40(FP), DX
+	MOVQ ssHor+48(FP), R10
+	MOVQ ssVer+56(FP), R11
+
+	SHLQ         $1, R8
+	VPBROADCASTQ cflOnes<>(SB), Y15
+	TESTQ        R10, R10
+	JZ           ac444row
+	TESTQ        R11, R11
+	JZ           ac422row
+
+ac420row:
+	XORQ BX, BX
+
+ac420col:
+	VMOVDQU    (SI)(BX*2), Y0
+	VPMADDUBSW Y15, Y0, Y0
+	LEAQ       (SI)(R9*1), AX
+	VMOVDQU    (AX)(BX*2), Y1
+	VPMADDUBSW Y15, Y1, Y1
+	VPADDW     Y1, Y0, Y0
+	VPSLLW     $1, Y0, Y0
+	VMOVDQU    Y0, (DI)(BX*2)
+	ADDQ       $8, BX
+	CMPQ       BX, CX
+	JLT        ac420col
+
+	ADDQ R8, DI
+	LEAQ (SI)(R9*2), SI
+	DECQ DX
+	JNZ  ac420row
+
+	VZEROUPPER
+	RET
+
+ac422row:
+	XORQ BX, BX
+
+ac422col:
+	VMOVDQU    (SI)(BX*2), Y0
+	VPMADDUBSW Y15, Y0, Y0
+	VPSLLW     $2, Y0, Y0
+	VMOVDQU    Y0, (DI)(BX*2)
+	ADDQ       $8, BX
+	CMPQ       BX, CX
+	JLT        ac422col
+
+	ADDQ R8, DI
+	ADDQ R9, SI
+	DECQ DX
+	JNZ  ac422row
+
+	VZEROUPPER
+	RET
+
+ac444row:
+	XORQ BX, BX
+
+ac444col:
+	VPMOVZXBW (SI)(BX*1), Y0
+	VPSLLW    $3, Y0, Y0
+	VMOVDQU   Y0, (DI)(BX*2)
+	ADDQ      $8, BX
+	CMPQ      BX, CX
+	JLT       ac444col
+
+	ADDQ R8, DI
+	ADDQ R9, SI
+	DECQ DX
+	JNZ  ac444row
+
+	VZEROUPPER
+	RET

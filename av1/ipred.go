@@ -713,8 +713,21 @@ func cflAc[P pixel](ac []int16, ypx []P, ypxOff, stride, wPad, hPad,
 	acOff := 0
 	y, x := 0, 0
 
+	// The kernel takes the whole main rectangle; the replicated right columns
+	// and bottom rows stay here, where they are a copy rather than a sum.
+	n8 := 0
+	var z P
+	if unsafe.Sizeof(z) == 1 && cflAcMain8Asm != nil {
+		if rows := height - 4*hPad; rows > 0 {
+			if n8 = (width - 4*wPad) &^ 7; n8 > 0 {
+				cflAcMain8Asm(&ac[0], width,
+					(*uint8)(unsafe.Pointer(&ypx[ypxOff])), stride, n8, rows, ssHor, ssVer)
+			}
+		}
+	}
+
 	for ; y < height-4*hPad; y++ {
-		for x = 0; x < width-4*wPad; x++ {
+		for x = n8; x < width-4*wPad; x++ {
 			acSum := int32(ypx[ypxOff+(x<<ssHor)])
 			if ssHor != 0 {
 				acSum += int32(ypx[ypxOff+x*2+1])
@@ -762,6 +775,9 @@ func cflAc[P pixel](ac []int16, ypx []P, ypxOff, stride, wPad, hPad,
 		ac[i] -= int16(sum)
 	}
 }
+
+// cflAcMain8Asm fills the subsampled luma sums for the main rectangle.
+var cflAcMain8Asm func(ac *int16, acStride int, ypx *uint8, stride, n, rows, ssHor, ssVer int)
 
 // cflAcNorm takes the mean out of the AC block. It is neither typed on the
 // pixel nor on the chroma layout, so one kernel covers every case.
