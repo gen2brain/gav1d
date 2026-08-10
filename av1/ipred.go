@@ -1,6 +1,9 @@
 package av1
 
-import "math/bits"
+import (
+	"math/bits"
+	"unsafe"
+)
 
 func splatDc[P pixel](dst []P, dstOff, stride, width, height int, dc int32) {
 	for y := range height {
@@ -11,9 +14,31 @@ func splatDc[P pixel](dst []P, dstOff, stride, width, height int, dc int32) {
 	}
 }
 
+// cflPredict8Asm and cflPredict16Asm carry the whole block, so the dispatch is
+// a package variable rather than a dsp entry: the four CFL modes differ only in
+// the DC they resolve first.
+var (
+	cflPredict8Asm  func(dst *uint8, stride, w, h int, dc int32, ac *int16, alpha, max int32)
+	cflPredict16Asm func(dst *uint16, stride, w, h int, dc int32, ac *int16, alpha, max int32)
+)
+
 func cflPredict[P pixel](dst []P, dstOff, stride, width, height int, dc int32,
 	ac []int16, alpha int32, bitdepthMax int32,
 ) {
+	var z P
+	if unsafe.Sizeof(z) == 1 && cflPredict8Asm != nil {
+		cflPredict8Asm((*uint8)(unsafe.Pointer(&dst[dstOff])), stride, width, height,
+			dc, &ac[0], alpha, bitdepthMax)
+
+		return
+	}
+	if unsafe.Sizeof(z) == 2 && cflPredict16Asm != nil {
+		cflPredict16Asm((*uint16)(unsafe.Pointer(&dst[dstOff])), stride, width, height,
+			dc, &ac[0], alpha, bitdepthMax)
+
+		return
+	}
+
 	acOff := 0
 	for y := range height {
 		row := dstOff + y*stride
@@ -514,7 +539,24 @@ func ipredZ2[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,
 		fracX := int32(xpos & 0x3E)
 
 		ypos := (y << (6 + upsampleLeft)) - dy
-		for x := 0; x < width; x, baseX, ypos = x+1, baseX+baseIncX, ypos-dy {
+		x := 0
+
+		// Without the upsample the top edge is read straight through, so the
+		// run past the last negative column is one contiguous kernel call.
+		if baseIncX == 1 {
+			for ; x < width && baseX < 0; x, baseX, ypos = x+1, baseX+1, ypos-dy {
+				baseY := ypos >> 6
+				fracY := int32(ypos & 0x3E)
+				v := int32(edge[leftOff-baseY])*(64-fracY) +
+					int32(edge[leftOff-(baseY+1)])*fracY
+				dst[row+x] = P((v + 32) >> 6)
+			}
+			if n := z2TopRun(dst, row+x, edge[:], tlOff+baseX, width-x, fracX); n > 0 {
+				x, baseX, ypos = x+n, baseX+n, ypos-n*dy
+			}
+		}
+
+		for ; x < width; x, baseX, ypos = x+1, baseX+baseIncX, ypos-dy {
 			var v int32
 			if baseX >= 0 {
 				v = int32(edge[tlOff+baseX])*(64-fracX) +
@@ -529,6 +571,35 @@ func ipredZ2[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,
 		}
 		xpos -= dx
 	}
+}
+
+// z2TopRun fills the columns that read the top edge, where the fraction is
+// constant across the row, and reports how many it took.
+var (
+	z2Top8Asm  func(dst *uint8, edge *uint8, n int, frac int32)
+	z2Top16Asm func(dst *uint16, edge *uint16, n int, frac int32)
+)
+
+func z2TopRun[P pixel](dst []P, dstOff int, edge []P, edgeOff, n int, frac int32) int {
+	var z P
+	if unsafe.Sizeof(z) == 1 && z2Top8Asm != nil {
+		if n16 := n &^ 15; n16 > 0 {
+			z2Top8Asm((*uint8)(unsafe.Pointer(&dst[dstOff])),
+				(*uint8)(unsafe.Pointer(&edge[edgeOff])), n16, frac)
+
+			return n16
+		}
+	}
+	if unsafe.Sizeof(z) == 2 && z2Top16Asm != nil {
+		if n8 := n &^ 7; n8 > 0 {
+			z2Top16Asm((*uint16)(unsafe.Pointer(&dst[dstOff])),
+				(*uint16)(unsafe.Pointer(&edge[edgeOff])), n8, frac)
+
+			return n8
+		}
+	}
+
+	return 0
 }
 
 func ipredZ3[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,
@@ -675,6 +746,12 @@ func cflAc[P pixel](ac []int16, ypx []P, ypxOff, stride, wPad, hPad,
 	}
 
 	log2sz := bits.TrailingZeros32(uint32(width)) + bits.TrailingZeros32(uint32(height))
+	if cflAcNorm != nil {
+		cflAcNorm(&ac[0], width*height, log2sz)
+
+		return
+	}
+
 	sum := int32((1 << log2sz) >> 1)
 	for i := range width * height {
 		sum += int32(ac[i])
@@ -685,6 +762,10 @@ func cflAc[P pixel](ac []int16, ypx []P, ypxOff, stride, wPad, hPad,
 		ac[i] -= int16(sum)
 	}
 }
+
+// cflAcNorm takes the mean out of the AC block. It is neither typed on the
+// pixel nor on the chroma layout, so one kernel covers every case.
+var cflAcNorm func(ac *int16, n int, log2sz int)
 
 func palPred[P pixel](dst []P, dstOff, stride int, pal []P, idx []uint8, w, h int) {
 	n := 0
