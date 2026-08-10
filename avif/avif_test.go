@@ -861,3 +861,79 @@ func TestEssentialProperty(t *testing.T) {
 		}
 	}
 }
+
+// trackDurationOff returns the offset of the tkhd duration field.
+func trackDurationOff(b []byte) (int, int) {
+	tkhd, ok := findRawBox(b, "moov", "trak", "tkhd")
+	if !ok {
+		return 0, 0
+	}
+	p := tkhd.off + tkhd.hdr
+	if b[p] == 1 {
+		return p + 4 + 8 + 8 + 4 + 4, 8
+	}
+
+	return p + 4 + 4 + 4 + 4 + 4, 4
+}
+
+// TestLoopCount checks the repeat count the edit list carries. Only the
+// indefinite case appears in the test files, so the other two are made by
+// patching the one flag and the one field that decide it.
+func TestLoopCount(t *testing.T) {
+	orig, err := os.ReadFile(filepath.Join("testdata", "anim.avif"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loop := func(b []byte) int {
+		a, err := DecodeAll(bytes.NewReader(b))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return a.LoopCount
+	}
+
+	if got := loop(orig); got != 0 {
+		t.Fatalf("indefinite duration with a repeating edit list = %d, want 0", got)
+	}
+
+	elst, ok := findRawBox(orig, "moov", "trak", "edts", "elst")
+	if !ok {
+		t.Fatal("no elst")
+	}
+	durOff, durLen := trackDurationOff(orig)
+	if durOff == 0 {
+		t.Fatal("no tkhd")
+	}
+
+	b := bytes.Clone(orig)
+	b[elst.off+elst.hdr+3] &^= 1
+	if got := loop(b); got != -1 {
+		t.Fatalf("edit list that does not repeat = %d, want -1", got)
+	}
+
+	// segment_duration is 5, so a track four segments long plays four times.
+	b = bytes.Clone(orig)
+	switch durLen {
+	case 8:
+		binary.BigEndian.PutUint64(b[durOff:], 20)
+	case 4:
+		binary.BigEndian.PutUint32(b[durOff:], 20)
+	}
+	if got := loop(b); got != 3 {
+		t.Fatalf("track four segments long = %d, want 3", got)
+	}
+
+	// A track shorter than one segment still plays once.
+	b = bytes.Clone(orig)
+	switch durLen {
+	case 8:
+		binary.BigEndian.PutUint64(b[durOff:], 5)
+	case 4:
+		binary.BigEndian.PutUint32(b[durOff:], 5)
+	}
+	if got := loop(b); got != -1 {
+		t.Fatalf("track one segment long = %d, want -1", got)
+	}
+}

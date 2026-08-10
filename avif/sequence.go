@@ -1,6 +1,10 @@
 package avif
 
-import "github.com/gen2brain/gav1d/av1"
+import (
+	"math"
+
+	"github.com/gen2brain/gav1d/av1"
+)
 
 type track struct {
 	id        uint32
@@ -10,6 +14,40 @@ type track struct {
 	deltas    []uint32
 	auxl      []uint32
 	auxType   string
+
+	duration   uint64
+	hasEdits   bool
+	repeating  bool
+	segmentDur uint64
+}
+
+const indefiniteDuration = ^uint64(0)
+
+// loopCount is zero for forever, -1 to show each frame once, otherwise the
+// number of extra plays. ISO/IEC 23008-12 section 9.6.1.
+func (t *track) loopCount() int {
+	if !t.hasEdits {
+		return 0
+	}
+	if !t.repeating {
+		return -1
+	}
+	if t.duration == indefiniteDuration || t.duration == 0 || t.segmentDur == 0 {
+		return 0
+	}
+
+	n := t.duration / t.segmentDur
+	if t.duration%t.segmentDur != 0 {
+		n++
+	}
+	if n <= 1 {
+		return -1
+	}
+	if n-1 > math.MaxInt32 {
+		return 0
+	}
+
+	return int(n - 1)
 }
 
 type movie struct {
@@ -52,9 +90,46 @@ func parseTrak(b []byte) (track, error) {
 				r.skip(8)
 			}
 			t.id = r.u32()
+			r.skip(4)
+			if v == 1 {
+				t.duration = r.u64()
+			} else {
+				t.duration = uint64(r.u32())
+				if t.duration == 1<<32-1 {
+					t.duration = indefiniteDuration
+				}
+			}
 			if r.err {
 				return errInvalid
 			}
+
+		case "edts":
+			t.hasEdits = true
+
+			return eachBox(b, func(typ string, b []byte) error {
+				if typ != "elst" {
+					return nil
+				}
+				r := &reader{b: b}
+				v, flags := r.fullBox()
+				if flags&1 == 0 {
+					return nil
+				}
+				t.repeating = true
+				if r.u32() != 1 {
+					return nil
+				}
+				if v == 1 {
+					t.segmentDur = r.u64()
+				} else {
+					t.segmentDur = uint64(r.u32())
+				}
+				if r.err {
+					return errInvalid
+				}
+
+				return nil
+			})
 
 		case "tref":
 			return eachBox(b, func(typ string, b []byte) error {
@@ -295,7 +370,7 @@ func (f *file) decodeSequence(o Options) (*AVIF, error) {
 		}
 	}
 
-	out := &AVIF{}
+	out := &AVIF{LoopCount: t.loopCount()}
 	if len(colors) > 0 {
 		out.Color = f.colorInfo(f.primary(), colors[0])
 	}

@@ -395,7 +395,10 @@ type AVIF struct {
 	Image []image.Image
 	// Delay holds each frame's duration in seconds.
 	Delay []float64
-	// LoopCount is how many times the animation repeats, zero for forever.
+	// LoopCount controls how many times the animation restarts, following
+	// image/gif: zero loops forever, -1 shows each frame once, and any other
+	// value plays the animation LoopCount+1 times. A file whose track carries
+	// no edit list loops forever.
 	LoopCount int
 	// Color describes the color space the frames were decoded from.
 	Color ColorInfo
