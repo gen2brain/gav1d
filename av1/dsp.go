@@ -25,6 +25,15 @@ type dspContext[P pixel] struct {
 	put8tap func(mid []int16, dst []P, dstOff, dstStride int, src []P, srcOff, srcStride,
 		w, h, mx, my, filterType int, bitdepthMax int32)
 
+	prep8tap func(mid []int16, tmp []int16, src []P, srcOff, srcStride,
+		w, h, mx, my, filterType int, bitdepthMax int32)
+
+	putBilin func(mid []int16, dst []P, dstOff, dstStride int, src []P, srcOff, srcStride,
+		w, h, mx, my int, bitdepthMax int32)
+
+	prepBilin func(mid []int16, tmp []int16, src []P, srcOff, srcStride,
+		w, h, mx, my int, bitdepthMax int32)
+
 	itxClip func(tmp []int32, rnd int32, shift int, lo, hi int32)
 	itxAdd  func(dst []P, dstOff, stride int, tmp []int32, w, h, ts int, bitdepthMax int32)
 	itxCol  func(tmp []int32, lanes, stride, n, txtp int, lo, hi int32, scratch []int32) bool
@@ -54,6 +63,9 @@ func newDspGo[P pixel]() *dspContext[P] {
 		fgApplyRow:   fgApplyRow[P],
 		fguvApplyRow: fguvApplyRow[P],
 		put8tap:      put8tap[P],
+		prep8tap:     prep8tap[P],
+		putBilin:     putBilin[P],
+		prepBilin:    prepBilin[P],
 		itxClip:      itxClipGo,
 		itxAdd:       itxAddGo[P],
 		itxTranspose: itxTransposeGo,

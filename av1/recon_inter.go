@@ -52,7 +52,7 @@ func recMc[P pixel, C coef](t *taskContext[P, C], dst8 []P, dst8Off int,
 			mc(f.dsp, t.scratch.mcMid[:], dst8, dst8Off, dstStride, ref, refOff, refStride, bw4*hMul,
 				bh4*vMul, mx<<(1-ssHor), my<<(1-ssVer), filter2d, f.bitdepthMax)
 		} else {
-			mct(t.scratch.mcMid[:], dst16, ref, refOff, refStride, bw4*hMul, bh4*vMul,
+			mct(f.dsp, t.scratch.mcMid[:], dst16, ref, refOff, refStride, bw4*hMul, bh4*vMul,
 				mx<<(1-ssHor), my<<(1-ssVer), filter2d, f.bitdepthMax)
 		}
 

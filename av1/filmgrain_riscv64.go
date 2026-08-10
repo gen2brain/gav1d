@@ -74,3 +74,18 @@ func fguvApplyRow16RVVRow(dst []uint16, dstOff int, src []uint16, srcOff int,
 	fguvApplyRow16RVV(&dst[dstOff], &src[srcOff], &luma[lumaOff],
 		&scaling[0], &grain[0], &p)
 }
+
+func init() {
+	grainAR = grainARRVVRow
+}
+
+//go:noescape
+func grainARRVV(pre *int32, row *int16, rowStride, lag int, coeffs *int8, n int)
+
+func grainARRVVRow(pre []int32, buf *grainLut, y, lag int, coeffs []int8, x0, x1 int) {
+	clear(pre[x0:x1])
+
+	if n := x1 - x0; n > 0 {
+		grainARRVV(&pre[x0], &buf[y-lag][x0-lag], grainWidth, lag, &coeffs[0], n)
+	}
+}

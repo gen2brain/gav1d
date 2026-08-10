@@ -93,3 +93,22 @@ func fguvApplyRow16NEONRow(dst []uint16, dstOff int, src []uint16, srcOff int,
 			n, shift, minValue, maxValue, sx, lumaMult, mult, offset, pixelMax, csfl)
 	}
 }
+
+func init() {
+	grainAR = grainARNEONRow
+}
+
+//go:noescape
+func grainARNEON(pre *int32, row *int16, rowStride, lag int, coeffs *int8, n int)
+
+func grainARNEONRow(pre []int32, buf *grainLut, y, lag int, coeffs []int8, x0, x1 int) {
+	clear(pre[x0:x1])
+
+	n := x1 - x0
+	if n4 := n &^ 3; n4 > 0 {
+		grainARNEON(&pre[x0], &buf[y-lag][x0-lag], grainWidth, lag, &coeffs[0], n4)
+	}
+	if n&3 != 0 {
+		grainARAcc(pre, buf, y, lag, coeffs, x0+(n&^3), x1)
+	}
+}

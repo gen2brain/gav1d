@@ -40,22 +40,50 @@ func generateGrainY(buf *grainLut, data *filmGrainData, bpc int) {
 
 	const arPad = 3
 	arLag := data.arCoeffLag
+	if arLag == 0 {
+		return
+	}
+
+	var pre [grainWidth]int32
+	x0, x1 := arPad, grainWidth-arPad
+	nprev := arLag * (2*arLag + 1)
+	arShift := int(data.arCoeffShift)
 
 	for y := arPad; y < grainHeight; y++ {
-		for x := arPad; x < grainWidth-arPad; x++ {
-			c, sum := 0, 0
-			for dy := -arLag; dy <= 0; dy++ {
-				for dx := -arLag; dx <= arLag; dx++ {
-					if dx == 0 && dy == 0 {
-						break
-					}
-					sum += int(data.arCoeffsY[c]) * int(buf[y+dy][x+dx])
-					c++
-				}
-			}
+		grainAR(pre[:], buf, y, arLag, data.arCoeffsY[:], x0, x1)
 
-			grain := int(buf[y][x]) + fgRound2(sum, int(data.arCoeffShift))
-			buf[y][x] = int16(clip(grain, grainMin, grainMax))
+		row := &buf[y]
+		for x := x0; x < x1; x++ {
+			sum := pre[x]
+			for dx := range arLag {
+				sum += int32(data.arCoeffsY[nprev+dx]) * int32(row[x-arLag+dx])
+			}
+			grain := int(row[x]) + fgRound2(int(sum), arShift)
+			row[x] = int16(clip(grain, grainMin, grainMax))
+		}
+	}
+}
+
+var grainAR = grainARGo
+
+func grainARGo(pre []int32, buf *grainLut, y, lag int, coeffs []int8, x0, x1 int) {
+	clear(pre[x0:x1])
+	grainARAcc(pre, buf, y, lag, coeffs, x0, x1)
+}
+
+func grainARAcc(pre []int32, buf *grainLut, y, lag int, coeffs []int8, x0, x1 int) {
+	c := 0
+	for dy := -lag; dy < 0; dy++ {
+		row := &buf[y+dy]
+		for dx := -lag; dx <= lag; dx++ {
+			co := int32(coeffs[c])
+			c++
+			if co == 0 {
+				continue
+			}
+			for x := x0; x < x1; x++ {
+				pre[x] += co * int32(row[x+dx])
+			}
 		}
 	}
 }
@@ -90,35 +118,39 @@ func generateGrainUV(buf, bufY *grainLut, data *filmGrainData, uv, subx, suby, b
 	const arPad = 3
 	arLag := data.arCoeffLag
 
-	for y := arPad; y < chromaH; y++ {
-		for x := arPad; x < chromaW-arPad; x++ {
-			c, sum := 0, 0
-			for dy := -arLag; dy <= 0; dy++ {
-				for dx := -arLag; dx <= arLag; dx++ {
-					if dx == 0 && dy == 0 {
-						if data.numYPoints == 0 {
-							break
-						}
-						luma := 0
-						lumaX := ((x - arPad) << subx) + arPad
-						lumaY := ((y - arPad) << suby) + arPad
-						for i := 0; i <= suby; i++ {
-							for j := 0; j <= subx; j++ {
-								luma += int(bufY[lumaY+i][lumaX+j])
-							}
-						}
-						luma = fgRound2(luma, subx+suby)
-						sum += luma * int(data.arCoeffsUv[uv][c])
+	var pre [grainWidth]int32
+	x0, x1 := arPad, chromaW-arPad
+	nprev := arLag * (2*arLag + 1)
+	arShift := int(data.arCoeffShift)
+	coeffs := data.arCoeffsUv[uv][:]
 
-						break
+	for y := arPad; y < chromaH; y++ {
+		if arLag > 0 {
+			grainAR(pre[:], buf, y, arLag, coeffs, x0, x1)
+		} else {
+			clear(pre[x0:x1])
+		}
+
+		row := &buf[y]
+		for x := x0; x < x1; x++ {
+			sum := pre[x]
+			for dx := range arLag {
+				sum += int32(coeffs[nprev+dx]) * int32(row[x-arLag+dx])
+			}
+			if data.numYPoints != 0 {
+				luma := 0
+				lumaX := ((x - arPad) << subx) + arPad
+				lumaY := ((y - arPad) << suby) + arPad
+				for i := 0; i <= suby; i++ {
+					for j := 0; j <= subx; j++ {
+						luma += int(bufY[lumaY+i][lumaX+j])
 					}
-					sum += int(data.arCoeffsUv[uv][c]) * int(buf[y+dy][x+dx])
-					c++
 				}
+				sum += int32(fgRound2(luma, subx+suby)) * int32(coeffs[nprev+arLag])
 			}
 
-			grain := int(buf[y][x]) + fgRound2(sum, int(data.arCoeffShift))
-			buf[y][x] = int16(clip(grain, grainMin, grainMax))
+			grain := int(row[x]) + fgRound2(int(sum), arShift)
+			row[x] = int16(clip(grain, grainMin, grainMax))
 		}
 	}
 }

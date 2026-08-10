@@ -318,3 +318,56 @@ nostep:
 	BNE    fguvrow16
 
 	RET
+
+#define ARMULS(Vd, Vn, Vm) WORD $(0x4EA09C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define ARSSHLL(Vd, Vn)    WORD $(0x0F10A400 | ((Vn) << 5) | (Vd))
+
+// func grainARNEON(pre *int32, row *int16, rowStride, lag int, coeffs *int8, n int)
+TEXT ·grainARNEON(SB), NOSPLIT, $0-48
+	MOVD pre+0(FP), R0
+	MOVD row+8(FP), R1
+	MOVD rowStride+16(FP), R2
+	MOVD lag+24(FP), R3
+	MOVD coeffs+32(FP), R4
+	MOVD n+40(FP), R5
+
+	LSL  $1, R2, R2
+	MOVD R3, R6
+	LSL  $1, R3, R7
+	ADD  $1, R7, R7
+
+argrow:
+	MOVD R1, R8
+	MOVD R7, R9
+
+argtap:
+	MOVB (R4), R10
+	VDUP R10, V1.S4
+	ADD  $1, R4, R4
+
+	MOVD R8, R11
+	MOVD R0, R12
+	MOVD R5, R13
+
+argcol:
+	VLD1 (R11), [V0.H4]
+	ARSSHLL(0, 0)
+	ARMULS(0, 0, 1)
+	VLD1 (R12), [V2.S4]
+	VADD V2.S4, V0.S4, V0.S4
+	VST1 [V0.S4], (R12)
+
+	ADD  $8, R11
+	ADD  $16, R12
+	SUB  $4, R13
+	CBNZ R13, argcol
+
+	ADD  $2, R8
+	SUB  $1, R9
+	CBNZ R9, argtap
+
+	ADD  R2, R1
+	SUB  $1, R6
+	CBNZ R6, argrow
+
+	RET

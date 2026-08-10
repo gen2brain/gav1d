@@ -75,7 +75,7 @@ func runMC[P pixel](b, iter, filter2d, isPrep, w, h, mx, my int, bitdepthMax int
 	out := make([]int, 0, w*h)
 	if isPrep != 0 {
 		tmp := make([]int16, 128*128)
-		mct(mcMidBuf[:], tmp, src, base, mcStride, w, h, mx, my, filter2d, bitdepthMax)
+		mct(newDspGo[P](), mcMidBuf[:], tmp, src, base, mcStride, w, h, mx, my, filter2d, bitdepthMax)
 		for i := range w * h {
 			out = append(out, int(tmp[i]))
 		}
@@ -480,10 +480,109 @@ func BenchmarkPrep8tap(b *testing.B) {
 	for _, w := range []int{4, 8, 16} {
 		b.Run(strconv.Itoa(w)+"x"+strconv.Itoa(w), func(b *testing.B) {
 			for b.Loop() {
-				mct(mcMidBuf[:], tmp, m.src, base, mcStride, w, w, 7, 7,
+				mct(newDsp[uint8](), mcMidBuf[:], tmp, m.src, base, mcStride, w, w, 7, 7,
 					filter2dFilterType[0], 255)
 			}
 			b.ReportMetric(float64(w*w)*float64(b.N)/b.Elapsed().Seconds()/1e6, "Mpixel/s")
 		})
 	}
+}
+
+// TestPrep8tapAsm checks the compound filter against the pure Go one.
+func TestPrep8tapAsm(t *testing.T) {
+	d, ref := newDsp[uint8](), newDspGo[uint8]()
+	base := mcPad*mcStride + mcPad
+	widths := []int{2, 4, 8, 16, 32, 64, 128}
+	heights := []int{2, 4, 8, 16, 64}
+	subpel := []int{0, 1, 7, 15}
+	cases := 0
+
+	got := make([]int16, 128*128+64)
+	want := make([]int16, 128*128+64)
+
+	for iter := range 2 {
+		m := mcFill[uint8](0, iter, 255)
+		for _, filter2d := range filter2dFilterType {
+			for _, mx := range subpel {
+				for _, my := range subpel {
+					for _, w := range widths {
+						for _, h := range heights {
+							for i := range got {
+								got[i], want[i] = -1, -1
+							}
+							d.prep8tap(mcMidBuf[:], got, m.src, base, mcStride,
+								w, h, mx, my, filter2d, 255)
+							ref.prep8tap(mcMidBuf[:], want, m.src, base, mcStride,
+								w, h, mx, my, filter2d, 255)
+
+							for i := range want {
+								if got[i] == want[i] {
+									continue
+								}
+								t.Fatalf("%dx%d mx=%d my=%d filter=%d: [%d,%d] = %d, want %d",
+									w, h, mx, my, filter2d, i/w, i%w, got[i], want[i])
+							}
+							cases++
+						}
+					}
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+// TestBilinAsm checks the bilinear filters against the pure Go ones.
+func TestBilinAsm(t *testing.T) {
+	d, ref := newDsp[uint8](), newDspGo[uint8]()
+	base := mcPad*mcStride + mcPad
+	widths := []int{2, 4, 8, 16, 32, 64, 128}
+	heights := []int{2, 4, 8, 16, 64}
+	subpel := []int{0, 1, 7, 15}
+	cases := 0
+
+	for iter := range 2 {
+		m := mcFill[uint8](0, iter, 255)
+		for _, mx := range subpel {
+			for _, my := range subpel {
+				for _, w := range widths {
+					for _, h := range heights {
+						got := make([]uint8, mcRows*mcStride)
+						want := make([]uint8, mcRows*mcStride)
+						copy(got, m.dst)
+						copy(want, m.dst)
+						d.putBilin(mcMidBuf[:], got, base, mcStride, m.src, base, mcStride,
+							w, h, mx, my, 255)
+						ref.putBilin(mcMidBuf[:], want, base, mcStride, m.src, base, mcStride,
+							w, h, mx, my, 255)
+						for i := range want {
+							if got[i] != want[i] {
+								t.Fatalf("put %dx%d mx=%d my=%d: [%d,%d] = %d, want %d",
+									w, h, mx, my, (i-base)/mcStride, (i-base)%mcStride,
+									got[i], want[i])
+							}
+						}
+
+						pg := make([]int16, 128*128+64)
+						pw := make([]int16, 128*128+64)
+						for i := range pg {
+							pg[i], pw[i] = -1, -1
+						}
+						d.prepBilin(mcMidBuf[:], pg, m.src, base, mcStride, w, h, mx, my, 255)
+						ref.prepBilin(mcMidBuf[:], pw, m.src, base, mcStride, w, h, mx, my, 255)
+						for i := range pw {
+							if pg[i] != pw[i] {
+								t.Fatalf("prep %dx%d mx=%d my=%d: [%d,%d] = %d, want %d",
+									w, h, mx, my, i/w, i%w, pg[i], pw[i])
+							}
+						}
+						cases++
+					}
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
 }

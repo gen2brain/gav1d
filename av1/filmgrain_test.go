@@ -460,3 +460,76 @@ func TestFilmGrain(t *testing.T) {
 
 	t.Logf("%d cases", cases)
 }
+
+func BenchmarkGenerateGrain(b *testing.B) {
+	var data filmGrainData
+	data.seed = 0x1234
+	data.arCoeffShift = 8
+	data.grainScaleShift = 0
+	data.numYPoints = 8
+	for lag := range 4 {
+		data.arCoeffLag = lag
+		for i := range data.arCoeffsY {
+			data.arCoeffsY[i] = int8(i*7&63) - 32
+		}
+		for uv := range 2 {
+			for i := range data.arCoeffsUv[uv] {
+				data.arCoeffsUv[uv][i] = int8(i*5&63) - 32
+			}
+		}
+
+		b.Run("y-lag"+strconv.Itoa(lag), func(b *testing.B) {
+			var buf grainLut
+			for b.Loop() {
+				generateGrainY(&buf, &data, 8)
+			}
+		})
+		b.Run("uv-lag"+strconv.Itoa(lag), func(b *testing.B) {
+			var buf, bufY grainLut
+			for b.Loop() {
+				generateGrainUV(&buf, &bufY, &data, 0, 1, 1, 8)
+			}
+		})
+	}
+}
+
+// TestGrainARAsm checks the autoregressive row accumulator against the pure Go one.
+func TestGrainARAsm(t *testing.T) {
+	var buf grainLut
+	for y := range grainHeight {
+		for x := range grainWidth {
+			v := uint32(y*grainWidth+x)*2654435761 + 12345
+			v ^= v >> 13
+			buf[y][x] = int16(v) >> 4
+		}
+	}
+
+	var coeffs [24]int8
+	for i := range coeffs {
+		coeffs[i] = int8(i*11&127) - 64
+	}
+
+	cases := 0
+	for lag := 1; lag <= 3; lag++ {
+		for _, x1 := range []int{grainWidth - 3, 40, 12} {
+			for y := lag; y < grainHeight; y++ {
+				got := make([]int32, grainWidth)
+				want := make([]int32, grainWidth)
+				for i := range got {
+					got[i], want[i] = -7, -7
+				}
+				grainAR(got, &buf, y, lag, coeffs[:], 3, x1)
+				grainARGo(want, &buf, y, lag, coeffs[:], 3, x1)
+				for i := range want {
+					if got[i] != want[i] {
+						t.Fatalf("lag=%d y=%d x1=%d: pre[%d] = %d, want %d",
+							lag, y, x1, i, got[i], want[i])
+					}
+				}
+				cases++
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}

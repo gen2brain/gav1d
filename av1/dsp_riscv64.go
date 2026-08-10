@@ -27,6 +27,9 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.fgApplyRow = fgApplyRow8RVV
 		d8.fguvApplyRow = fguvApplyRow8RVV
 		d8.put8tap = put8tap8RVV
+		d8.prep8tap = prep8tap8RVV
+		d8.putBilin = putBilin8RVV
+		d8.prepBilin = prepBilin8RVV
 		d8.itxAdd = itxAdd8Vec
 		d8.cdefDir = cdefFindDir8RVV
 		d8.cdefCopy = cdefCopy8RVVRows

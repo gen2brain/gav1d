@@ -316,7 +316,7 @@ func mc[P pixel](dsp *dspContext[P], mid []int16, dst []P, dstOff, dstStride int
 	src []P, srcOff, srcStride, w, h, mx, my, filter2d int, bitdepthMax int32,
 ) {
 	if filter2d == filter2dBilinear {
-		putBilin(mid, dst, dstOff, dstStride, src, srcOff, srcStride, w, h, mx, my, bitdepthMax)
+		dsp.putBilin(mid, dst, dstOff, dstStride, src, srcOff, srcStride, w, h, mx, my, bitdepthMax)
 
 		return
 	}
@@ -325,16 +325,16 @@ func mc[P pixel](dsp *dspContext[P], mid []int16, dst []P, dstOff, dstStride int
 		filter2dFilterType[filter2d], bitdepthMax)
 }
 
-func mct[P pixel](mid []int16, tmp []int16, src []P, srcOff, srcStride, w, h, mx, my,
-	filter2d int, bitdepthMax int32,
+func mct[P pixel](dsp *dspContext[P], mid []int16, tmp []int16, src []P, srcOff, srcStride,
+	w, h, mx, my, filter2d int, bitdepthMax int32,
 ) {
 	if filter2d == filter2dBilinear {
-		prepBilin(mid, tmp, src, srcOff, srcStride, w, h, mx, my, bitdepthMax)
+		dsp.prepBilin(mid, tmp, src, srcOff, srcStride, w, h, mx, my, bitdepthMax)
 
 		return
 	}
 
-	prep8tap(mid, tmp, src, srcOff, srcStride, w, h, mx, my,
+	dsp.prep8tap(mid, tmp, src, srcOff, srcStride, w, h, mx, my,
 		filter2dFilterType[filter2d], bitdepthMax)
 }
 

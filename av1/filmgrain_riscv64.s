@@ -281,3 +281,55 @@ idxdone:
 	BNE  X0, X14, fguvrow16
 
 	RET
+
+// func grainARRVV(pre *int32, row *int16, rowStride, lag int, coeffs *int8, n int)
+TEXT ·grainARRVV(SB), NOSPLIT, $0-48
+	MOV  pre+0(FP), X10
+	MOV  row+8(FP), X11
+	MOV  rowStride+16(FP), X12
+	MOV  lag+24(FP), X13
+	MOV  coeffs+32(FP), X14
+	MOV  n+40(FP), X15
+
+	SLLI $1, X12, X12
+	MOV  X13, X16
+	SLLI $1, X13, X17
+	ADDI $1, X17, X17
+
+argrow:
+	MOV X11, X18
+	MOV X17, X19
+
+argtap:
+	MOVB (X14), X20
+	ADDI $1, X14, X14
+
+	MOV X18, X21
+	MOV X10, X22
+	MOV X15, X23
+
+argcol:
+	VSETVLI  X23, E16, MF2, TA, MA, X24
+	VLE16V   (X21), V1
+	VSETVLI  X23, E32, M1, TA, MA, X24
+	VSEXTVF2 V1, V2
+	VLE32V   (X22), V3
+	VMACCVX  V2, X20, V3
+	VSE32V   V3, (X22)
+
+	SLLI $1, X24, X25
+	ADD  X25, X21
+	SLLI $2, X24, X25
+	ADD  X25, X22
+	SUB  X24, X23
+	BNEZ X23, argcol
+
+	ADDI $2, X18, X18
+	ADDI $-1, X19
+	BNEZ X19, argtap
+
+	ADD  X12, X11
+	ADDI $-1, X16
+	BNEZ X16, argrow
+
+	RET

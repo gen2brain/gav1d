@@ -365,3 +365,52 @@ nosub16:
 
 	VZEROUPPER
 	RET
+
+// func grainARAVX2(pre *int32, row *int16, rowStride, lag int, coeffs *int8, n int)
+TEXT ·grainARAVX2(SB), NOSPLIT, $0-48
+	MOVQ pre+0(FP), DI
+	MOVQ row+8(FP), SI
+	MOVQ rowStride+16(FP), R9
+	MOVQ lag+24(FP), BX
+	MOVQ coeffs+32(FP), AX
+	MOVQ n+40(FP), CX
+	SHLQ $1, R9
+
+	MOVQ BX, R10
+	LEAQ (BX)(BX*1), R8
+	INCQ R8
+
+argrow:
+	MOVQ SI, R12
+	MOVQ R8, R11
+
+argtap:
+	MOVBLSX      (AX), DX
+	VMOVD        DX, X1
+	VPBROADCASTD X1, Y1
+	INCQ         AX
+
+	MOVQ R12, R13
+	MOVQ DI, R14
+	MOVQ CX, R15
+
+argcol:
+	VPMOVSXWD (R13), Y0
+	VPMULLD   Y1, Y0, Y0
+	VPADDD    (R14), Y0, Y0
+	VMOVDQU   Y0, (R14)
+	ADDQ      $16, R13
+	ADDQ      $32, R14
+	SUBQ      $8, R15
+	JG        argcol
+
+	ADDQ $2, R12
+	DECQ R11
+	JNZ  argtap
+
+	ADDQ R9, SI
+	DECQ R10
+	JNZ  argrow
+
+	VZEROUPPER
+	RET

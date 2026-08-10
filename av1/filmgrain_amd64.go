@@ -93,3 +93,24 @@ func fguvApplyRow16AVX2Row(dst []uint16, dstOff int, src []uint16, srcOff int,
 			n, shift, minValue, maxValue, sx, lumaMult, mult, offset, pixelMax, csfl)
 	}
 }
+
+func init() {
+	if hasAVX2 {
+		grainAR = grainARAVX2Row
+	}
+}
+
+//go:noescape
+func grainARAVX2(pre *int32, row *int16, rowStride, lag int, coeffs *int8, n int)
+
+func grainARAVX2Row(pre []int32, buf *grainLut, y, lag int, coeffs []int8, x0, x1 int) {
+	clear(pre[x0:x1])
+
+	n := x1 - x0
+	if n8 := n &^ 7; n8 > 0 {
+		grainARAVX2(&pre[x0], &buf[y-lag][x0-lag], grainWidth, lag, &coeffs[0], n8)
+	}
+	if n&7 != 0 {
+		grainARAcc(pre, buf, y, lag, coeffs, x0+(n&^7), x1)
+	}
+}

@@ -453,3 +453,601 @@ hv4v2:
 	CBNZ R10, hv4v2
 
 	RET
+
+#define SSHR6(Vd, Vn) WORD $(0x4F000400 | ((64 - 6) << 16) | ((Vn) << 5) | (Vd))
+
+// func prep8tapHNEON(tmp *int16, src *uint8, srcStride int, f *[8]int8, w, h int)
+TEXT ·prep8tapHNEON(SB), NOSPLIT, $0-48
+	MOVD dst+0(FP), R0
+	MOVD src+8(FP), R2
+	MOVD srcStride+16(FP), R3
+	MOVD f+24(FP), R4
+	MOVD w+32(FP), R5
+	MOVD h+40(FP), R6
+
+	LOADTAPS(R4, V16.H8, V17.H8, V18.H8, V19.H8, V20.H8, V21.H8, V22.H8, V23.H8)
+
+	MOVD $8192, R9
+	VDUP R9, V25.H8
+
+	CMP $4, R5
+	BEQ prph4
+
+prph:
+	MOVD R2, R7
+	MOVD R0, R8
+	MOVD R5, R10
+
+prphcol:
+	TAPS8(R7)
+	SQRDMULH(3, 3, 25)
+	VST1 [V3.H8], (R8)
+
+	ADD  $8, R7
+	ADD  $16, R8
+	SUB  $8, R10
+	CBNZ R10, prphcol
+
+	ADD  R3, R2
+	ADD  R5<<1, R0, R0
+	SUB  $1, R6
+	CBNZ R6, prph
+
+	RET
+
+prph4:
+	TAPS8(R2)
+	SQRDMULH(3, 3, 25)
+	VMOV V3.D[0], R9
+	MOVD R9, (R0)
+
+	ADD  R3, R2
+	ADD  $8, R0, R0
+	SUB  $1, R6
+	CBNZ R6, prph4
+
+	RET
+
+// func prep8tapVNEON(tmp *int16, src *uint8, srcStride int, f *[8]int8, w, h int)
+TEXT ·prep8tapVNEON(SB), NOSPLIT, $0-48
+	MOVD dst+0(FP), R0
+	MOVD src+8(FP), R2
+	MOVD srcStride+16(FP), R3
+	MOVD f+24(FP), R4
+	MOVD w+32(FP), R5
+	MOVD h+40(FP), R6
+
+	LOADTAPS(R4, V16.H8, V17.H8, V18.H8, V19.H8, V20.H8, V21.H8, V22.H8, V23.H8)
+
+	MOVD $8192, R11
+	VDUP R11, V25.H8
+
+	CMP $4, R5
+	BEQ prpv4
+
+prpv:
+	MOVD R2, R7
+	MOVD R0, R8
+	MOVD R5, R10
+
+prpvcol:
+	MOVD R7, R9
+	VTAP(MUL, 16)
+	VTAP(MLA, 17)
+	VTAP(MLA, 18)
+	VTAP(MLA, 19)
+	VTAP(MLA, 20)
+	VTAP(MLA, 21)
+	VTAP(MLA, 22)
+	VTAP(MLA, 23)
+	SQRDMULH(3, 3, 25)
+	VST1 [V3.H8], (R8)
+
+	ADD  $8, R7
+	ADD  $16, R8
+	SUB  $8, R10
+	CBNZ R10, prpvcol
+
+	ADD  R3, R2
+	ADD  R5<<1, R0, R0
+	SUB  $1, R6
+	CBNZ R6, prpv
+
+	RET
+
+prpv4:
+	MOVD R2, R9
+	VTAP(MUL, 16)
+	VTAP(MLA, 17)
+	VTAP(MLA, 18)
+	VTAP(MLA, 19)
+	VTAP(MLA, 20)
+	VTAP(MLA, 21)
+	VTAP(MLA, 22)
+	VTAP(MLA, 23)
+	SQRDMULH(3, 3, 25)
+	VMOV V3.D[0], R9
+	MOVD R9, (R0)
+
+	ADD  R3, R2
+	ADD  $8, R0, R0
+	SUB  $1, R6
+	CBNZ R6, prpv4
+
+	RET
+
+// func prep8tapHVNEON(tmp *int16, src *uint8, srcStride int, mid *int16, fh, fv *[8]int8, w, h int)
+TEXT ·prep8tapHVNEON(SB), NOSPLIT, $0-64
+	MOVD dst+0(FP), R0
+	MOVD src+8(FP), R2
+	MOVD srcStride+16(FP), R3
+	MOVD mid+24(FP), R11
+	MOVD fh+32(FP), R4
+	MOVD w+48(FP), R5
+	MOVD h+56(FP), R6
+	MOVD R5, R14
+
+	LOADTAPS(R4, V16.H8, V17.H8, V18.H8, V19.H8, V20.H8, V21.H8, V22.H8, V23.H8)
+	MOVD fv+40(FP), R4
+	LOADTAPS(R4, V24.H8, V25.H8, V26.H8, V27.H8, V28.H8, V29.H8, V30.H8, V31.H8)
+
+	MOVD $8192, R9
+	VDUP R9, V15.H8
+	MOVD $32, R9
+	VDUP R9, V14.S4
+
+	CMP $4, R5
+	BEQ prphv4
+
+prphvstrip:
+	MOVD R2, R7
+	MOVD R11, R9
+	MOVD R6, R10
+	ADD  $7, R10
+
+prphvh:
+	TAPS8(R7)
+	SQRDMULH(3, 3, 15)
+	VST1 [V3.H8], (R9)
+
+	ADD  R3, R7
+	ADD  $16, R9
+	SUB  $1, R10
+	CBNZ R10, prphvh
+
+	MOVD R11, R9
+	MOVD R0, R8
+	MOVD R6, R10
+
+prphvv:
+	MOVD R9, R12
+	HVTAP(SMULL, SMULL2, 24)
+	HVTAP(SMLAL, SMLAL2, 25)
+	HVTAP(SMLAL, SMLAL2, 26)
+	HVTAP(SMLAL, SMLAL2, 27)
+	HVTAP(SMLAL, SMLAL2, 28)
+	HVTAP(SMLAL, SMLAL2, 29)
+	HVTAP(SMLAL, SMLAL2, 30)
+	HVTAP(SMLAL, SMLAL2, 31)
+
+	VADD  V14.S4, V5.S4, V5.S4
+	VADD  V14.S4, V6.S4, V6.S4
+	SSHR6(5, 5)
+	SSHR6(6, 6)
+	VUZP1 V6.H8, V5.H8, V5.H8
+	VST1  [V5.H8], (R8)
+
+	ADD  $16, R9
+	ADD  R14<<1, R8, R8
+	SUB  $1, R10
+	CBNZ R10, prphvv
+
+	ADD  $8, R2
+	ADD  $16, R0
+	SUB  $8, R5
+	CBNZ R5, prphvstrip
+
+	RET
+
+prphv4:
+	MOVD R2, R7
+	MOVD R11, R9
+	MOVD R6, R10
+	ADD  $7, R10
+
+prphv4h:
+	TAPS8(R7)
+	SQRDMULH(3, 3, 15)
+	VST1 [V3.H8], (R9)
+
+	ADD  R3, R7
+	ADD  $16, R9
+	SUB  $1, R10
+	CBNZ R10, prphv4h
+
+	MOVD R11, R9
+	MOVD R0, R8
+	MOVD R6, R10
+
+prphv4v:
+	MOVD R9, R12
+	HVTAP(SMULL, SMULL2, 24)
+	HVTAP(SMLAL, SMLAL2, 25)
+	HVTAP(SMLAL, SMLAL2, 26)
+	HVTAP(SMLAL, SMLAL2, 27)
+	HVTAP(SMLAL, SMLAL2, 28)
+	HVTAP(SMLAL, SMLAL2, 29)
+	HVTAP(SMLAL, SMLAL2, 30)
+	HVTAP(SMLAL, SMLAL2, 31)
+
+	VADD  V14.S4, V5.S4, V5.S4
+	VADD  V14.S4, V6.S4, V6.S4
+	SSHR6(5, 5)
+	SSHR6(6, 6)
+	VUZP1 V6.H8, V5.H8, V5.H8
+	VMOV  V5.D[0], R13
+	MOVD  R13, (R8)
+
+	ADD  $16, R9
+	ADD  $8, R8
+	SUB  $1, R10
+	CBNZ R10, prphv4v
+
+	RET
+
+#define SSHR4(Vd, Vn)    WORD $(0x4F000400 | ((64 - 4) << 16) | ((Vn) << 5) | (Vd))
+#define SSHR8B(Vd, Vn)   WORD $(0x4F000400 | ((64 - 8) << 16) | ((Vn) << 5) | (Vd))
+
+#define BILHN                       \
+	VLD1   (R2), [V0.B8];       \
+	ADD    $1, R2, R11;         \
+	VLD1   (R11), [V1.B8];      \
+	VUSHLL $0, V0.B8, V0.H8;    \
+	VUSHLL $0, V1.B8, V1.H8;    \
+	MUL(2, 0, 24);             \
+	MLA(2, 1, 25)
+
+#define BILVN                       \
+	VLD1   (R2), [V0.B8];       \
+	ADD    R3, R2, R11;         \
+	VLD1   (R11), [V1.B8];      \
+	VUSHLL $0, V0.B8, V0.H8;    \
+	VUSHLL $0, V1.B8, V1.H8;    \
+	MUL(2, 0, 24);             \
+	MLA(2, 1, 25)
+
+#define BILCOEFN(OFF)        \
+	MOVW OFF, R9;        \
+	MOVD $16, R10;       \
+	SUB  R9, R10, R10;   \
+	VDUP R10, V24.H8;    \
+	VDUP R9, V25.H8
+
+// func putBilinHNEON(dst *uint8, dstStride int, src *uint8, srcStride int, mx int32, w, h int)
+TEXT ·putBilinHNEON(SB), NOSPLIT, $0-56
+	MOVD dst+0(FP), R0
+	MOVD dstStride+8(FP), R1
+	MOVD src+16(FP), R2
+	MOVD srcStride+24(FP), R3
+	MOVD w+40(FP), R5
+	MOVD h+48(FP), R6
+
+	BILCOEFN(mx+32(FP))
+	MOVD $2048, R9
+	VDUP R9, V26.H8
+
+blhrow:
+	MOVD R2, R7
+	MOVD R0, R8
+	MOVD R5, R12
+
+blhcol:
+	BILHN
+	SQRDMULH(2, 2, 26)
+	SQXTUN(2, 2)
+	CMP  $4, R12
+	BLE  blh4
+	VMOV V2.D[0], R13
+	MOVD R13, (R8)
+	B    blhnext
+
+blh4:
+	VMOV V2.S[0], R13
+	MOVW R13, (R8)
+
+blhnext:
+	ADD  $8, R2
+	ADD  $8, R8
+	SUB  $8, R12
+	CMP  $0, R12
+	BGT  blhcol
+
+	ADD  R3, R7, R2
+	ADD  R1, R0, R0
+	SUB  $1, R6
+	CBNZ R6, blhrow
+
+	RET
+
+// func putBilinVNEON(dst *uint8, dstStride int, src *uint8, srcStride int, my int32, w, h int)
+TEXT ·putBilinVNEON(SB), NOSPLIT, $0-56
+	MOVD dst+0(FP), R0
+	MOVD dstStride+8(FP), R1
+	MOVD src+16(FP), R2
+	MOVD srcStride+24(FP), R3
+	MOVD w+40(FP), R5
+	MOVD h+48(FP), R6
+
+	BILCOEFN(my+32(FP))
+	MOVD $2048, R9
+	VDUP R9, V26.H8
+
+blvrow:
+	MOVD R2, R7
+	MOVD R0, R8
+	MOVD R5, R12
+
+blvcol:
+	BILVN
+	SQRDMULH(2, 2, 26)
+	SQXTUN(2, 2)
+	CMP  $4, R12
+	BLE  blv4
+	VMOV V2.D[0], R13
+	MOVD R13, (R8)
+	B    blvnext
+
+blv4:
+	VMOV V2.S[0], R13
+	MOVW R13, (R8)
+
+blvnext:
+	ADD  $8, R2
+	ADD  $8, R8
+	SUB  $8, R12
+	CMP  $0, R12
+	BGT  blvcol
+
+	ADD  R3, R7, R2
+	ADD  R1, R0, R0
+	SUB  $1, R6
+	CBNZ R6, blvrow
+
+	RET
+
+// func prepBilinHNEON(tmp *int16, src *uint8, srcStride int, mx int32, w, h int)
+TEXT ·prepBilinHNEON(SB), NOSPLIT, $0-48
+	MOVD dst+0(FP), R0
+	MOVD src+8(FP), R2
+	MOVD srcStride+16(FP), R3
+	MOVD w+32(FP), R5
+	MOVD h+40(FP), R6
+
+	BILCOEFN(mx+24(FP))
+
+prblhrow:
+	MOVD R2, R7
+	MOVD R0, R8
+	MOVD R5, R12
+
+prblhcol:
+	BILHN
+	CMP  $4, R12
+	BLE  prblh4
+	VST1 [V2.H8], (R8)
+	B    prblhnext
+
+prblh4:
+	VMOV V2.D[0], R13
+	MOVD R13, (R8)
+
+prblhnext:
+	ADD  $8, R2
+	ADD  $16, R8
+	SUB  $8, R12
+	CMP  $0, R12
+	BGT  prblhcol
+
+	ADD  R3, R7, R2
+	ADD  R5<<1, R0, R0
+	SUB  $1, R6
+	CBNZ R6, prblhrow
+
+	RET
+
+// func prepBilinVNEON(tmp *int16, src *uint8, srcStride int, my int32, w, h int)
+TEXT ·prepBilinVNEON(SB), NOSPLIT, $0-48
+	MOVD dst+0(FP), R0
+	MOVD src+8(FP), R2
+	MOVD srcStride+16(FP), R3
+	MOVD w+32(FP), R5
+	MOVD h+40(FP), R6
+
+	BILCOEFN(my+24(FP))
+
+prblvrow:
+	MOVD R2, R7
+	MOVD R0, R8
+	MOVD R5, R12
+
+prblvcol:
+	BILVN
+	CMP  $4, R12
+	BLE  prblv4
+	VST1 [V2.H8], (R8)
+	B    prblvnext
+
+prblv4:
+	VMOV V2.D[0], R13
+	MOVD R13, (R8)
+
+prblvnext:
+	ADD  $8, R2
+	ADD  $16, R8
+	SUB  $8, R12
+	CMP  $0, R12
+	BGT  prblvcol
+
+	ADD  R3, R7, R2
+	ADD  R5<<1, R0, R0
+	SUB  $1, R6
+	CBNZ R6, prblvrow
+
+	RET
+
+#define BILVMIDN(SHIFT)                \
+	VLD1   (R8), [V0.H8];          \
+	ADD    R14, R8, R11;           \
+	VLD1   (R11), [V1.H8];         \
+	SMULL(4, 0, 24);               \
+	SMULL2(5, 0, 24);              \
+	SMLAL(4, 1, 25);               \
+	SMLAL2(5, 1, 25);              \
+	VADD   V27.S4, V4.S4, V4.S4;   \
+	VADD   V27.S4, V5.S4, V5.S4;   \
+	SHIFT(4, 4);                   \
+	SHIFT(5, 5);                   \
+	VUZP1  V5.H8, V4.H8, V2.H8
+
+// func putBilinHVNEON(dst *uint8, dstStride int, src *uint8, srcStride int, mid *int16, mx, my int32, w, h int)
+TEXT ·putBilinHVNEON(SB), NOSPLIT, $0-64
+	MOVD dst+0(FP), R0
+	MOVD dstStride+8(FP), R1
+	MOVD src+16(FP), R2
+	MOVD srcStride+24(FP), R3
+	MOVD mid+32(FP), R15
+	MOVD w+48(FP), R5
+	MOVD h+56(FP), R6
+
+	BILCOEFN(mx+40(FP))
+
+	MOVD R15, R4
+	MOVD R6, R16
+	ADD  $1, R16
+
+blhvh:
+	MOVD R2, R7
+	MOVD R4, R8
+	MOVD R5, R12
+
+blhvhcol:
+	BILHN
+	VST1 [V2.H8], (R8)
+	ADD  $8, R2
+	ADD  $16, R8
+	SUB  $8, R12
+	CMP  $0, R12
+	BGT  blhvhcol
+
+	ADD  R3, R7, R2
+	ADD  R5<<1, R4, R4
+	SUB  $1, R16
+	CBNZ R16, blhvh
+
+	BILCOEFN(my+44(FP))
+	MOVD $128, R9
+	VDUP R9, V27.S4
+	LSL  $1, R5, R14
+	MOVD R15, R4
+
+blhvv:
+	MOVD R4, R8
+	MOVD R0, R17
+	MOVD R5, R12
+
+blhvvcol:
+	BILVMIDN(SSHR8B)
+	SQXTUN(2, 2)
+	CMP  $4, R12
+	BLE  blhv4
+	VMOV V2.D[0], R13
+	MOVD R13, (R17)
+	B    blhvnext
+
+blhv4:
+	VMOV V2.S[0], R13
+	MOVW R13, (R17)
+
+blhvnext:
+	ADD  $16, R8
+	ADD  $8, R17
+	SUB  $8, R12
+	CMP  $0, R12
+	BGT  blhvvcol
+
+	ADD  R14, R4, R4
+	ADD  R1, R0, R0
+	SUB  $1, R6
+	CBNZ R6, blhvv
+
+	RET
+
+// func prepBilinHVNEON(tmp *int16, src *uint8, srcStride int, mid *int16, mx, my int32, w, h int)
+TEXT ·prepBilinHVNEON(SB), NOSPLIT, $0-56
+	MOVD dst+0(FP), R0
+	MOVD src+8(FP), R2
+	MOVD srcStride+16(FP), R3
+	MOVD mid+24(FP), R15
+	MOVD w+40(FP), R5
+	MOVD h+48(FP), R6
+
+	BILCOEFN(mx+32(FP))
+
+	MOVD R15, R4
+	MOVD R6, R16
+	ADD  $1, R16
+
+prblhvh:
+	MOVD R2, R7
+	MOVD R4, R8
+	MOVD R5, R12
+
+prblhvhcol:
+	BILHN
+	VST1 [V2.H8], (R8)
+	ADD  $8, R2
+	ADD  $16, R8
+	SUB  $8, R12
+	CMP  $0, R12
+	BGT  prblhvhcol
+
+	ADD  R3, R7, R2
+	ADD  R5<<1, R4, R4
+	SUB  $1, R16
+	CBNZ R16, prblhvh
+
+	BILCOEFN(my+36(FP))
+	MOVD $8, R9
+	VDUP R9, V27.S4
+	LSL  $1, R5, R14
+	MOVD R15, R4
+
+prblhvv:
+	MOVD R4, R8
+	MOVD R0, R17
+	MOVD R5, R12
+
+prblhvvcol:
+	BILVMIDN(SSHR4)
+	CMP  $4, R12
+	BLE  prblhv4
+	VST1 [V2.H8], (R17)
+	B    prblhvnext
+
+prblhv4:
+	VMOV V2.D[0], R13
+	MOVD R13, (R17)
+
+prblhvnext:
+	ADD  $16, R8
+	ADD  $16, R17
+	SUB  $8, R12
+	CMP  $0, R12
+	BGT  prblhvvcol
+
+	ADD  R14, R4, R4
+	ADD  R14, R0, R0
+	SUB  $1, R6
+	CBNZ R6, prblhvv
+
+	RET
