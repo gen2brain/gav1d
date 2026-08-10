@@ -14,6 +14,18 @@ func cdefFilter16AVX2(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
 //go:noescape
 func cdefFilterClip16AVX2(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
 
+//go:noescape
+func cdefFilter2AVX2(dst *uint8, dstStride int, tmp *int16, p *cdefParams)
+
+//go:noescape
+func cdefFilterClip2AVX2(dst *uint8, dstStride int, tmp *int16, p *cdefParams)
+
+//go:noescape
+func cdefFilter2_16AVX2(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
+
+//go:noescape
+func cdefFilterClip2_16AVX2(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
+
 func cdefFilterBlockAVX2(tmp []int16, dst []uint8, dstOff, dstStride int,
 	left []uint8, leftOff int, top []uint8, topOff int, bottom []uint8, bottomOff int,
 	priStrength, secStrength, dir, damping, w, h, edges int, bitdepthMax int32,
@@ -27,7 +39,17 @@ func cdefFilterBlockAVX2(tmp []int16, dst []uint8, dstOff, dstStride int,
 	p := cdefParamsFor(priStrength, secStrength, dir, damping, w, h, bitdepthMax)
 
 	if priStrength != 0 && secStrength != 0 {
-		cdefFilterClipAVX2(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
+		if h&1 == 0 {
+			cdefFilterClip2AVX2(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
+		} else {
+			cdefFilterClipAVX2(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
+		}
+
+		return
+	}
+
+	if h&1 == 0 {
+		cdefFilter2AVX2(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
 
 		return
 	}
@@ -48,7 +70,17 @@ func cdefFilterBlock16AVX2(tmp []int16, dst []uint16, dstOff, dstStride int,
 	p := cdefParamsFor(priStrength, secStrength, dir, damping, w, h, bitdepthMax)
 
 	if priStrength != 0 && secStrength != 0 {
-		cdefFilterClip16AVX2(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
+		if h&1 == 0 {
+			cdefFilterClip2_16AVX2(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
+		} else {
+			cdefFilterClip16AVX2(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
+		}
+
+		return
+	}
+
+	if h&1 == 0 {
+		cdefFilter2_16AVX2(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
 
 		return
 	}
