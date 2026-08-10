@@ -22,7 +22,7 @@ type dspContext[P pixel] struct {
 		luma []P, lumaOff int, scaling []uint8, grain []int16,
 		n, shift, minValue, maxValue int, sx, lumaMult, mult, offset, pixelMax int, csfl bool)
 
-	put8tap func(dst []P, dstOff, dstStride int, src []P, srcOff, srcStride,
+	put8tap func(mid []int16, dst []P, dstOff, dstStride int, src []P, srcOff, srcStride,
 		w, h, mx, my, filterType int, bitdepthMax int32)
 
 	itxClip func(tmp []int32, rnd int32, shift int, lo, hi int32)

@@ -75,7 +75,7 @@ func runMC[P pixel](b, iter, filter2d, isPrep, w, h, mx, my int, bitdepthMax int
 	out := make([]int, 0, w*h)
 	if isPrep != 0 {
 		tmp := make([]int16, 128*128)
-		mct(tmp, src, base, mcStride, w, h, mx, my, filter2d, bitdepthMax)
+		mct(mcMidBuf[:], tmp, src, base, mcStride, w, h, mx, my, filter2d, bitdepthMax)
 		for i := range w * h {
 			out = append(out, int(tmp[i]))
 		}
@@ -83,7 +83,7 @@ func runMC[P pixel](b, iter, filter2d, isPrep, w, h, mx, my int, bitdepthMax int
 		return out
 	}
 
-	mc(newDspGo[P](), m.dst, base, mcStride, src, base, mcStride, w, h, mx, my,
+	mc(newDspGo[P](), mcMidBuf[:], m.dst, base, mcStride, src, base, mcStride, w, h, mx, my,
 		filter2d, bitdepthMax)
 
 	return m.dump(w, h)
@@ -192,6 +192,8 @@ func runMCEmuEdge[P pixel](b, iter, w, h, iw, ih, x, y int, bitdepthMax int32) [
 
 	return m.dump(w, h)
 }
+
+var mcMidBuf [135 * mcMidStride]int16
 
 func TestMC(t *testing.T) {
 	sc, closeFixture := openFixture(t, "mc.txt")
@@ -377,9 +379,9 @@ func TestPut8tapAsm(t *testing.T) {
 						for _, h := range heights {
 							copy(got, m.dst)
 							copy(want, m.dst)
-							d.put8tap(got, base, mcStride, m.src, base, mcStride,
+							d.put8tap(mcMidBuf[:], got, base, mcStride, m.src, base, mcStride,
 								w, h, mx, my, filter2d, 255)
-							ref.put8tap(want, base, mcStride, m.src, base, mcStride,
+							ref.put8tap(mcMidBuf[:], want, base, mcStride, m.src, base, mcStride,
 								w, h, mx, my, filter2d, 255)
 
 							for i := range want {
@@ -424,9 +426,9 @@ func TestPut8tap16Asm(t *testing.T) {
 						for _, h := range heights {
 							copy(got, m.dst)
 							copy(want, m.dst)
-							d.put8tap(got, base, mcStride, m.src, base, mcStride,
+							d.put8tap(mcMidBuf[:], got, base, mcStride, m.src, base, mcStride,
 								w, h, mx, my, filter2d, 255)
-							ref.put8tap(want, base, mcStride, m.src, base, mcStride,
+							ref.put8tap(mcMidBuf[:], want, base, mcStride, m.src, base, mcStride,
 								w, h, mx, my, filter2d, 255)
 
 							for i := range want {
@@ -446,4 +448,42 @@ func TestPut8tap16Asm(t *testing.T) {
 	}
 
 	t.Logf("%d cases", cases)
+}
+
+func BenchmarkPut8tap(b *testing.B) {
+	d := newDsp[uint8]()
+	base := mcPad*mcStride + mcPad
+	m := mcFill[uint8](0, 0, 255)
+	dst := make([]uint8, mcRows*mcStride)
+
+	for _, w := range []int{2, 4, 8, 16} {
+		for _, sub := range []struct {
+			name   string
+			mx, my int
+		}{{"h", 7, 0}, {"v", 0, 7}, {"hv", 7, 7}} {
+			b.Run(strconv.Itoa(w)+"x"+strconv.Itoa(w)+"-"+sub.name, func(b *testing.B) {
+				for b.Loop() {
+					d.put8tap(mcMidBuf[:], dst, base, mcStride, m.src, base, mcStride,
+						w, w, sub.mx, sub.my, filter2dFilterType[0], 255)
+				}
+				b.ReportMetric(float64(w*w)*float64(b.N)/b.Elapsed().Seconds()/1e6, "Mpixel/s")
+			})
+		}
+	}
+}
+
+func BenchmarkPrep8tap(b *testing.B) {
+	base := mcPad*mcStride + mcPad
+	m := mcFill[uint8](0, 0, 255)
+	tmp := make([]int16, 128*128)
+
+	for _, w := range []int{4, 8, 16} {
+		b.Run(strconv.Itoa(w)+"x"+strconv.Itoa(w), func(b *testing.B) {
+			for b.Loop() {
+				mct(mcMidBuf[:], tmp, m.src, base, mcStride, w, w, 7, 7,
+					filter2dFilterType[0], 255)
+			}
+			b.ReportMetric(float64(w*w)*float64(b.N)/b.Elapsed().Seconds()/1e6, "Mpixel/s")
+		})
+	}
 }

@@ -17,7 +17,7 @@ func put8tapHVRVV(dst *uint8, dstStride int, src *uint8, srcStride int, mid *int
 // cheap to clear and one vector covers a strip.
 const mcMidCols = 16
 
-func put8tap8RVV(dst []uint8, dstOff, dstStride int, src []uint8, srcOff, srcStride,
+func put8tap8RVV(mid []int16, dst []uint8, dstOff, dstStride int, src []uint8, srcOff, srcStride,
 	w, h, mx, my, filterType int, bitdepthMax int32,
 ) {
 	fh := hFilter(mx, w, filterType)
@@ -26,7 +26,6 @@ func put8tap8RVV(dst []uint8, dstOff, dstStride int, src []uint8, srcOff, srcStr
 	if w >= 8 {
 		switch {
 		case fh != nil && fv != nil:
-			var mid [135 * mcMidCols]int16
 
 			put8tapHVRVV(&dst[dstOff], dstStride, &src[srcOff-3*srcStride-3],
 				srcStride, &mid[0], fh, fv, w, h)
@@ -44,6 +43,6 @@ func put8tap8RVV(dst []uint8, dstOff, dstStride int, src []uint8, srcOff, srcStr
 		}
 	}
 
-	put8tap(dst, dstOff, dstStride, src, srcOff, srcStride, w, h, mx, my,
+	put8tap(mid, dst, dstOff, dstStride, src, srcOff, srcStride, w, h, mx, my,
 		filterType, bitdepthMax)
 }

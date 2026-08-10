@@ -16,16 +16,16 @@ func put8tapHVAVX2(dst *uint8, dstStride int, src *uint8, srcStride int, mid *in
 // the scratch is cheap to clear and stays in L1 between the two passes.
 const mcMidCols = 16
 
-func put8tap8AVX2(dst []uint8, dstOff, dstStride int, src []uint8, srcOff, srcStride,
+func put8tap8AVX2(mid []int16, dst []uint8, dstOff, dstStride int, src []uint8, srcOff, srcStride,
 	w, h, mx, my, filterType int, bitdepthMax int32,
 ) {
 	fh := hFilter(mx, w, filterType)
 	fv := vFilter(my, h, filterType)
 
 	if w >= 8 {
+
 		switch {
 		case fh != nil && fv != nil:
-			var mid [135 * mcMidCols]int16
 			var fvw [8]int16
 			for i, v := range fv {
 				fvw[i] = int16(v)
@@ -47,6 +47,6 @@ func put8tap8AVX2(dst []uint8, dstOff, dstStride int, src []uint8, srcOff, srcSt
 		}
 	}
 
-	put8tap(dst, dstOff, dstStride, src, srcOff, srcStride, w, h, mx, my,
+	put8tap(mid, dst, dstOff, dstStride, src, srcOff, srcStride, w, h, mx, my,
 		filterType, bitdepthMax)
 }
