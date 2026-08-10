@@ -12,6 +12,9 @@ func cflPredict8NEON(dst *uint8, stride, w, h int, dc int32, ac *int16, alpha, m
 func cflPredict16NEON(dst *uint16, stride, w, h int, dc int32, ac *int16, alpha, max int32)
 
 //go:noescape
+func cflAcMain8NEON(ac *int16, acStride int, ypx *uint8, stride, n, rows, ssHor, ssVer int)
+
+//go:noescape
 func z2Top8NEON(dst *uint8, edge *uint8, n int, frac int32)
 
 //go:noescape
@@ -19,6 +22,7 @@ func z2Top16NEON(dst *uint16, edge *uint16, n int, frac int32)
 
 func init() {
 	cflAcNorm = cflAcNormNEON
+	cflAcMain8Asm = cflAcMain8NEON
 	cflPredict8Asm = cflPredict8NEON
 	cflPredict16Asm = cflPredict16NEON
 	z2Top8Asm = z2Top8NEON

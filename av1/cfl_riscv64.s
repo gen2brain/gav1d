@@ -212,3 +212,116 @@ z2t16:
 	BNE X0, X12, z2t16
 
 	RET
+
+// There is no pairwise add, so the two halves of a chroma pair come from two
+// strided loads and are added after widening.
+// func cflAcMain8RVV(ac *int16, acStride int, ypx *uint8, stride, n, rows, ssHor, ssVer int)
+TEXT ·cflAcMain8RVV(SB), NOSPLIT, $0-64
+	MOV ac+0(FP), X10
+	MOV acStride+8(FP), X11
+	MOV ypx+16(FP), X12
+	MOV stride+24(FP), X13
+	MOV n+32(FP), X14
+	MOV rows+40(FP), X15
+	MOV ssHor+48(FP), X16
+	MOV ssVer+56(FP), X17
+
+	SLL $1, X11, X11
+	MOV $2, X18
+	BEQ X0, X16, ac444row
+	BEQ X0, X17, ac422row
+
+ac420row:
+	MOV X12, X19
+	MOV X10, X20
+	MOV X14, X21
+
+ac420col:
+	VSETVLI  X21, E8, MF2, TA, MA, X22
+	VLSE8V   (X19), X18, V0
+	ADD      $1, X19, X23
+	VLSE8V   (X23), X18, V1
+	ADD      X13, X19, X24
+	VLSE8V   (X24), X18, V2
+	ADD      $1, X24, X24
+	VLSE8V   (X24), X18, V3
+	VSETVLI  X21, E16, M1, TA, MA, X22
+	VZEXTVF2 V0, V4
+	VZEXTVF2 V1, V5
+	VZEXTVF2 V2, V6
+	VZEXTVF2 V3, V7
+	VADDVV   V5, V4, V4
+	VADDVV   V7, V6, V6
+	VADDVV   V6, V4, V4
+	VSLLVI   $1, V4, V4
+	VSE16V   V4, (X20)
+
+	SLL $1, X22, X25
+	ADD X25, X19, X19
+	ADD X25, X20, X20
+	SUB X22, X21, X21
+	BNE X0, X21, ac420col
+
+	ADD X11, X10, X10
+	SLL $1, X13, X25
+	ADD X25, X12, X12
+	ADD $-1, X15, X15
+	BNE X0, X15, ac420row
+
+	RET
+
+ac422row:
+	MOV X12, X19
+	MOV X10, X20
+	MOV X14, X21
+
+ac422col:
+	VSETVLI  X21, E8, MF2, TA, MA, X22
+	VLSE8V   (X19), X18, V0
+	ADD      $1, X19, X23
+	VLSE8V   (X23), X18, V1
+	VSETVLI  X21, E16, M1, TA, MA, X22
+	VZEXTVF2 V0, V4
+	VZEXTVF2 V1, V5
+	VADDVV   V5, V4, V4
+	VSLLVI   $2, V4, V4
+	VSE16V   V4, (X20)
+
+	SLL $1, X22, X25
+	ADD X25, X19, X19
+	ADD X25, X20, X20
+	SUB X22, X21, X21
+	BNE X0, X21, ac422col
+
+	ADD X11, X10, X10
+	ADD X13, X12, X12
+	ADD $-1, X15, X15
+	BNE X0, X15, ac422row
+
+	RET
+
+ac444row:
+	MOV X12, X19
+	MOV X10, X20
+	MOV X14, X21
+
+ac444col:
+	VSETVLI  X21, E8, MF2, TA, MA, X22
+	VLE8V    (X19), V0
+	VSETVLI  X21, E16, M1, TA, MA, X22
+	VZEXTVF2 V0, V4
+	VSLLVI   $3, V4, V4
+	VSE16V   V4, (X20)
+
+	ADD X22, X19, X19
+	SLL $1, X22, X25
+	ADD X25, X20, X20
+	SUB X22, X21, X21
+	BNE X0, X21, ac444col
+
+	ADD X11, X10, X10
+	ADD X13, X12, X12
+	ADD $-1, X15, X15
+	BNE X0, X15, ac444row
+
+	RET
