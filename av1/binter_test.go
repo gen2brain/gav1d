@@ -336,7 +336,7 @@ func TestDecodeBInter(t *testing.T) {
 		ts.lastQidx = 128
 		ts.lflvl = &f.lf.lvl
 
-		tc := &taskContext[uint8, int16]{f: f, ts: ts, bx: bx4, by: by4}
+		tc := &taskContext[uint8, int16]{scratch: &scratch[uint8]{}, f: f, ts: ts, bx: bx4, by: by4}
 		tc.a = new(blockContext)
 		tc.lfMask = new(av1Filter)
 		tc.curSbCdefIdx = []int8{-1, -1, -1, -1}

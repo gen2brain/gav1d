@@ -63,7 +63,7 @@ func TestRefSelection(t *testing.T) {
 		p += 7
 
 		ts := new(tileState)
-		tc := &taskContext[uint8, int16]{ts: ts}
+		tc := &taskContext[uint8, int16]{scratch: &scratch[uint8]{}, ts: ts}
 		tc.a = new(blockContext)
 
 		for i := range 32 {

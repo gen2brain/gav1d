@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 func planeRows(pic *Picture, w *bytes.Buffer) {
@@ -52,8 +53,21 @@ func decodeIVF(t *testing.T, path string, threads int) []byte {
 		t.Fatalf("%s: not an IVF file", path)
 	}
 
-	var out bytes.Buffer
 	d := Decoder{Threads: threads}
+
+	return decodeIVFWith(t, &d, path)
+}
+
+// decodeIVFWith decodes into a decoder the caller has already set up.
+func decodeIVFWith(t *testing.T, d *Decoder, path string) []byte {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
 
 	for _, chunk := range ivfChunks(data) {
 		pics, err := d.DecodeOBUs(chunk)
@@ -67,6 +81,53 @@ func decodeIVF(t *testing.T, path string, threads int) []byte {
 	}
 
 	return out.Bytes()
+}
+
+// poisonedScratch fills a task scratch with a byte no field would hold, so a
+// decoder that reads any part of one before writing it cannot match dav1d.
+func poisonedScratch[P pixel]() *scratch[P] {
+	s := new(scratch[P])
+	b := unsafe.Slice((*byte)(unsafe.Pointer(s)), unsafe.Sizeof(*s))
+	for i := range b {
+		b[i] = 0xa5
+	}
+
+	return s
+}
+
+// TestScratchReuse decodes with a scratch pool that is already full of dirty
+// buffers, which is what every frame after the first gets once the pool is
+// warm. The streams still have to match dav1d.
+func TestScratchReuse(t *testing.T) {
+	dir := "testdata/streams"
+
+	f, err := os.Open(filepath.Join(dir, "md5.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) != 2 {
+			continue
+		}
+		name, want := fields[0], fields[1]
+
+		t.Run(name, func(t *testing.T) {
+			d := Decoder{Threads: 1}
+			for range 8 {
+				d.tc.Put(poisonedScratch[uint8]())
+				d.tc.Put(poisonedScratch[uint16]())
+			}
+
+			sum := md5.Sum(decodeIVFWith(t, &d, filepath.Join(dir, name)))
+			if hex.EncodeToString(sum[:]) != want {
+				t.Fatalf("md5 = %s, want %s", hex.EncodeToString(sum[:]), want)
+			}
+		})
+	}
 }
 
 // TestDecodeStreams decodes intra-only streams encoded with all post-filters

@@ -37,7 +37,7 @@ func lrStripe[P pixel, C coef](t *taskContext[P, C], p []P, pOff int,
 			left []P, leftOff int, lpf []P, lpfOff, w, h int,
 			params *looprestorationParams, edges int, bitdepthMax int32,
 		) {
-			lrWiener(lr, &t.lrw, dst, dstOff, stride, left, leftOff, lpf, lpfOff,
+			lrWiener(lr, &t.scratch.lrw, dst, dstOff, stride, left, leftOff, lpf, lpfOff,
 				w, h, params, edges, bitdepthMax)
 		}
 	} else {

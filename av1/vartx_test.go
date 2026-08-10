@@ -53,7 +53,7 @@ func TestVartxTree(t *testing.T) {
 			bh:       64,
 		}
 		ts := new(tileState)
-		tc := &taskContext[uint8, int16]{f: f, ts: ts, bx: bx, by: by}
+		tc := &taskContext[uint8, int16]{scratch: &scratch[uint8]{}, f: f, ts: ts, bx: bx, by: by}
 		tc.a = new(blockContext)
 
 		ts.msac.init(buf, update == 0)

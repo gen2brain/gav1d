@@ -148,7 +148,7 @@ func TestWarpRef(t *testing.T) {
 
 		ts := new(tileState)
 		ts.tiling.colEnd = colEnd
-		tc := &taskContext[uint8, int16]{ts: ts, bx: bx, by: by}
+		tc := &taskContext[uint8, int16]{scratch: &scratch[uint8]{}, ts: ts, bx: bx, by: by}
 		tc.rt.r = make([]refmvsBlock, warprefRows*warprefStride)
 		for i := range warprefRows {
 			tc.rt.rows[i] = i * warprefStride

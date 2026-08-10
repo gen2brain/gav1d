@@ -148,6 +148,7 @@ func setupFrame[P pixel, C coef](d *Decoder, tiles []tileGroup, p *pendingFrame)
 		layout:   seqHdr.layout,
 		bpc:      8 + 2*int(seqHdr.hbd),
 		pool:     &d.pool,
+		tc:       &d.tc,
 
 		reconIntra: reconBIntra[P, C],
 		reconInter: reconBInter[P, C],
@@ -603,9 +604,11 @@ func (f *frameContext[P, C]) runFrame(
 ) error {
 	hdr := f.frameHdr
 	pt := f.newTaskContext()
+	defer f.putTaskContext(pt)
 
 	if f.nThreads <= 1 {
 		t := f.newTaskContext()
+		defer f.putTaskContext(t)
 		for tr := range nRows {
 			sbhEnd := min(int(hdr.tiling.rowStartSb[tr+1]), f.sbh)
 			for sby := int(hdr.tiling.rowStartSb[tr]); sby < sbhEnd; sby++ {
@@ -644,6 +647,7 @@ func (f *frameContext[P, C]) runFrame(
 		go func() {
 			defer wg.Done()
 			t := f.newTaskContext()
+			defer f.putTaskContext(t)
 			for i := range next {
 				tr, tc := i/nCols, i%nCols
 				sbhEnd := min(int(hdr.tiling.rowStartSb[tr+1]), f.sbh)
@@ -840,11 +844,25 @@ func (s *sbrowSync) wait(sby, nCols int) bool {
 	return ok
 }
 
+// newTaskContext takes the scratch from the decoder's pool, which is almost
+// all of a task context by size. Only the scratch is reused; the rest is small
+// and starts zeroed, so nothing that reads a field before writing it can carry
+// over from the last frame.
 func (f *frameContext[P, C]) newTaskContext() *taskContext[P, C] {
 	t := &taskContext[P, C]{f: f}
+	if s, ok := f.tc.Get().(*scratch[P]); ok {
+		t.scratch = s
+	} else {
+		t.scratch = &scratch[P]{}
+	}
 	t.cf = make([]C, 32*32)
 
 	return t
+}
+
+func (f *frameContext[P, C]) putTaskContext(t *taskContext[P, C]) {
+	f.tc.Put(t.scratch)
+	t.scratch = nil
 }
 
 func backupIpredEdge[P pixel, C coef](t *taskContext[P, C]) {

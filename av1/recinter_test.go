@@ -189,7 +189,7 @@ func TestReconBInter(t *testing.T) {
 		}
 		ts.dq = &ts.dqmem
 
-		tc := &taskContext[uint8, int16]{f: f, ts: ts, bx: bx, by: by}
+		tc := &taskContext[uint8, int16]{scratch: &scratch[uint8]{}, f: f, ts: ts, bx: bx, by: by}
 		tc.a = new(blockContext)
 		tc.cf = make([]int16, 32*32)
 		tc.tl4x4Filter = uint8(tlFilter)

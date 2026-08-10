@@ -1,6 +1,9 @@
 package av1
 
-import "unsafe"
+import (
+	"sync"
+	"unsafe"
+)
 
 type blockContext struct {
 	mode      [32]uint8
@@ -100,6 +103,7 @@ type scratch[P pixel] struct {
 	cdefLrBak  [2][3][16]P
 	lrBorder   [2][(128 + 8) * 4]P
 	lrParams   looprestorationParams
+	lrw        lrScratch
 }
 
 type frameContext[P pixel, C coef] struct {
@@ -107,6 +111,7 @@ type frameContext[P pixel, C coef] struct {
 	frameHdr *frameHeader
 
 	pool  *picPool
+	tc    *sync.Pool
 	mem   *picMem
 	srMem *picMem
 
@@ -193,8 +198,7 @@ type taskContext[P pixel, C coef] struct {
 	a *blockContext
 
 	cf           []C
-	scratch      scratch[P]
-	lrw          lrScratch
+	scratch      *scratch[P]
 	blk          av1Block
 	curSbCdefIdx []int8
 	lfMask       *av1Filter

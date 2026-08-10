@@ -181,6 +181,8 @@ type Decoder struct {
 	queue []*pendingFrame
 	out   []*Picture
 
+	tc sync.Pool
+
 	sem  chan struct{}
 	wg   sync.WaitGroup
 	pool picPool

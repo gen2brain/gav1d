@@ -82,7 +82,7 @@ func TestCompoundType(t *testing.T) {
 			},
 			frameHdr: &frameHeader{frameOffset: uint8(poc)},
 		}
-		tc := &taskContext[uint8, int16]{f: f, ts: ts}
+		tc := &taskContext[uint8, int16]{scratch: &scratch[uint8]{}, f: f, ts: ts}
 		tc.a = new(blockContext)
 
 		for i := range 32 {

@@ -155,7 +155,7 @@ func TestReconBIntra(t *testing.T) {
 		ts.cdf.initStatic(uint8(qidx))
 		ts.msac.init(buf, false)
 
-		tc := &taskContext[uint8, int16]{f: &f, ts: &ts, bx: bx, by: by}
+		tc := &taskContext[uint8, int16]{scratch: &scratch[uint8]{}, f: &f, ts: &ts, bx: bx, by: by}
 		tc.a = &a
 		tc.l = l
 		tc.cf = make([]int16, 32*32)

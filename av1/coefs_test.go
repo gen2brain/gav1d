@@ -102,7 +102,7 @@ func TestDecodeCoefs(t *testing.T) {
 		ts.cdf.initStatic(uint8(qidx))
 		ts.msac.init(buf, false)
 
-		tc := &taskContext[uint8, int16]{f: &f, ts: &ts}
+		tc := &taskContext[uint8, int16]{scratch: &scratch[uint8]{}, f: &f, ts: &ts}
 
 		b := &av1Block{
 			uvMode: uint8(uvMode),

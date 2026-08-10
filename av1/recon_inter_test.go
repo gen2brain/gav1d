@@ -77,7 +77,7 @@ func recmcFrame(iter, layout int) (*frameContext[uint8, int16], *taskContext[uin
 	ts := new(tileState)
 	ts.tiling.colEnd = recmcCurW / 4
 	ts.tiling.rowEnd = recmcCurH / 4
-	tc := &taskContext[uint8, int16]{f: f, ts: ts}
+	tc := &taskContext[uint8, int16]{scratch: &scratch[uint8]{}, f: f, ts: ts}
 	tc.a = new(blockContext)
 
 	return f, tc
