@@ -89,6 +89,14 @@ GLOBL wienerPerm<>(SB), RODATA|NOPTR, $16
 	VPADDD     Y2, Y4, Y4;           \
 	VPADDD     Y3, Y5, Y5
 
+#define VPAIRN(RA, RB, COEF)         \
+	VMOVDQU    (RA)(DX*1), Y0;       \
+	VMOVDQU    (RB)(DX*1), Y1;       \
+	VPUNPCKLWD Y1, Y0, Y2;           \
+	VPUNPCKHWD Y1, Y0, Y3;           \
+	VPDPWSSD   COEF, Y2, Y4;         \
+	VPDPWSSD   COEF, Y3, Y5
+
 // VBODY accumulates all seven rows and lands the clipped result in Y4 as
 // sixteen words in ascending order.
 #define VBODY                        \
@@ -117,116 +125,204 @@ GLOBL wienerPerm<>(SB), RODATA|NOPTR, $16
 	VPMINSD    Y13, Y5, Y5;          \
 	VPACKUSDW  Y5, Y4, Y4
 
+#define VBODYN                       \
+	VMOVDQU    (R9)(DX*1), Y0;       \
+	VMOVDQU    (R10)(DX*1), Y1;      \
+	VPUNPCKLWD Y1, Y0, Y2;           \
+	VPUNPCKHWD Y1, Y0, Y3;           \
+	VPMADDWD   Y8, Y2, Y4;           \
+	VPMADDWD   Y8, Y3, Y5;           \
+	VPAIRN(R11, R12, Y9);            \
+	VPAIRN(R13, R14, Y10);           \
+	VMOVDQU    (R15)(DX*1), Y0;      \
+	VPUNPCKLWD Y0, Y14, Y2;          \
+	VPUNPCKHWD Y0, Y14, Y3;          \
+	VPDPWSSD   Y11, Y2, Y4;          \
+	VPDPWSSD   Y11, Y3, Y5;          \
+	VPADDD     Y12, Y4, Y4;          \
+	VPADDD     Y12, Y5, Y5;          \
+	VPSRAD     X15, Y4, Y4;          \
+	VPSRAD     X15, Y5, Y5;          \
+	VPMAXSD    Y14, Y4, Y4;          \
+	VPMAXSD    Y14, Y5, Y5;          \
+	VPMINSD    Y13, Y4, Y4;          \
+	VPMINSD    Y13, Y5, Y5;          \
+	VPACKUSDW  Y5, Y4, Y4
+
+#define HBODY8                   \
+	VPMOVZXBW (SI), Y0;      \
+	VPMADDWD  Y8, Y0, Y0;    \
+	VPMOVZXBW 2(SI), Y1;     \
+	VPMADDWD  Y9, Y1, Y1;    \
+	VPADDD    Y1, Y0, Y0;    \
+	VPMOVZXBW 4(SI), Y1;     \
+	VPMADDWD  Y10, Y1, Y1;   \
+	VPADDD    Y1, Y0, Y0;    \
+	VPMOVZXBW 5(SI), Y1;     \
+	VPMADDWD  Y11, Y1, Y1;   \
+	VPADDD    Y1, Y0, Y0;    \
+	VPMOVZXBW 1(SI), Y2;     \
+	VPMADDWD  Y8, Y2, Y2;    \
+	VPMOVZXBW 3(SI), Y1;     \
+	VPMADDWD  Y9, Y1, Y1;    \
+	VPADDD    Y1, Y2, Y2;    \
+	VPMOVZXBW 5(SI), Y1;     \
+	VPMADDWD  Y10, Y1, Y1;   \
+	VPADDD    Y1, Y2, Y2;    \
+	VPMOVZXBW 6(SI), Y1;     \
+	VPMADDWD  Y11, Y1, Y1;   \
+	VPADDD    Y1, Y2, Y2
+
+#define HBODY8N                  \
+	VPMOVZXBW (SI), Y0;      \
+	VPMADDWD  Y8, Y0, Y0;    \
+	VPMOVZXBW 2(SI), Y1;     \
+	VPDPWSSD  Y9, Y1, Y0;    \
+	VPMOVZXBW 4(SI), Y1;     \
+	VPDPWSSD  Y10, Y1, Y0;   \
+	VPMOVZXBW 5(SI), Y1;     \
+	VPDPWSSD  Y11, Y1, Y0;   \
+	VPMOVZXBW 1(SI), Y2;     \
+	VPMADDWD  Y8, Y2, Y2;    \
+	VPMOVZXBW 3(SI), Y1;     \
+	VPDPWSSD  Y9, Y1, Y2;    \
+	VPMOVZXBW 5(SI), Y1;     \
+	VPDPWSSD  Y10, Y1, Y2;   \
+	VPMOVZXBW 6(SI), Y1;     \
+	VPDPWSSD  Y11, Y1, Y2
+
+#define HBODY16                 \
+	VMOVDQU  (SI), Y0;      \
+	VPMADDWD Y8, Y0, Y0;    \
+	VMOVDQU  4(SI), Y1;     \
+	VPMADDWD Y9, Y1, Y1;    \
+	VPADDD   Y1, Y0, Y0;    \
+	VMOVDQU  8(SI), Y1;     \
+	VPMADDWD Y10, Y1, Y1;   \
+	VPADDD   Y1, Y0, Y0;    \
+	VMOVDQU  10(SI), Y1;    \
+	VPMADDWD Y11, Y1, Y1;   \
+	VPADDD   Y1, Y0, Y0;    \
+	VMOVDQU  2(SI), Y2;     \
+	VPMADDWD Y8, Y2, Y2;    \
+	VMOVDQU  6(SI), Y1;     \
+	VPMADDWD Y9, Y1, Y1;    \
+	VPADDD   Y1, Y2, Y2;    \
+	VMOVDQU  10(SI), Y1;    \
+	VPMADDWD Y10, Y1, Y1;   \
+	VPADDD   Y1, Y2, Y2;    \
+	VMOVDQU  12(SI), Y1;    \
+	VPMADDWD Y11, Y1, Y1;   \
+	VPADDD   Y1, Y2, Y2
+
+#define HBODY16N                \
+	VMOVDQU  (SI), Y0;      \
+	VPMADDWD Y8, Y0, Y0;    \
+	VMOVDQU  4(SI), Y1;     \
+	VPDPWSSD Y9, Y1, Y0;    \
+	VMOVDQU  8(SI), Y1;     \
+	VPDPWSSD Y10, Y1, Y0;   \
+	VMOVDQU  10(SI), Y1;    \
+	VPDPWSSD Y11, Y1, Y0;   \
+	VMOVDQU  2(SI), Y2;     \
+	VPMADDWD Y8, Y2, Y2;    \
+	VMOVDQU  6(SI), Y1;     \
+	VPDPWSSD Y9, Y1, Y2;    \
+	VMOVDQU  10(SI), Y1;    \
+	VPDPWSSD Y10, Y1, Y2;   \
+	VMOVDQU  12(SI), Y1;    \
+	VPDPWSSD Y11, Y1, Y2
+
+// WIENERH and WIENERV wrap one filter body in its loop, so the two tap forms
+// share the setup and the tail.
+#define WIENERH8(BODY)       \
+	MOVQ dst+0(FP), DI;  \
+	MOVQ src+8(FP), SI;  \
+	MOVQ n+16(FP), CX;   \
+	HSETUP;              \
+	loop8:;              \
+	BODY;                \
+	HTAIL;               \
+	ADDQ $16, SI;        \
+	SUBQ $16, CX;        \
+	JNZ  loop8;          \
+	VZEROUPPER
+
+#define WIENERH16(BODY)      \
+	MOVQ dst+0(FP), DI;  \
+	MOVQ src+8(FP), SI;  \
+	MOVQ n+16(FP), CX;   \
+	HSETUP;              \
+	loop16:;             \
+	BODY;                \
+	HTAIL;               \
+	ADDQ $32, SI;        \
+	SUBQ $16, CX;        \
+	JNZ  loop16;         \
+	VZEROUPPER
+
+#define WIENERV8(BODY)         \
+	MOVQ p+0(FP), DI;      \
+	VSETUP;                \
+	vloop8:;               \
+	BODY;                  \
+	VPACKUSWB Y4, Y4, Y4;  \
+	VPERMQ    $0x08, Y4, Y4; \
+	VMOVDQU   X4, (DI);    \
+	ADDQ      $16, DI;     \
+	ADDQ      $32, DX;     \
+	SUBQ      $16, CX;     \
+	JNZ       vloop8;      \
+	VZEROUPPER
+
+#define WIENERV16(BODY)      \
+	MOVQ p+0(FP), DI;    \
+	VSETUP;              \
+	vloop16:;            \
+	BODY;                \
+	VMOVDQU Y4, (DI);    \
+	ADDQ    $32, DI;     \
+	ADDQ    $32, DX;     \
+	SUBQ    $16, CX;     \
+	JNZ     vloop16;     \
+	VZEROUPPER
+
 // func wienerH8AVX2(dst *uint16, src *uint8, n int, c *[8]int16, rnd int32, shift int, limit int32)
 TEXT ·wienerH8AVX2(SB), NOSPLIT, $0-52
-	MOVQ dst+0(FP), DI
-	MOVQ src+8(FP), SI
-	MOVQ n+16(FP), CX
-	HSETUP
+	WIENERH8(HBODY8)
+	RET
 
-loop8:
-	VPMOVZXBW (SI), Y0
-	VPMADDWD  Y8, Y0, Y0
-	VPMOVZXBW 2(SI), Y1
-	VPMADDWD  Y9, Y1, Y1
-	VPADDD    Y1, Y0, Y0
-	VPMOVZXBW 4(SI), Y1
-	VPMADDWD  Y10, Y1, Y1
-	VPADDD    Y1, Y0, Y0
-	VPMOVZXBW 5(SI), Y1
-	VPMADDWD  Y11, Y1, Y1
-	VPADDD    Y1, Y0, Y0
-
-	VPMOVZXBW 1(SI), Y2
-	VPMADDWD  Y8, Y2, Y2
-	VPMOVZXBW 3(SI), Y1
-	VPMADDWD  Y9, Y1, Y1
-	VPADDD    Y1, Y2, Y2
-	VPMOVZXBW 5(SI), Y1
-	VPMADDWD  Y10, Y1, Y1
-	VPADDD    Y1, Y2, Y2
-	VPMOVZXBW 6(SI), Y1
-	VPMADDWD  Y11, Y1, Y1
-	VPADDD    Y1, Y2, Y2
-
-	HTAIL
-	ADDQ $16, SI
-	SUBQ $16, CX
-	JNZ  loop8
-
-	VZEROUPPER
+// func wienerH8AVX512(dst *uint16, src *uint8, n int, c *[8]int16, rnd int32, shift int, limit int32)
+TEXT ·wienerH8AVX512(SB), NOSPLIT, $0-52
+	WIENERH8(HBODY8N)
 	RET
 
 // func wienerH16AVX2(dst *uint16, src *uint16, n int, c *[8]int16, rnd int32, shift int, limit int32)
 TEXT ·wienerH16AVX2(SB), NOSPLIT, $0-52
-	MOVQ dst+0(FP), DI
-	MOVQ src+8(FP), SI
-	MOVQ n+16(FP), CX
-	HSETUP
+	WIENERH16(HBODY16)
+	RET
 
-loop16:
-	VMOVDQU  (SI), Y0
-	VPMADDWD Y8, Y0, Y0
-	VMOVDQU  4(SI), Y1
-	VPMADDWD Y9, Y1, Y1
-	VPADDD   Y1, Y0, Y0
-	VMOVDQU  8(SI), Y1
-	VPMADDWD Y10, Y1, Y1
-	VPADDD   Y1, Y0, Y0
-	VMOVDQU  10(SI), Y1
-	VPMADDWD Y11, Y1, Y1
-	VPADDD   Y1, Y0, Y0
-
-	VMOVDQU  2(SI), Y2
-	VPMADDWD Y8, Y2, Y2
-	VMOVDQU  6(SI), Y1
-	VPMADDWD Y9, Y1, Y1
-	VPADDD   Y1, Y2, Y2
-	VMOVDQU  10(SI), Y1
-	VPMADDWD Y10, Y1, Y1
-	VPADDD   Y1, Y2, Y2
-	VMOVDQU  12(SI), Y1
-	VPMADDWD Y11, Y1, Y1
-	VPADDD   Y1, Y2, Y2
-
-	HTAIL
-	ADDQ $32, SI
-	SUBQ $16, CX
-	JNZ  loop16
-
-	VZEROUPPER
+// func wienerH16AVX512(dst *uint16, src *uint16, n int, c *[8]int16, rnd int32, shift int, limit int32)
+TEXT ·wienerH16AVX512(SB), NOSPLIT, $0-52
+	WIENERH16(HBODY16N)
 	RET
 
 // func wienerV8AVX2(p *uint8, hor *uint16, rows *[7]int, c *[8]int16, n int, rnd int32, shift int, limit int32)
 TEXT ·wienerV8AVX2(SB), NOSPLIT, $0-60
-	MOVQ p+0(FP), DI
-	VSETUP
+	WIENERV8(VBODY)
+	RET
 
-vloop8:
-	VBODY
-	VPACKUSWB Y4, Y4, Y4
-	VPERMQ    $0x08, Y4, Y4
-	VMOVDQU   X4, (DI)
-	ADDQ      $16, DI
-	ADDQ      $32, DX
-	SUBQ      $16, CX
-	JNZ       vloop8
-
-	VZEROUPPER
+// func wienerV8AVX512(p *uint8, hor *uint16, rows *[7]int, c *[8]int16, n int, rnd int32, shift int, limit int32)
+TEXT ·wienerV8AVX512(SB), NOSPLIT, $0-60
+	WIENERV8(VBODYN)
 	RET
 
 // func wienerV16AVX2(p *uint16, hor *uint16, rows *[7]int, c *[8]int16, n int, rnd int32, shift int, limit int32)
 TEXT ·wienerV16AVX2(SB), NOSPLIT, $0-60
-	MOVQ p+0(FP), DI
-	VSETUP
+	WIENERV16(VBODY)
+	RET
 
-vloop16:
-	VBODY
-	VMOVDQU Y4, (DI)
-	ADDQ    $32, DI
-	ADDQ    $32, DX
-	SUBQ    $16, CX
-	JNZ     vloop16
-
-	VZEROUPPER
+// func wienerV16AVX512(p *uint16, hor *uint16, rows *[7]int, c *[8]int16, n int, rnd int32, shift int, limit int32)
+TEXT ·wienerV16AVX512(SB), NOSPLIT, $0-60
+	WIENERV16(VBODYN)
 	RET

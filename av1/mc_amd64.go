@@ -33,6 +33,19 @@ func prep8tapHVAVX2(dst *int16, src *uint8, srcStride int, mid *int16,
 	fh *[8]int8, fv *[8]int16, w, h int)
 
 //go:noescape
+func put8tapHVAVX512(dst *uint8, dstStride int, src *uint8, srcStride int, mid *int16,
+	fh *[8]int8, fv *[8]int16, w, h int)
+
+//go:noescape
+func prep8tapHVAVX512(dst *int16, src *uint8, srcStride int, mid *int16,
+	fh *[8]int8, fv *[8]int16, w, h int)
+
+var (
+	put8tapHVAsm  = put8tapHVAVX2
+	prep8tapHVAsm = prep8tapHVAVX2
+)
+
+//go:noescape
 func putBilinHAVX2(dst *uint8, dstStride int, src *uint8, srcStride int, mx int32, w, h int)
 
 //go:noescape
@@ -103,7 +116,7 @@ func prep8tap8AVX2(mid []int16, tmp []int16, src []uint8, srcOff, srcStride,
 		case fh != nil && fv != nil:
 			fvw := vFilter16(my, h, filterType)
 
-			prep8tapHVAVX2(&tmp[0], &src[srcOff-3*srcStride-3], srcStride,
+			prep8tapHVAsm(&tmp[0], &src[srcOff-3*srcStride-3], srcStride,
 				&mid[0], fh, fvw, w, h)
 
 			return
@@ -156,7 +169,7 @@ func put8tap8AVX2(mid []int16, dst []uint8, dstOff, dstStride int, src []uint8, 
 	if w >= 2 {
 		hv, hh, vv := put8tapHV4AVX2, put8tapH4AVX2, put8tapV4AVX2
 		if w >= 8 {
-			hv, hh, vv = put8tapHVAVX2, put8tapHAVX2, put8tapVAVX2
+			hv, hh, vv = put8tapHVAsm, put8tapHAVX2, put8tapVAVX2
 		}
 
 		switch {

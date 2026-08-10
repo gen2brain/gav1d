@@ -16,6 +16,27 @@ func wienerV8AVX2(p *uint8, hor *uint16, rows *[7]int, c *[8]int16, n int, rnd i
 func wienerV16AVX2(p *uint16, hor *uint16, rows *[7]int, c *[8]int16, n int, rnd int32,
 	shift int, limit int32)
 
+//go:noescape
+func wienerH8AVX512(dst *uint16, src *uint8, n int, c *[8]int16, rnd int32, shift int, limit int32)
+
+//go:noescape
+func wienerH16AVX512(dst *uint16, src *uint16, n int, c *[8]int16, rnd int32, shift int, limit int32)
+
+//go:noescape
+func wienerV8AVX512(p *uint8, hor *uint16, rows *[7]int, c *[8]int16, n int, rnd int32,
+	shift int, limit int32)
+
+//go:noescape
+func wienerV16AVX512(p *uint16, hor *uint16, rows *[7]int, c *[8]int16, n int, rnd int32,
+	shift int, limit int32)
+
+var (
+	wienerH8Asm  = wienerH8AVX2
+	wienerH16Asm = wienerH16AVX2
+	wienerV8Asm  = wienerV8AVX2
+	wienerV16Asm = wienerV16AVX2
+)
+
 // wienerPairs reorders the taps into the four multiply-add pairs the kernels
 // consume, with the lone seventh tap in the high half so no load reaches
 // further right than the scalar loop does.
@@ -28,7 +49,7 @@ func wienerH8AVX2Row(dst []uint16, dstOff int, src []uint8, srcOff, n int,
 ) {
 	c := wienerPairs(fh)
 	if n16 := n &^ 15; n16 > 0 {
-		wienerH8AVX2(&dst[dstOff], &src[srcOff-3], n16, &c, rnd, shift, limit)
+		wienerH8Asm(&dst[dstOff], &src[srcOff-3], n16, &c, rnd, shift, limit)
 		dstOff += n16
 		srcOff += n16
 		n -= n16
@@ -43,7 +64,7 @@ func wienerH16AVX2Row(dst []uint16, dstOff int, src []uint16, srcOff, n int,
 ) {
 	c := wienerPairs(fh)
 	if n16 := n &^ 15; n16 > 0 {
-		wienerH16AVX2(&dst[dstOff], &src[srcOff-3], n16, &c, rnd, shift, limit)
+		wienerH16Asm(&dst[dstOff], &src[srcOff-3], n16, &c, rnd, shift, limit)
 		dstOff += n16
 		srcOff += n16
 		n -= n16
@@ -61,7 +82,7 @@ func wienerV8AVX2Row(p []uint8, pOff int, hor []uint16, rows *[7]int,
 
 	n := w &^ 15
 	if n > 0 {
-		wienerV8AVX2(&p[pOff], &hor[0], rows, &c, n, rnd, shift, bitdepthMax)
+		wienerV8Asm(&p[pOff], &hor[0], rows, &c, n, rnd, shift, bitdepthMax)
 	}
 	if n == w {
 		return
@@ -82,7 +103,7 @@ func wienerV16AVX2Row(p []uint16, pOff int, hor []uint16, rows *[7]int,
 
 	n := w &^ 15
 	if n > 0 {
-		wienerV16AVX2(&p[pOff], &hor[0], rows, &c, n, rnd, shift, bitdepthMax)
+		wienerV16Asm(&p[pOff], &hor[0], rows, &c, n, rnd, shift, bitdepthMax)
 	}
 	if n == w {
 		return

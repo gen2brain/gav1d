@@ -96,5 +96,11 @@ func init() {
 	if hasAVX512 {
 		widenCoefs16 = widenCoefs16AVX512
 		widenCoefs16Rect2 = widenCoefs16Rect2AVX512
+		put8tapHVAsm = put8tapHVAVX512
+		prep8tapHVAsm = prep8tapHVAVX512
+		wienerH8Asm = wienerH8AVX512
+		wienerH16Asm = wienerH16AVX512
+		wienerV8Asm = wienerV8AVX512
+		wienerV16Asm = wienerV16AVX512
 	}
 }

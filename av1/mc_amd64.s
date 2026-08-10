@@ -42,6 +42,192 @@ GLOBL pd512<>(SB), RODATA|NOPTR, $4
 	VPADDW     V1, V0, V0;   \
 	VPHADDW    V2, V0, V0;   \
 	VPADDW     RND, V0, V0
+#define PUT8TAPHV(TAPS) \
+	MOVQ dst+0(FP), DI; \
+	MOVQ dstStride+8(FP), R8; \
+	MOVQ src+16(FP), SI; \
+	MOVQ srcStride+24(FP), R9; \
+	MOVQ mid+32(FP), BX; \
+	MOVQ w+56(FP), DX; \
+	MOVQ           fh+40(FP), AX; \
+	VBROADCASTI128 subpelShufA<>(SB), Y6; \
+	VBROADCASTI128 subpelShufB<>(SB), Y7; \
+	VBROADCASTI128 subpelShufC<>(SB), Y8; \
+	VPBROADCASTD   (AX), Y9; \
+	VPBROADCASTD   4(AX), Y10; \
+	VPBROADCASTD   pw2<>(SB), Y5; \
+	MOVQ         fv+48(FP), AX; \
+	VPBROADCASTD (AX), Y11; \
+	VPBROADCASTD 4(AX), Y12; \
+	VPBROADCASTD 8(AX), Y13; \
+	VPBROADCASTD 12(AX), Y14; \
+	VPBROADCASTD pd512<>(SB), Y15; \
+	CMPQ DX, $8; \
+	JEQ  hvh8; \
+hvh16:; \
+	MOVQ SI, R10; \
+	MOVQ BX, R12; \
+	MOVQ h+64(FP), R13; \
+	ADDQ $7, R13; \
+hvhrow16:; \
+	VMOVDQU     (R10), X0; \
+	VINSERTI128 $1, 8(R10), Y0, Y0; \
+	HTAPS(Y0, Y1, Y2, Y3, Y5, Y6, Y7, Y8, Y9, Y10); \
+	VPSRAW      $2, Y0, Y0; \
+	VMOVDQU     Y0, (R12); \
+	ADDQ        R9, R10; \
+	ADDQ        $32, R12; \
+	DECQ        R13; \
+	JNZ         hvhrow16; \
+	MOVQ BX, R12; \
+	MOVQ DI, R11; \
+	MOVQ h+64(FP), R13; \
+hvvrow16:; \
+	TAPS(Y0, Y1, Y2, Y3, Y4, Y11, Y12, Y13, Y14, Y15); \
+	VPACKUSWB Y2, Y2, Y2; \
+	VPERMQ    $0x08, Y2, Y2; \
+	VMOVDQU   X2, (R11); \
+	ADDQ      R8, R11; \
+	ADDQ      $32, R12; \
+	DECQ      R13; \
+	JNZ       hvvrow16; \
+	ADDQ $16, SI; \
+	ADDQ $16, DI; \
+	SUBQ $16, DX; \
+	JG   hvh16; \
+	VZEROUPPER; \
+	RET; \
+hvh8:; \
+	MOVQ BX, R12; \
+	MOVQ h+64(FP), R13; \
+	ADDQ $7, R13; \
+hvhrow8:; \
+	VMOVDQU (SI), X0; \
+	HTAPS(X0, X1, X2, X3, X5, X6, X7, X8, X9, X10); \
+	VPSRAW  $2, X0, X0; \
+	VMOVDQU X0, (R12); \
+	ADDQ    R9, SI; \
+	ADDQ    $32, R12; \
+	DECQ    R13; \
+	JNZ     hvhrow8; \
+	MOVQ BX, R12; \
+	MOVQ h+64(FP), R13; \
+hvvrow8:; \
+	TAPS(X0, X1, X2, X3, X4, X11, X12, X13, X14, X15); \
+	VPACKUSWB X2, X2, X2; \
+	VMOVQ     X2, (DI); \
+	ADDQ      R8, DI; \
+	ADDQ      $32, R12; \
+	DECQ      R13; \
+	JNZ       hvvrow8; \
+	VZEROUPPER; \
+	RET; \
+	/* H4TAPS filters four outputs from twelve source bytes, which is all a two or */; \
+	/* four wide row reaches. */
+
+#define PREP8TAPHV(TAPS) \
+	MOVQ dst+0(FP), DI; \
+	MOVQ src+8(FP), SI; \
+	MOVQ srcStride+16(FP), R9; \
+	MOVQ mid+24(FP), BX; \
+	MOVQ w+48(FP), DX; \
+	MOVQ DX, R8; \
+	MOVQ           fh+32(FP), AX; \
+	VBROADCASTI128 subpelShufA<>(SB), Y6; \
+	VBROADCASTI128 subpelShufB<>(SB), Y7; \
+	VBROADCASTI128 subpelShufC<>(SB), Y8; \
+	VPBROADCASTD   (AX), Y9; \
+	VPBROADCASTD   4(AX), Y10; \
+	VPBROADCASTD   pw2<>(SB), Y5; \
+	MOVQ         fv+40(FP), AX; \
+	VPBROADCASTD (AX), Y11; \
+	VPBROADCASTD 4(AX), Y12; \
+	VPBROADCASTD 8(AX), Y13; \
+	VPBROADCASTD 12(AX), Y14; \
+	VPBROADCASTD pd32<>(SB), Y15; \
+	CMPQ DX, $4; \
+	JEQ  prphv4; \
+	CMPQ DX, $8; \
+	JEQ  prphv8; \
+prphv16:; \
+	MOVQ SI, R10; \
+	MOVQ BX, R12; \
+	MOVQ h+56(FP), R13; \
+	ADDQ $7, R13; \
+prphvh16:; \
+	VMOVDQU     (R10), X0; \
+	VINSERTI128 $1, 8(R10), Y0, Y0; \
+	HTAPS(Y0, Y1, Y2, Y3, Y5, Y6, Y7, Y8, Y9, Y10); \
+	VPSRAW      $2, Y0, Y0; \
+	VMOVDQU     Y0, (R12); \
+	ADDQ        R9, R10; \
+	ADDQ        $32, R12; \
+	DECQ        R13; \
+	JNZ         prphvh16; \
+	MOVQ BX, R12; \
+	MOVQ DI, R11; \
+	MOVQ h+56(FP), R13; \
+prphvv16:; \
+	TAPS(Y0, Y1, Y2, Y3, Y4, Y11, Y12, Y13, Y14, Y15); \
+	VMOVDQU Y3, (R11); \
+	LEAQ    (R11)(R8*2), R11; \
+	ADDQ    $32, R12; \
+	DECQ    R13; \
+	JNZ     prphvv16; \
+	ADDQ $16, SI; \
+	ADDQ $32, DI; \
+	SUBQ $16, DX; \
+	JG   prphv16; \
+	VZEROUPPER; \
+	RET; \
+prphv8:; \
+	MOVQ BX, R12; \
+	MOVQ h+56(FP), R13; \
+	ADDQ $7, R13; \
+prphvh8:; \
+	VMOVDQU (SI), X0; \
+	HTAPS(X0, X1, X2, X3, X5, X6, X7, X8, X9, X10); \
+	VPSRAW  $2, X0, X0; \
+	VMOVDQU X0, (R12); \
+	ADDQ    R9, SI; \
+	ADDQ    $32, R12; \
+	DECQ    R13; \
+	JNZ     prphvh8; \
+	MOVQ BX, R12; \
+	MOVQ h+56(FP), R13; \
+prphvv8:; \
+	TAPS(X0, X1, X2, X3, X4, X11, X12, X13, X14, X15); \
+	VMOVDQU X3, (DI); \
+	ADDQ    $32, R12; \
+	LEAQ    (DI)(R8*2), DI; \
+	DECQ    R13; \
+	JNZ     prphvv8; \
+	VZEROUPPER; \
+	RET; \
+prphv4:; \
+	MOVQ BX, R12; \
+	MOVQ h+56(FP), R13; \
+	ADDQ $7, R13; \
+prphvh4:; \
+	H4LOAD(SI, X0); \
+	H4TAPS(X0, X1, X2, X5, X6, X7, X9, X10); \
+	VPSRAW $2, X1, X1; \
+	VMOVQ  X1, (R12); \
+	ADDQ   R9, SI; \
+	ADDQ   $32, R12; \
+	DECQ   R13; \
+	JNZ    prphvh4; \
+	MOVQ BX, R12; \
+	MOVQ h+56(FP), R13; \
+prphvv4:; \
+	TAPS(X0, X1, X2, X3, X4, X11, X12, X13, X14, X15); \
+	VMOVQ X3, (DI); \
+	ADDQ  $32, R12; \
+	LEAQ  (DI)(R8*2), DI; \
+	DECQ  R13; \
+	JNZ   prphvv4; \
+	VZEROUPPER
+
 
 // func put8tapHAVX2(dst *uint8, dstStride int, src *uint8, srcStride int, f *[8]int8, w, h int)
 TEXT ·put8tapHAVX2(SB), NOSPLIT, $0-56
@@ -257,104 +443,49 @@ vrow8:
 	VPSRAD     $10, ACC1, ACC1; \
 	VPACKSSDW  ACC1, ACC0, ACC0
 
+#define VTAPSN(A, B, ACC0, ACC1, T, F0, F1, F2, F3, RND) \
+	VMOVDQU    0(R12), A;     \
+	VMOVDQU    32(R12), B;    \
+	VPUNPCKLWD B, A, ACC0;    \
+	VPUNPCKHWD B, A, ACC1;    \
+	VPMADDWD   F0, ACC0, ACC0; \
+	VPMADDWD   F0, ACC1, ACC1; \
+	VMOVDQU    64(R12), A;    \
+	VMOVDQU    96(R12), B;    \
+	VPUNPCKLWD B, A, T;       \
+	VPDPWSSD   F1, T, ACC0; \
+	VPUNPCKHWD B, A, T;       \
+	VPDPWSSD   F1, T, ACC1; \
+	VMOVDQU    128(R12), A;   \
+	VMOVDQU    160(R12), B;   \
+	VPUNPCKLWD B, A, T;       \
+	VPDPWSSD   F2, T, ACC0; \
+	VPUNPCKHWD B, A, T;       \
+	VPDPWSSD   F2, T, ACC1; \
+	VMOVDQU    192(R12), A;   \
+	VMOVDQU    224(R12), B;   \
+	VPUNPCKLWD B, A, T;       \
+	VPDPWSSD   F3, T, ACC0; \
+	VPUNPCKHWD B, A, T;       \
+	VPDPWSSD   F3, T, ACC1; \
+	VPADDD     RND, ACC0, ACC0; \
+	VPADDD     RND, ACC1, ACC1; \
+	VPSRAD     $10, ACC0, ACC0; \
+	VPSRAD     $10, ACC1, ACC1; \
+	VPACKSSDW  ACC1, ACC0, ACC0
+
+// func put8tapHVAVX2(dst *uint8, dstStride int, src *uint8, srcStride int, mid *int16, fh *[8]int8, fv *[8]int16, w, h int)
+
 // func put8tapHVAVX2(dst *uint8, dstStride int, src *uint8, srcStride int, mid *int16, fh *[8]int8, fv *[8]int16, w, h int)
 TEXT ·put8tapHVAVX2(SB), NOSPLIT, $0-72
-	MOVQ dst+0(FP), DI
-	MOVQ dstStride+8(FP), R8
-	MOVQ src+16(FP), SI
-	MOVQ srcStride+24(FP), R9
-	MOVQ mid+32(FP), BX
-	MOVQ w+56(FP), DX
-
-	MOVQ           fh+40(FP), AX
-	VBROADCASTI128 subpelShufA<>(SB), Y6
-	VBROADCASTI128 subpelShufB<>(SB), Y7
-	VBROADCASTI128 subpelShufC<>(SB), Y8
-	VPBROADCASTD   (AX), Y9
-	VPBROADCASTD   4(AX), Y10
-	VPBROADCASTD   pw2<>(SB), Y5
-
-	MOVQ         fv+48(FP), AX
-	VPBROADCASTD (AX), Y11
-	VPBROADCASTD 4(AX), Y12
-	VPBROADCASTD 8(AX), Y13
-	VPBROADCASTD 12(AX), Y14
-	VPBROADCASTD pd512<>(SB), Y15
-
-	CMPQ DX, $8
-	JEQ  hvh8
-
-hvh16:
-	MOVQ SI, R10
-	MOVQ BX, R12
-	MOVQ h+64(FP), R13
-	ADDQ $7, R13
-
-hvhrow16:
-	VMOVDQU     (R10), X0
-	VINSERTI128 $1, 8(R10), Y0, Y0
-	HTAPS(Y0, Y1, Y2, Y3, Y5, Y6, Y7, Y8, Y9, Y10)
-	VPSRAW      $2, Y0, Y0
-	VMOVDQU     Y0, (R12)
-	ADDQ        R9, R10
-	ADDQ        $32, R12
-	DECQ        R13
-	JNZ         hvhrow16
-
-	MOVQ BX, R12
-	MOVQ DI, R11
-	MOVQ h+64(FP), R13
-
-hvvrow16:
-	VTAPS(Y0, Y1, Y2, Y3, Y4, Y11, Y12, Y13, Y14, Y15)
-	VPACKUSWB Y2, Y2, Y2
-	VPERMQ    $0x08, Y2, Y2
-	VMOVDQU   X2, (R11)
-	ADDQ      R8, R11
-	ADDQ      $32, R12
-	DECQ      R13
-	JNZ       hvvrow16
-
-	ADDQ $16, SI
-	ADDQ $16, DI
-	SUBQ $16, DX
-	JG   hvh16
-
-	VZEROUPPER
+	PUT8TAPHV(VTAPS)
 	RET
 
-hvh8:
-	MOVQ BX, R12
-	MOVQ h+64(FP), R13
-	ADDQ $7, R13
-
-hvhrow8:
-	VMOVDQU (SI), X0
-	HTAPS(X0, X1, X2, X3, X5, X6, X7, X8, X9, X10)
-	VPSRAW  $2, X0, X0
-	VMOVDQU X0, (R12)
-	ADDQ    R9, SI
-	ADDQ    $32, R12
-	DECQ    R13
-	JNZ     hvhrow8
-
-	MOVQ BX, R12
-	MOVQ h+64(FP), R13
-
-hvvrow8:
-	VTAPS(X0, X1, X2, X3, X4, X11, X12, X13, X14, X15)
-	VPACKUSWB X2, X2, X2
-	VMOVQ     X2, (DI)
-	ADDQ      R8, DI
-	ADDQ      $32, R12
-	DECQ      R13
-	JNZ       hvvrow8
-
-	VZEROUPPER
+// func put8tapHVAVX512(dst *uint8, dstStride int, src *uint8, srcStride int, mid *int16, fh *[8]int8, fv *[8]int16, w, h int)
+TEXT ·put8tapHVAVX512(SB), NOSPLIT, $0-72
+	PUT8TAPHV(VTAPSN)
 	RET
 
-// H4TAPS filters four outputs from twelve source bytes, which is all a two or
-// four wide row reaches.
 #define H4TAPS(V0, V1, V2, RND, SA, SB, F03, F47) \
 	VPSHUFB    SB, V0, V2;   \
 	VPSHUFB    SA, V0, V1;   \
@@ -778,128 +909,47 @@ prpv4:
 	VPSRAD     $6, ACC1, ACC1; \
 	VPACKSSDW  ACC1, ACC0, ACC0
 
+#define PVTAPSN(A, B, T, ACC0, ACC1, F0, F1, F2, F3, RND) \
+	VMOVDQU    (R12), A;      \
+	VMOVDQU    32(R12), B;    \
+	VPUNPCKLWD B, A, ACC0;    \
+	VPUNPCKHWD B, A, ACC1;    \
+	VPMADDWD   F0, ACC0, ACC0; \
+	VPMADDWD   F0, ACC1, ACC1; \
+	VMOVDQU    64(R12), A;    \
+	VMOVDQU    96(R12), B;    \
+	VPUNPCKLWD B, A, T;       \
+	VPDPWSSD   F1, T, ACC0; \
+	VPUNPCKHWD B, A, T;       \
+	VPDPWSSD   F1, T, ACC1; \
+	VMOVDQU    128(R12), A;   \
+	VMOVDQU    160(R12), B;   \
+	VPUNPCKLWD B, A, T;       \
+	VPDPWSSD   F2, T, ACC0; \
+	VPUNPCKHWD B, A, T;       \
+	VPDPWSSD   F2, T, ACC1; \
+	VMOVDQU    192(R12), A;   \
+	VMOVDQU    224(R12), B;   \
+	VPUNPCKLWD B, A, T;       \
+	VPDPWSSD   F3, T, ACC0; \
+	VPUNPCKHWD B, A, T;       \
+	VPDPWSSD   F3, T, ACC1; \
+	VPADDD     RND, ACC0, ACC0; \
+	VPADDD     RND, ACC1, ACC1; \
+	VPSRAD     $6, ACC0, ACC0; \
+	VPSRAD     $6, ACC1, ACC1; \
+	VPACKSSDW  ACC1, ACC0, ACC0
+
+// func prep8tapHVAVX2(tmp *int16, src *uint8, srcStride int, mid *int16, fh *[8]int8, fv *[8]int16, w, h int)
+
 // func prep8tapHVAVX2(tmp *int16, src *uint8, srcStride int, mid *int16, fh *[8]int8, fv *[8]int16, w, h int)
 TEXT ·prep8tapHVAVX2(SB), NOSPLIT, $0-64
-	MOVQ dst+0(FP), DI
-	MOVQ src+8(FP), SI
-	MOVQ srcStride+16(FP), R9
-	MOVQ mid+24(FP), BX
-	MOVQ w+48(FP), DX
-	MOVQ DX, R8
-
-	MOVQ           fh+32(FP), AX
-	VBROADCASTI128 subpelShufA<>(SB), Y6
-	VBROADCASTI128 subpelShufB<>(SB), Y7
-	VBROADCASTI128 subpelShufC<>(SB), Y8
-	VPBROADCASTD   (AX), Y9
-	VPBROADCASTD   4(AX), Y10
-	VPBROADCASTD   pw2<>(SB), Y5
-
-	MOVQ         fv+40(FP), AX
-	VPBROADCASTD (AX), Y11
-	VPBROADCASTD 4(AX), Y12
-	VPBROADCASTD 8(AX), Y13
-	VPBROADCASTD 12(AX), Y14
-	VPBROADCASTD pd32<>(SB), Y15
-
-	CMPQ DX, $4
-	JEQ  prphv4
-	CMPQ DX, $8
-	JEQ  prphv8
-
-prphv16:
-	MOVQ SI, R10
-	MOVQ BX, R12
-	MOVQ h+56(FP), R13
-	ADDQ $7, R13
-
-prphvh16:
-	VMOVDQU     (R10), X0
-	VINSERTI128 $1, 8(R10), Y0, Y0
-	HTAPS(Y0, Y1, Y2, Y3, Y5, Y6, Y7, Y8, Y9, Y10)
-	VPSRAW      $2, Y0, Y0
-	VMOVDQU     Y0, (R12)
-	ADDQ        R9, R10
-	ADDQ        $32, R12
-	DECQ        R13
-	JNZ         prphvh16
-
-	MOVQ BX, R12
-	MOVQ DI, R11
-	MOVQ h+56(FP), R13
-
-prphvv16:
-	PVTAPS(Y0, Y1, Y2, Y3, Y4, Y11, Y12, Y13, Y14, Y15)
-	VMOVDQU Y3, (R11)
-	LEAQ    (R11)(R8*2), R11
-	ADDQ    $32, R12
-	DECQ    R13
-	JNZ     prphvv16
-
-	ADDQ $16, SI
-	ADDQ $32, DI
-	SUBQ $16, DX
-	JG   prphv16
-
-	VZEROUPPER
+	PREP8TAPHV(PVTAPS)
 	RET
 
-prphv8:
-	MOVQ BX, R12
-	MOVQ h+56(FP), R13
-	ADDQ $7, R13
-
-prphvh8:
-	VMOVDQU (SI), X0
-	HTAPS(X0, X1, X2, X3, X5, X6, X7, X8, X9, X10)
-	VPSRAW  $2, X0, X0
-	VMOVDQU X0, (R12)
-	ADDQ    R9, SI
-	ADDQ    $32, R12
-	DECQ    R13
-	JNZ     prphvh8
-
-	MOVQ BX, R12
-	MOVQ h+56(FP), R13
-
-prphvv8:
-	PVTAPS(X0, X1, X2, X3, X4, X11, X12, X13, X14, X15)
-	VMOVDQU X3, (DI)
-	ADDQ    $32, R12
-	LEAQ    (DI)(R8*2), DI
-	DECQ    R13
-	JNZ     prphvv8
-
-	VZEROUPPER
-	RET
-
-prphv4:
-	MOVQ BX, R12
-	MOVQ h+56(FP), R13
-	ADDQ $7, R13
-
-prphvh4:
-	H4LOAD(SI, X0)
-	H4TAPS(X0, X1, X2, X5, X6, X7, X9, X10)
-	VPSRAW $2, X1, X1
-	VMOVQ  X1, (R12)
-	ADDQ   R9, SI
-	ADDQ   $32, R12
-	DECQ   R13
-	JNZ    prphvh4
-
-	MOVQ BX, R12
-	MOVQ h+56(FP), R13
-
-prphvv4:
-	PVTAPS(X0, X1, X2, X3, X4, X11, X12, X13, X14, X15)
-	VMOVQ X3, (DI)
-	ADDQ  $32, R12
-	LEAQ  (DI)(R8*2), DI
-	DECQ  R13
-	JNZ   prphvv4
-
-	VZEROUPPER
+// func prep8tapHVAVX512(tmp *int16, src *uint8, srcStride int, mid *int16, fh *[8]int8, fv *[8]int16, w, h int)
+TEXT ·prep8tapHVAVX512(SB), NOSPLIT, $0-64
+	PREP8TAPHV(PVTAPSN)
 	RET
 
 DATA pw2048<>+0(SB)/4, $0x08000800
