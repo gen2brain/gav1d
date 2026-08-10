@@ -232,3 +232,224 @@ hvv:
 	CBNZ R5, hvstrip
 
 	RET
+
+// STN4 and STN2 write the low four or two bytes of a filtered row.
+#define STN4(V) \
+	VMOV V.S[0], R13; \
+	MOVW R13, (R8)
+
+#define STN2(V) \
+	VMOV V.H[0], R13; \
+	MOVH R13, (R8)
+
+// func put8tapH4NEON(dst *uint8, dstStride int, src *uint8, srcStride int, f *[8]int8, w, h int)
+TEXT ·put8tapH4NEON(SB), NOSPLIT, $0-56
+	MOVD dst+0(FP), R0
+	MOVD dstStride+8(FP), R1
+	MOVD src+16(FP), R2
+	MOVD srcStride+24(FP), R3
+	MOVD f+32(FP), R4
+	MOVD w+40(FP), R5
+	MOVD h+48(FP), R6
+
+	LOADTAPS(R4, V16.H8, V17.H8, V18.H8, V19.H8, V20.H8, V21.H8, V22.H8, V23.H8)
+
+	MOVD $2, R9
+	VDUP R9, V24.H8
+	MOVD $512, R9
+	VDUP R9, V25.H8
+
+	CMP  $2, R5
+	BEQ  h4row2
+
+h4row4:
+	MOVD R0, R8
+	TAPS8(R2)
+	VADD V24.H8, V3.H8, V3.H8
+	SQRDMULH(3, 3, 25)
+	SQXTUN(3, 3)
+	STN4(V3)
+
+	ADD  R3, R2
+	ADD  R1, R0
+	SUB  $1, R6
+	CBNZ R6, h4row4
+
+	RET
+
+h4row2:
+	MOVD R0, R8
+	TAPS8(R2)
+	VADD V24.H8, V3.H8, V3.H8
+	SQRDMULH(3, 3, 25)
+	SQXTUN(3, 3)
+	STN2(V3)
+
+	ADD  R3, R2
+	ADD  R1, R0
+	SUB  $1, R6
+	CBNZ R6, h4row2
+
+	RET
+
+// func put8tapV4NEON(dst *uint8, dstStride int, src *uint8, srcStride int, f *[8]int8, w, h int)
+TEXT ·put8tapV4NEON(SB), NOSPLIT, $0-56
+	MOVD dst+0(FP), R0
+	MOVD dstStride+8(FP), R1
+	MOVD src+16(FP), R2
+	MOVD srcStride+24(FP), R3
+	MOVD f+32(FP), R4
+	MOVD w+40(FP), R5
+	MOVD h+48(FP), R6
+
+	LOADTAPS(R4, V16.H8, V17.H8, V18.H8, V19.H8, V20.H8, V21.H8, V22.H8, V23.H8)
+
+	MOVD $512, R11
+	VDUP R11, V25.H8
+
+	CMP  $2, R5
+	BEQ  v4row2
+
+v4row4:
+	MOVD R2, R9
+	MOVD R0, R8
+	VTAP(MUL, 16)
+	VTAP(MLA, 17)
+	VTAP(MLA, 18)
+	VTAP(MLA, 19)
+	VTAP(MLA, 20)
+	VTAP(MLA, 21)
+	VTAP(MLA, 22)
+	VTAP(MLA, 23)
+	SQRDMULH(3, 3, 25)
+	SQXTUN(3, 3)
+	STN4(V3)
+
+	ADD  R3, R2
+	ADD  R1, R0
+	SUB  $1, R6
+	CBNZ R6, v4row4
+
+	RET
+
+v4row2:
+	MOVD R2, R9
+	MOVD R0, R8
+	VTAP(MUL, 16)
+	VTAP(MLA, 17)
+	VTAP(MLA, 18)
+	VTAP(MLA, 19)
+	VTAP(MLA, 20)
+	VTAP(MLA, 21)
+	VTAP(MLA, 22)
+	VTAP(MLA, 23)
+	SQRDMULH(3, 3, 25)
+	SQXTUN(3, 3)
+	STN2(V3)
+
+	ADD  R3, R2
+	ADD  R1, R0
+	SUB  $1, R6
+	CBNZ R6, v4row2
+
+	RET
+
+// func put8tapHV4NEON(dst *uint8, dstStride int, src *uint8, srcStride int, mid *int16, fh *[8]int8, fv *[8]int16, w, h int)
+TEXT ·put8tapHV4NEON(SB), NOSPLIT, $0-72
+	MOVD dst+0(FP), R0
+	MOVD dstStride+8(FP), R1
+	MOVD src+16(FP), R2
+	MOVD srcStride+24(FP), R3
+	MOVD mid+32(FP), R11
+	MOVD fh+40(FP), R4
+	MOVD w+56(FP), R5
+	MOVD h+64(FP), R6
+
+	LOADTAPS(R4, V16.H8, V17.H8, V18.H8, V19.H8, V20.H8, V21.H8, V22.H8, V23.H8)
+	MOVD fv+48(FP), R4
+	LOADTAPS(R4, V24.H8, V25.H8, V26.H8, V27.H8, V28.H8, V29.H8, V30.H8, V31.H8)
+
+	MOVD $8192, R9
+	VDUP R9, V15.H8
+	MOVD $524800, R9
+	VDUP R9, V14.S4
+	MOVD $512, R9
+	VDUP R9, V13.S4
+
+	MOVD R2, R7
+	MOVD R11, R9
+	MOVD R6, R10
+	ADD  $7, R10
+
+hv4h:
+	TAPS8(R7)
+	SQRDMULH(3, 3, 15)
+	VST1 [V3.H8], (R9)
+
+	ADD  R3, R7
+	ADD  $16, R9
+	SUB  $1, R10
+	CBNZ R10, hv4h
+
+	MOVD R11, R9
+	MOVD R0, R8
+	MOVD R6, R10
+
+	CMP  $2, R5
+	BEQ  hv4v2
+
+hv4v4:
+	MOVD R9, R12
+	HVTAP(SMULL, SMULL2, 24)
+	HVTAP(SMLAL, SMLAL2, 25)
+	HVTAP(SMLAL, SMLAL2, 26)
+	HVTAP(SMLAL, SMLAL2, 27)
+	HVTAP(SMLAL, SMLAL2, 28)
+	HVTAP(SMLAL, SMLAL2, 29)
+	HVTAP(SMLAL, SMLAL2, 30)
+	HVTAP(SMLAL, SMLAL2, 31)
+
+	VADD  V14.S4, V5.S4, V5.S4
+	VADD  V14.S4, V6.S4, V6.S4
+	VUSHR $10, V5.S4, V5.S4
+	VUSHR $10, V6.S4, V6.S4
+	VSUB  V13.S4, V5.S4, V5.S4
+	VSUB  V13.S4, V6.S4, V6.S4
+	VUZP1 V6.H8, V5.H8, V5.H8
+	SQXTUN(5, 5)
+	STN4(V5)
+
+	ADD  $16, R9
+	ADD  R1, R8
+	SUB  $1, R10
+	CBNZ R10, hv4v4
+
+	RET
+
+hv4v2:
+	MOVD R9, R12
+	HVTAP(SMULL, SMULL2, 24)
+	HVTAP(SMLAL, SMLAL2, 25)
+	HVTAP(SMLAL, SMLAL2, 26)
+	HVTAP(SMLAL, SMLAL2, 27)
+	HVTAP(SMLAL, SMLAL2, 28)
+	HVTAP(SMLAL, SMLAL2, 29)
+	HVTAP(SMLAL, SMLAL2, 30)
+	HVTAP(SMLAL, SMLAL2, 31)
+
+	VADD  V14.S4, V5.S4, V5.S4
+	VADD  V14.S4, V6.S4, V6.S4
+	VUSHR $10, V5.S4, V5.S4
+	VUSHR $10, V6.S4, V6.S4
+	VSUB  V13.S4, V5.S4, V5.S4
+	VSUB  V13.S4, V6.S4, V6.S4
+	VUZP1 V6.H8, V5.H8, V5.H8
+	SQXTUN(5, 5)
+	STN2(V5)
+
+	ADD  $16, R9
+	ADD  R1, R8
+	SUB  $1, R10
+	CBNZ R10, hv4v2
+
+	RET

@@ -352,3 +352,235 @@ hvvrow8:
 
 	VZEROUPPER
 	RET
+
+// H4TAPS filters four outputs from twelve source bytes, which is all a two or
+// four wide row reaches.
+#define H4TAPS(V0, V1, V2, RND, SA, SB, F03, F47) \
+	VPSHUFB    SB, V0, V2;   \
+	VPSHUFB    SA, V0, V1;   \
+	VPMADDUBSW F03, V1, V1;  \
+	VPMADDUBSW F47, V2, V2;  \
+	VPADDW     V2, V1, V1;   \
+	VPHADDW    V1, V1, V1;   \
+	VPADDW     RND, V1, V1
+
+#define H4LOAD(P, V) \
+	VMOVQ   (P), V;  \
+	VPINSRD $2, 8(P), V, V
+
+// func put8tapH4AVX2(dst *uint8, dstStride int, src *uint8, srcStride int, f *[8]int8, w, h int)
+TEXT ·put8tapH4AVX2(SB), NOSPLIT, $0-56
+	MOVQ dst+0(FP), DI
+	MOVQ dstStride+8(FP), R8
+	MOVQ src+16(FP), SI
+	MOVQ srcStride+24(FP), R9
+	MOVQ f+32(FP), AX
+	MOVQ w+40(FP), DX
+	MOVQ h+48(FP), BX
+
+	VMOVDQU      subpelShufA<>(SB), X6
+	VMOVDQU      subpelShufB<>(SB), X7
+	VPBROADCASTD (AX), X9
+	VPBROADCASTD 4(AX), X10
+	VPBROADCASTD pw34<>(SB), X5
+
+	CMPQ DX, $2
+	JEQ  h4row2
+
+h4row4:
+	H4LOAD(SI, X0)
+	H4TAPS(X0, X1, X2, X5, X6, X7, X9, X10)
+	VPSRAW    $6, X1, X1
+	VPACKUSWB X1, X1, X1
+	VMOVD     X1, (DI)
+
+	ADDQ R9, SI
+	ADDQ R8, DI
+	DECQ BX
+	JNZ  h4row4
+
+	VZEROUPPER
+	RET
+
+h4row2:
+	H4LOAD(SI, X0)
+	H4TAPS(X0, X1, X2, X5, X6, X7, X9, X10)
+	VPSRAW    $6, X1, X1
+	VPACKUSWB X1, X1, X1
+	VPEXTRW   $0, X1, (DI)
+
+	ADDQ R9, SI
+	ADDQ R8, DI
+	DECQ BX
+	JNZ  h4row2
+
+	VZEROUPPER
+	RET
+
+// V4TAPS filters one four wide row from the eight rows above R10.
+#define V4TAPS(V0, V1, V2, F0, F1, F2, F3) \
+	VMOVD      (R10), V0;        \
+	VMOVD      (R10)(R9*1), V1;  \
+	VPUNPCKLBW V1, V0, V0;       \
+	VPMADDUBSW F0, V0, V0;       \
+	LEAQ       (R10)(R9*2), R14; \
+	VMOVD      (R14), V1;        \
+	VMOVD      (R14)(R9*1), V2;  \
+	VPUNPCKLBW V2, V1, V1;       \
+	VPMADDUBSW F1, V1, V1;       \
+	VPADDW     V1, V0, V0;       \
+	LEAQ       (R14)(R9*2), R14; \
+	VMOVD      (R14), V1;        \
+	VMOVD      (R14)(R9*1), V2;  \
+	VPUNPCKLBW V2, V1, V1;       \
+	VPMADDUBSW F2, V1, V1;       \
+	VPADDW     V1, V0, V0;       \
+	LEAQ       (R14)(R9*2), R14; \
+	VMOVD      (R14), V1;        \
+	VMOVD      (R14)(R9*1), V2;  \
+	VPUNPCKLBW V2, V1, V1;       \
+	VPMADDUBSW F3, V1, V1;       \
+	VPADDW     V1, V0, V0
+
+// func put8tapV4AVX2(dst *uint8, dstStride int, src *uint8, srcStride int, f *[8]int8, w, h int)
+TEXT ·put8tapV4AVX2(SB), NOSPLIT, $0-56
+	MOVQ dst+0(FP), DI
+	MOVQ dstStride+8(FP), R8
+	MOVQ src+16(FP), SI
+	MOVQ srcStride+24(FP), R9
+	MOVQ f+32(FP), AX
+	MOVQ w+40(FP), DX
+	MOVQ h+48(FP), BX
+
+	VPBROADCASTW (AX), X8
+	VPBROADCASTW 2(AX), X9
+	VPBROADCASTW 4(AX), X10
+	VPBROADCASTW 6(AX), X11
+	VPBROADCASTD pw512<>(SB), X7
+
+	CMPQ DX, $2
+	JEQ  v4row2
+
+v4row4:
+	MOVQ SI, R10
+	V4TAPS(X0, X1, X2, X8, X9, X10, X11)
+	VPMULHRSW X7, X0, X0
+	VPACKUSWB X0, X0, X0
+	VMOVD     X0, (DI)
+
+	ADDQ R9, SI
+	ADDQ R8, DI
+	DECQ BX
+	JNZ  v4row4
+
+	VZEROUPPER
+	RET
+
+v4row2:
+	MOVQ SI, R10
+	V4TAPS(X0, X1, X2, X8, X9, X10, X11)
+	VPMULHRSW X7, X0, X0
+	VPACKUSWB X0, X0, X0
+	VPEXTRW   $0, X0, (DI)
+
+	ADDQ R9, SI
+	ADDQ R8, DI
+	DECQ BX
+	JNZ  v4row2
+
+	VZEROUPPER
+	RET
+
+// V4MID filters one four wide row out of the sixteen bit intermediate rows.
+#define V4MID(A, B, ACC, T, F0, F1, F2, F3, RND) \
+	VMOVQ      (R12), A;      \
+	VMOVQ      32(R12), B;    \
+	VPUNPCKLWD B, A, ACC;     \
+	VPMADDWD   F0, ACC, ACC;  \
+	VMOVQ      64(R12), A;    \
+	VMOVQ      96(R12), B;    \
+	VPUNPCKLWD B, A, T;       \
+	VPMADDWD   F1, T, T;      \
+	VPADDD     T, ACC, ACC;   \
+	VMOVQ      128(R12), A;   \
+	VMOVQ      160(R12), B;   \
+	VPUNPCKLWD B, A, T;       \
+	VPMADDWD   F2, T, T;      \
+	VPADDD     T, ACC, ACC;   \
+	VMOVQ      192(R12), A;   \
+	VMOVQ      224(R12), B;   \
+	VPUNPCKLWD B, A, T;       \
+	VPMADDWD   F3, T, T;      \
+	VPADDD     T, ACC, ACC;   \
+	VPADDD     RND, ACC, ACC; \
+	VPSRAD     $10, ACC, ACC; \
+	VPACKSSDW  ACC, ACC, ACC
+
+// func put8tapHV4AVX2(dst *uint8, dstStride int, src *uint8, srcStride int, mid *int16, fh *[8]int8, fv *[8]int16, w, h int)
+TEXT ·put8tapHV4AVX2(SB), NOSPLIT, $0-72
+	MOVQ dst+0(FP), DI
+	MOVQ dstStride+8(FP), R8
+	MOVQ src+16(FP), SI
+	MOVQ srcStride+24(FP), R9
+	MOVQ mid+32(FP), BX
+	MOVQ w+56(FP), DX
+
+	MOVQ         fh+40(FP), AX
+	VMOVDQU      subpelShufA<>(SB), X6
+	VMOVDQU      subpelShufB<>(SB), X7
+	VPBROADCASTD (AX), X9
+	VPBROADCASTD 4(AX), X10
+	VPBROADCASTD pw2<>(SB), X5
+
+	MOVQ         fv+48(FP), AX
+	VPBROADCASTD (AX), X11
+	VPBROADCASTD 4(AX), X12
+	VPBROADCASTD 8(AX), X13
+	VPBROADCASTD 12(AX), X14
+	VPBROADCASTD pd512<>(SB), X15
+
+	MOVQ BX, R12
+	MOVQ h+64(FP), R13
+	ADDQ $7, R13
+
+hv4h:
+	H4LOAD(SI, X0)
+	H4TAPS(X0, X1, X2, X5, X6, X7, X9, X10)
+	VPSRAW $2, X1, X1
+	VMOVQ  X1, (R12)
+
+	ADDQ R9, SI
+	ADDQ $32, R12
+	DECQ R13
+	JNZ  hv4h
+
+	MOVQ BX, R12
+	MOVQ h+64(FP), R13
+	CMPQ DX, $2
+	JEQ  hv4v2
+
+hv4v4:
+	V4MID(X0, X1, X2, X3, X11, X12, X13, X14, X15)
+	VPACKUSWB X2, X2, X2
+	VMOVD     X2, (DI)
+
+	ADDQ R8, DI
+	ADDQ $32, R12
+	DECQ R13
+	JNZ  hv4v4
+
+	VZEROUPPER
+	RET
+
+hv4v2:
+	V4MID(X0, X1, X2, X3, X11, X12, X13, X14, X15)
+	VPACKUSWB X2, X2, X2
+	VPEXTRW   $0, X2, (DI)
+
+	ADDQ R8, DI
+	ADDQ $32, R12
+	DECQ R13
+	JNZ  hv4v2
+
+	VZEROUPPER
+	RET

@@ -23,7 +23,7 @@ func put8tap8RVV(mid []int16, dst []uint8, dstOff, dstStride int, src []uint8, s
 	fh := hFilter(mx, w, filterType)
 	fv := vFilter(my, h, filterType)
 
-	if w >= 8 {
+	if w >= 2 {
 		switch {
 		case fh != nil && fv != nil:
 
