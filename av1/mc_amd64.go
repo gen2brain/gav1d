@@ -105,13 +105,10 @@ func prep8tap8AVX2(mid []int16, tmp []int16, src []uint8, srcOff, srcStride,
 	if w >= 4 && bitdepthMax == 0xff {
 		switch {
 		case fh != nil && fv != nil:
-			var fvw [8]int16
-			for i, v := range fv {
-				fvw[i] = int16(v)
-			}
+			fvw := vFilter16(my, h, filterType)
 
 			prep8tapHVAVX2(&tmp[0], &src[srcOff-3*srcStride-3], srcStride,
-				&mid[0], fh, &fvw, w, h)
+				&mid[0], fh, fvw, w, h)
 
 			return
 		case fh != nil:
@@ -128,6 +125,32 @@ func prep8tap8AVX2(mid []int16, tmp []int16, src []uint8, srcOff, srcStride,
 	prep8tap(mid, tmp, src, srcOff, srcStride, w, h, mx, my, filterType, bitdepthMax)
 }
 
+// mcSubpelFilters16 is the subpel filter table widened once, so that the
+// kernels taking int16 taps can point straight at it.
+var mcSubpelFilters16 = func() [6][15][8]int16 {
+	var out [6][15][8]int16
+	for i, set := range mcSubpelFilters {
+		for j, f := range set {
+			for k, v := range f {
+				out[i][j][k] = int16(v)
+			}
+		}
+	}
+
+	return out
+}()
+
+func vFilter16(my, h, filterType int) *[8]int16 {
+	if my == 0 {
+		return nil
+	}
+	if h > 4 {
+		return &mcSubpelFilters16[filterType>>2][my-1]
+	}
+
+	return &mcSubpelFilters16[3+((filterType>>2)&1)][my-1]
+}
+
 func put8tap8AVX2(mid []int16, dst []uint8, dstOff, dstStride int, src []uint8, srcOff, srcStride,
 	w, h, mx, my, filterType int, bitdepthMax int32,
 ) {
@@ -142,13 +165,10 @@ func put8tap8AVX2(mid []int16, dst []uint8, dstOff, dstStride int, src []uint8, 
 
 		switch {
 		case fh != nil && fv != nil:
-			var fvw [8]int16
-			for i, v := range fv {
-				fvw[i] = int16(v)
-			}
+			fvw := vFilter16(my, h, filterType)
 
 			hv(&dst[dstOff], dstStride, &src[srcOff-3*srcStride-3],
-				srcStride, &mid[0], fh, &fvw, w, h)
+				srcStride, &mid[0], fh, fvw, w, h)
 
 			return
 		case fh != nil:
