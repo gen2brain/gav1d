@@ -143,3 +143,72 @@ cfl16col:
 	BNE X0, X13, cfl16row
 
 	RET
+
+// func z2Top8RVV(dst *uint8, edge *uint8, n int, frac int32)
+TEXT ·z2Top8RVV(SB), NOSPLIT, $0-28
+	MOV  dst+0(FP), X10
+	MOV  edge+8(FP), X11
+	MOV  n+16(FP), X12
+	MOVW frac+24(FP), X13
+
+	MOV  $64, X14
+	SUBW X13, X14, X14
+	MOV  $32, X15
+
+z2t8:
+	VSETVLI  X12, E8, MF2, TA, MA, X16
+	VLE8V    (X11), V0
+	ADD      $1, X11, X17
+	VLE8V    (X17), V1
+	VSETVLI  X12, E16, M1, TA, MA, X16
+	VZEXTVF2 V0, V2
+	VZEXTVF2 V1, V3
+	VMULVX   X14, V2, V2
+	VMACCVX  V3, X13, V2
+	VADDVX   X15, V2, V2
+	VSRLVI   $6, V2, V2
+	VSETVLI  X12, E8, MF2, TA, MA, X16
+	VNSRLWI  $0, V2, V4
+	VSE8V    V4, (X10)
+
+	ADD X16, X11, X11
+	ADD X16, X10, X10
+	SUB X16, X12, X12
+	BNE X0, X12, z2t8
+
+	RET
+
+// func z2Top16RVV(dst *uint16, edge *uint16, n int, frac int32)
+TEXT ·z2Top16RVV(SB), NOSPLIT, $0-28
+	MOV  dst+0(FP), X10
+	MOV  edge+8(FP), X11
+	MOV  n+16(FP), X12
+	MOVW frac+24(FP), X13
+
+	MOV  $64, X14
+	SUBW X13, X14, X14
+	MOV  $32, X15
+
+z2t16:
+	VSETVLI  X12, E16, MF2, TA, MA, X16
+	VLE16V   (X11), V0
+	ADD      $2, X11, X17
+	VLE16V   (X17), V1
+	VSETVLI  X12, E32, M1, TA, MA, X16
+	VZEXTVF2 V0, V2
+	VZEXTVF2 V1, V3
+	VMULVX   X14, V2, V2
+	VMACCVX  V3, X13, V2
+	VADDVX   X15, V2, V2
+	VSRLVI   $6, V2, V2
+	VSETVLI  X12, E16, MF2, TA, MA, X16
+	VNSRLWI  $0, V2, V4
+	VSE16V   V4, (X10)
+
+	SLL $1, X16, X18
+	ADD X18, X11, X11
+	ADD X18, X10, X10
+	SUB X16, X12, X12
+	BNE X0, X12, z2t16
+
+	RET

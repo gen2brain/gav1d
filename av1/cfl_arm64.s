@@ -139,3 +139,74 @@ acsub:
 	BNE    acsub
 
 	RET
+
+#define UMULLH(Vd, Vn, Vm) WORD $(0x2E20C000 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define UMLALH(Vd, Vn, Vm) WORD $(0x2E208000 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define URSHRH(Vd, Vn)     WORD $(0x6F1A2400 | ((Vn) << 5) | (Vd))
+#define UMULLS(Vd, Vn, Vm) WORD $(0x2E60C000 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define UMLALS(Vd, Vn, Vm) WORD $(0x2E608000 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define URSHRS(Vd, Vn)     WORD $(0x6F3A2400 | ((Vn) << 5) | (Vd))
+#define DUPB(Vd, Rn)       WORD $(0x0E010C00 | ((Rn) << 5) | (Vd))
+#define DUPH(Vd, Rn)       WORD $(0x0E020C00 | ((Rn) << 5) | (Vd))
+
+// The rounding shift carries the +32, so the tap is a widening multiply, a
+// widening accumulate and one shift.
+// func z2Top8NEON(dst *uint8, edge *uint8, n int, frac int32)
+TEXT ·z2Top8NEON(SB), NOSPLIT, $0-28
+	MOVD dst+0(FP), R0
+	MOVD edge+8(FP), R1
+	MOVD n+16(FP), R2
+	MOVW frac+24(FP), R3
+
+	MOVD $64, R4
+	SUBW R3, R4, R4
+	DUPB(6, 4)
+	DUPB(7, 3)
+	MOVD $0, R5
+
+z2t8:
+	ADD    R5, R1, R6
+	FMOVD  (R6), F0
+	ADD    $1, R6, R6
+	FMOVD  (R6), F1
+	UMULLH(2, 0, 6)
+	UMLALH(2, 1, 7)
+	URSHRH(2, 2)
+	XTNB(2, 2)
+	ADD    R5, R0, R7
+	FMOVD  F2, (R7)
+	ADD    $8, R5, R5
+	CMP    R2, R5
+	BLT    z2t8
+
+	RET
+
+// func z2Top16NEON(dst *uint16, edge *uint16, n int, frac int32)
+TEXT ·z2Top16NEON(SB), NOSPLIT, $0-28
+	MOVD dst+0(FP), R0
+	MOVD edge+8(FP), R1
+	MOVD n+16(FP), R2
+	MOVW frac+24(FP), R3
+
+	MOVD $64, R4
+	SUBW R3, R4, R4
+	DUPH(6, 4)
+	DUPH(7, 3)
+	MOVD $0, R5
+
+z2t16:
+	ADD    R5<<1, R1, R6
+	FMOVD  (R6), F0
+	ADD    $2, R6, R6
+	FMOVD  (R6), F1
+	UMULLS(2, 0, 6)
+	UMLALS(2, 1, 7)
+	URSHRS(2, 2)
+	XTN4(2, 2)
+	ADD    R5<<1, R0, R7
+	FMOVD  F2, (R7)
+	ADD    $4, R5, R5
+	CMP    R2, R5
+	BLT    z2t16
+
+	RET
