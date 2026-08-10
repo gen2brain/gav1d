@@ -34,6 +34,11 @@ type GainMap struct {
 	// rather than the alternate rendition's.
 	UseBaseColorSpace bool
 
+	// Alt describes the alternate rendition the gain map leads to, from the
+	// tone mapped item's own color property. Unspecified primaries mean the
+	// base image's.
+	Alt ColorInfo
+
 	BaseHDRHeadroom      Rational
 	AlternateHDRHeadroom Rational
 
@@ -151,6 +156,16 @@ func (f *file) gainMap(o Options) (*GainMap, error) {
 	g, ok := parseToneMap(data)
 	if !ok {
 		return nil, nil
+	}
+	g.Alt = ColorInfo{Primaries: cicpUnspecified, Transfer: cicpUnspecified, Matrix: cicpUnspecified}
+	if p := f.meta.prop(tmap, "colr"); p != nil && p.colr != nil {
+		if p.colr.hasNCLX {
+			g.Alt.Primaries = p.colr.primaries
+			g.Alt.Transfer = p.colr.transfer
+			g.Alt.Matrix = p.colr.matrix
+			g.Alt.FullRange = p.colr.fullRange
+		}
+		g.Alt.ICCP = p.colr.icc
 	}
 
 	var pic *av1.Picture

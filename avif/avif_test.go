@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/draw"
 	"image/png"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1296,6 +1298,326 @@ func TestExifFiles(t *testing.T) {
 			e.FNumber != 1.7 || e.FocalLength != 4.4 || e.Flash != 16 ||
 			e.DateTimeOriginal != "2022:08:22 20:30:46" {
 			t.Fatalf("%s: exif = %+v", name, *e)
+		}
+	}
+}
+
+// TestTransferFuncs checks that every curve inverts itself, which is what the
+// tone mapping relies on when it takes an image apart and puts it back.
+func TestTransferFuncs(t *testing.T) {
+	all := []uint16{
+		trcBT709, trcBT470M, trcBT470BG, trcBT601, trcSMPTE240, trcLinear,
+		trcLog100, trcLog100Sqrt10, trcIEC61966, trcBT1361, trcSRGB,
+		trcBT2020_10, trcBT2020_12, trcPQ, trcSMPTE428, trcHLG,
+	}
+
+	for _, trc := range all {
+		toLinear, toGamma := transferFuncs(trc)
+		for i := range 101 {
+			v := float64(i) / 100
+			if got := toGamma(toLinear(v)); math.Abs(got-v) > 1e-6 {
+				t.Fatalf("transfer %d: gamma(linear(%v)) = %v", trc, v, got)
+			}
+		}
+		if toLinear(0) < 0 || toGamma(0) < 0 {
+			t.Fatalf("transfer %d: negative at zero", trc)
+		}
+	}
+
+	// The HDR curves put SDR white at 1, so the whole range reaches past it.
+	for _, trc := range []uint16{trcPQ, trcHLG} {
+		toLinear, _ := transferFuncs(trc)
+		if got := toLinear(1); got <= 1 {
+			t.Fatalf("transfer %d: peak = %v, want more than SDR white", trc, got)
+		}
+	}
+}
+
+// TestPrimariesMatrix checks the conversion between primaries, which must be
+// the identity when there is nothing to convert and must undo itself.
+func TestPrimariesMatrix(t *testing.T) {
+	all := []uint16{
+		priBT709, priBT470M, priBT470BG, priBT601, priSMPTE240,
+		priGenericFilm, priBT2020, priXYZ, priSMPTE431, priSMPTE432, priEBU3213,
+	}
+
+	for _, cp := range all {
+		m, ok := rgbToRGBMatrix(cp, cp)
+		if !ok {
+			t.Fatalf("primaries %d: no matrix", cp)
+		}
+		for i := range 3 {
+			for j := range 3 {
+				want := 0.0
+				if i == j {
+					want = 1
+				}
+				if math.Abs(m[i][j]-want) > 1e-9 {
+					t.Fatalf("primaries %d: [%d][%d] = %v, want %v", cp, i, j, m[i][j], want)
+				}
+			}
+		}
+
+		if cp == priBT709 {
+			continue
+		}
+		to, _ := rgbToRGBMatrix(priBT709, cp)
+		back, _ := rgbToRGBMatrix(cp, priBT709)
+		v := [3]float64{0.2, 0.5, 0.8}
+		got := back.apply(to.apply(v))
+		for c := range 3 {
+			if math.Abs(got[c]-v[c]) > 1e-9 {
+				t.Fatalf("primaries 1 -> %d -> 1: %v, want %v", cp, got, v)
+			}
+		}
+	}
+
+	// The published BT.709 to BT.2020 matrix, which the computation has to
+	// land on for same-whitepoint primaries.
+	want2020 := mat3{
+		{0.6274, 0.3293, 0.0433},
+		{0.0691, 0.9195, 0.0114},
+		{0.0164, 0.0880, 0.8956},
+	}
+	got2020, _ := rgbToRGBMatrix(priBT709, priBT2020)
+	for i := range 3 {
+		for j := range 3 {
+			if math.Abs(got2020[i][j]-want2020[i][j]) > 1e-3 {
+				t.Fatalf("BT.709 to BT.2020 = %v, want %v", got2020, want2020)
+			}
+		}
+	}
+
+	// White stays white across a change of whitepoint, which only the
+	// chromatic adaptation makes true.
+	m, _ := rgbToRGBMatrix(priBT709, priSMPTE431)
+	white := m.apply([3]float64{1, 1, 1})
+	for c := range 3 {
+		if math.Abs(white[c]-1) > 1e-6 {
+			t.Fatalf("BT.709 white in SMPTE RP 431-2 = %v", white)
+		}
+	}
+}
+
+func TestGainMapWeight(t *testing.T) {
+	g := &GainMap{
+		BaseHDRHeadroom:      Rational{1, 1},
+		AlternateHDRHeadroom: Rational{3, 1},
+	}
+	for _, c := range []struct {
+		headroom, want float64
+	}{
+		{0, 0}, {1, 0}, {2, 0.5}, {3, 1}, {4, 1},
+	} {
+		if got := g.weight(c.headroom); got != c.want {
+			t.Fatalf("weight(%v) = %v, want %v", c.headroom, got, c.want)
+		}
+	}
+
+	// An alternate darker than the base runs the other way.
+	g = &GainMap{
+		BaseHDRHeadroom:      Rational{3, 1},
+		AlternateHDRHeadroom: Rational{1, 1},
+	}
+	for _, c := range []struct {
+		headroom, want float64
+	}{
+		{0, -1}, {1, -1}, {2, -0.5}, {3, 0}, {4, 0},
+	} {
+		if got := g.weight(c.headroom); got != c.want {
+			t.Fatalf("reversed weight(%v) = %v, want %v", c.headroom, got, c.want)
+		}
+	}
+
+	// Renditions that claim the same headroom say nothing about the gain.
+	g = &GainMap{BaseHDRHeadroom: Rational{2, 1}, AlternateHDRHeadroom: Rational{2, 1}}
+	if got := g.weight(4); got != 0 {
+		t.Fatalf("equal headrooms = %v, want 0", got)
+	}
+}
+
+// testGainMap builds metadata whose math is easy to follow: linear light, a
+// gamma of one and a constant gain of log2Gain stops.
+func testGainMap(log2Gain, baseOffset, altOffset float64, gain image.Image) *GainMap {
+	r := func(v float64) Rational { return Rational{int32(math.Round(v * 1000)), 1000} }
+
+	g := &GainMap{
+		Image:                gain,
+		UseBaseColorSpace:    true,
+		Alt:                  ColorInfo{Primaries: cicpUnspecified, Transfer: cicpUnspecified},
+		BaseHDRHeadroom:      Rational{0, 1},
+		AlternateHDRHeadroom: Rational{2, 1},
+	}
+	for c := range 3 {
+		g.Min[c] = r(log2Gain)
+		g.Max[c] = r(log2Gain)
+		g.Gamma[c] = Rational{1, 1}
+		g.BaseOffset[c] = r(baseOffset)
+		g.AlternateOffset[c] = r(altOffset)
+	}
+
+	return g
+}
+
+func grayGain(w, h int, v uint8) *image.NRGBA {
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = v, v, v, 255
+	}
+
+	return img
+}
+
+// TestApplyGainMap works in linear light so the gain is a plain multiply,
+// which pins the formula without restating it.
+func TestApplyGainMap(t *testing.T) {
+	linear := ColorInfo{Primaries: priBT709, Transfer: trcLinear}
+
+	base := image.NewNRGBA(image.Rect(0, 0, 2, 1))
+	copy(base.Pix, []byte{128, 64, 32, 200, 255, 255, 255, 255})
+
+	// One stop at full weight doubles the linear value.
+	g := testGainMap(1, 0, 0, grayGain(2, 1, 255))
+	out, err := ApplyGainMap(base, linear, g, 2, linear)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := out.(*image.NRGBA)
+	if want := []byte{255, 128, 64, 200}; !bytes.Equal(got.Pix[:4], want) {
+		t.Fatalf("one stop = %v, want %v", got.Pix[:4], want)
+	}
+
+	// Half the headroom is half the stops.
+	out, _ = ApplyGainMap(base, linear, g, 1, linear)
+	got = out.(*image.NRGBA)
+	if want := byte(math.Round(64.0 / 255 * math.Sqrt2 * 255)); got.Pix[1] != want {
+		t.Fatalf("half weight = %d, want %d", got.Pix[1], want)
+	}
+
+	// The base offset is added before the gain and the alternate one taken
+	// off after, so the two are not interchangeable.
+	g = testGainMap(0, 0.1, 0.25, grayGain(2, 1, 255))
+	out, _ = ApplyGainMap(base, linear, g, 2, linear)
+	got = out.(*image.NRGBA)
+	if want := byte(math.Round((64.0/255 + 0.1 - 0.25) * 255)); got.Pix[1] != want {
+		t.Fatalf("offsets at unit gain = %d, want %d", got.Pix[1], want)
+	}
+
+	// The metadata carries the encoding gamma, so decoding raises the gain to
+	// its inverse.
+	g = testGainMap(0, 0, 0, grayGain(2, 1, 64))
+	g.Min = [3]Rational{{0, 1}, {0, 1}, {0, 1}}
+	g.Max = [3]Rational{{1, 1}, {1, 1}, {1, 1}}
+	g.Gamma = [3]Rational{{2, 1}, {2, 1}, {2, 1}}
+	out, _ = ApplyGainMap(base, linear, g, 2, linear)
+	got = out.(*image.NRGBA)
+	if want := byte(math.Round(64.0 / 255 * math.Exp2(math.Sqrt(64.0/255)) * 255)); got.Pix[1] != want {
+		t.Fatalf("gain of two = %d, want %d", got.Pix[1], want)
+	}
+
+	// A gain map at zero reads the bottom of the range, not the top.
+	g = testGainMap(1, 0, 0, grayGain(2, 1, 0))
+	g.Min = [3]Rational{{0, 1}, {0, 1}, {0, 1}}
+	out, _ = ApplyGainMap(base, linear, g, 2, linear)
+	got = out.(*image.NRGBA)
+	if !bytes.Equal(got.Pix[:4], base.Pix[:4]) {
+		t.Fatalf("gain map at its minimum = %v, want the base back", got.Pix[:4])
+	}
+
+	// Alpha carries no light, so no curve is applied to it.
+	srgb := ColorInfo{Primaries: priBT709, Transfer: trcSRGB}
+	g = testGainMap(1, 0, 0, grayGain(2, 1, 255))
+	out, _ = ApplyGainMap(base, srgb, g, 2, srgb)
+	if got := out.(*image.NRGBA).Pix[3]; got != 200 {
+		t.Fatalf("alpha = %d, want 200", got)
+	}
+
+	// Below the base headroom there is nothing to apply.
+	out, err = ApplyGainMap(base, linear, g, 0, linear)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != image.Image(base) {
+		t.Fatal("no weight and no conversion should give the base back")
+	}
+
+	// A gain map that names its own primaries is applied in them, so a gain
+	// on one channel alone reaches the others once the conversion is undone.
+	mixed := image.NewNRGBA(image.Rect(0, 0, 1, 1))
+	copy(mixed.Pix, []byte{255, 128, 64, 255})
+	g = testGainMap(0, 0, 0, grayGain(1, 1, 255))
+	g.UseBaseColorSpace = false
+	g.Alt.Primaries = priBT2020
+	g.Min[0], g.Max[0] = Rational{1, 1}, Rational{1, 1}
+	out, err = ApplyGainMap(mixed, linear, g, 2, linear)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []byte{255, 102, 60, 255}; !bytes.Equal(out.(*image.NRGBA).Pix, want) {
+		t.Fatalf("gain in the alternate primaries = %v, want %v", out.(*image.NRGBA).Pix, want)
+	}
+
+	// Output primaries are converted even with no gain to apply.
+	red := image.NewNRGBA(image.Rect(0, 0, 1, 1))
+	copy(red.Pix, []byte{255, 0, 0, 255})
+	wide := ColorInfo{Primaries: priBT2020, Transfer: trcLinear}
+	out, err = ApplyGainMap(red, linear, g, 0, wide)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []byte{160, 18, 4, 255}; !bytes.Equal(out.(*image.NRGBA).Pix, want) {
+		t.Fatalf("BT.709 red in BT.2020 = %v, want %v", out.(*image.NRGBA).Pix, want)
+	}
+
+	if _, err := ApplyGainMap(base, linear, g, -1, linear); err == nil {
+		t.Fatal("negative headroom should be rejected")
+	}
+	if _, err := ApplyGainMap(base, linear, nil, 1, linear); err == nil {
+		t.Fatal("missing gain map should be rejected")
+	}
+
+	// The output keeps the base image's depth.
+	deep := image.NewNRGBA64(image.Rect(0, 0, 2, 1))
+	draw.Draw(deep, deep.Bounds(), base, base.Bounds().Min, draw.Src)
+	out, err = ApplyGainMap(deep, linear, g, 2, linear)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out.(*image.NRGBA64); !ok {
+		t.Fatalf("16-bit base gave %T", out)
+	}
+}
+
+// TestApplyGainMapScale checks the gain map being read at the base image's
+// resolution when it was stored smaller.
+func TestApplyGainMapScale(t *testing.T) {
+	linear := ColorInfo{Primaries: priBT709, Transfer: trcLinear}
+
+	base := image.NewNRGBA(image.Rect(0, 0, 4, 1))
+	for x := range 4 {
+		copy(base.Pix[x*4:], []byte{64, 64, 64, 255})
+	}
+
+	// Two gain samples, one at each end of the range.
+	gain := image.NewNRGBA(image.Rect(0, 0, 2, 1))
+	copy(gain.Pix, []byte{0, 0, 0, 255, 255, 255, 255, 255})
+
+	g := testGainMap(0, 0, 0, gain)
+	g.Min = [3]Rational{{0, 1}, {0, 1}, {0, 1}}
+	g.Max = [3]Rational{{1, 1}, {1, 1}, {1, 1}}
+
+	out, err := ApplyGainMap(base, linear, g, 2, linear)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := out.(*image.NRGBA)
+
+	// The two samples sit at the quarter points, so the row reads a quarter
+	// and three quarters of a stop between them and holds flat past them.
+	for x, stops := range []float64{0, 0.25, 0.75, 1} {
+		want := byte(math.Round(64.0 / 255 * math.Exp2(stops) * 255))
+		if got.Pix[x*4] != want {
+			t.Fatalf("column %d = %d, want %d (%v stops)", x, got.Pix[x*4], want, stops)
 		}
 	}
 }
