@@ -136,9 +136,10 @@ type extent struct {
 }
 
 type item struct {
-	id      uint32
-	typ     string
-	extents []extent
+	id          uint32
+	typ         string
+	contentType string
+	extents     []extent
 
 	method     uint8
 	baseOffset uint64
@@ -385,7 +386,15 @@ func (m *metaBox) parseIinf(b []byte) error {
 			return errInvalid
 		}
 
-		m.item(id).typ = itemType
+		it := m.item(id)
+		it.typ = itemType
+
+		if itemType == "mime" {
+			rr.cstr()
+			if ct := rr.cstr(); !rr.err {
+				it.contentType = ct
+			}
+		}
 
 		return nil
 	})

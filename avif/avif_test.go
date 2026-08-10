@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1006,6 +1007,295 @@ func TestParseToneMap(t *testing.T) {
 		}
 		if got := g.Min[0].Float(); got != -1 {
 			t.Fatalf("%s: min = %v, want -1", c.name, got)
+		}
+	}
+}
+
+func buildBox(typ string, parts ...[]byte) []byte {
+	n := 8
+	for _, p := range parts {
+		n += len(p)
+	}
+	b := binary.BigEndian.AppendUint32(make([]byte, 0, n), uint32(n))
+	b = append(b, typ...)
+	for _, p := range parts {
+		b = append(b, p...)
+	}
+
+	return b
+}
+
+func fullBox(typ string, version uint8, flags uint32, parts ...[]byte) []byte {
+	head := binary.BigEndian.AppendUint32(nil, uint32(version)<<24|flags)
+
+	return buildBox(typ, append([][]byte{head}, parts...)...)
+}
+
+type tiffTag struct {
+	tag, typ uint16
+	count    uint32
+	data     []byte
+}
+
+func tiffLen(tags []tiffTag) int {
+	n := 2 + len(tags)*12 + 4
+	for _, t := range tags {
+		if len(t.data) > 4 {
+			n += len(t.data)
+		}
+	}
+
+	return n
+}
+
+// tiffIFD encodes an IFD placed at base, pointing values too big to inline at
+// the overflow area that follows the directory.
+func tiffIFD(base int, tags []tiffTag) []byte {
+	over := base + 2 + len(tags)*12 + 4
+
+	dir := binary.BigEndian.AppendUint16(nil, uint16(len(tags)))
+	var extra []byte
+	for _, t := range tags {
+		dir = binary.BigEndian.AppendUint16(dir, t.tag)
+		dir = binary.BigEndian.AppendUint16(dir, t.typ)
+		dir = binary.BigEndian.AppendUint32(dir, t.count)
+		if len(t.data) > 4 {
+			dir = binary.BigEndian.AppendUint32(dir, uint32(over+len(extra)))
+			extra = append(extra, t.data...)
+		} else {
+			v := make([]byte, 4)
+			copy(v, t.data)
+			dir = append(dir, v...)
+		}
+	}
+	dir = binary.BigEndian.AppendUint32(dir, 0)
+
+	return append(dir, extra...)
+}
+
+func be16(v uint16) []byte { return binary.BigEndian.AppendUint16(nil, v) }
+func be32(v uint32) []byte { return binary.BigEndian.AppendUint32(nil, v) }
+func rat(n, d uint32) []byte {
+	return append(be32(n), be32(d)...)
+}
+
+// sampleTIFF builds the payload the Exif tests read back.
+func sampleTIFF() []byte {
+	gps := []tiffTag{
+		{tagGPSLatitudeRef, typeASCIIString, 2, []byte("N\x00")},
+		{tagGPSLatitude, typeUnsignedRational, 3, slices.Concat(rat(48, 1), rat(51, 1), rat(1234, 100))},
+		{tagGPSLongitudeRef, typeASCIIString, 2, []byte("W\x00")},
+		{tagGPSLongitude, typeUnsignedRational, 3, slices.Concat(rat(2, 1), rat(21, 1), rat(50, 100))},
+		{tagGPSAltitudeRef, typeUnsignedByte, 1, []byte{1}},
+		{tagGPSAltitude, typeUnsignedRational, 1, rat(3500, 100)},
+	}
+	sub := []tiffTag{
+		{tagExposureTime, typeUnsignedRational, 1, rat(1, 250)},
+		{tagFNumber, typeUnsignedRational, 1, rat(56, 10)},
+		{tagISOSpeedRatings, typeUnsignedShort, 1, be16(800)},
+		{tagDateTimeOriginal, typeASCIIString, 20, []byte("2024:03:01 09:15:00\x00")},
+		{tagFlash, typeUnsignedShort, 1, be16(9)},
+		{tagFocalLength, typeUnsignedRational, 1, rat(350, 10)},
+	}
+
+	ifd0Base := 8
+	var ifd0 []tiffTag
+	build := func() []byte {
+		subBase := ifd0Base + tiffLen(ifd0)
+		gpsBase := subBase + tiffLen(sub)
+
+		return slices.Concat(
+			[]byte("MM\x00\x2a"), be32(uint32(ifd0Base)),
+			tiffIFD(ifd0Base, ifd0),
+			tiffIFD(subBase, sub),
+			tiffIFD(gpsBase, gps),
+		)
+	}
+
+	ifd0 = []tiffTag{
+		{tagImageWidth, typeUnsignedLong, 1, be32(1600)},
+		{tagImageLength, typeUnsignedShort, 1, be16(900)},
+		{tagMake, typeASCIIString, 6, []byte("Canon\x00")},
+		{tagModel, typeASCIIString, 8, []byte("EOS 5D\x00\x00")},
+		{tagSoftware, typeASCIIString, 6, []byte("gav1d\x00")},
+		{tagDateTime, typeASCIIString, 20, []byte("2024:03:02 11:00:00\x00")},
+		{tagArtist, typeASCIIString, 6, []byte("milan\x00")},
+		{tagCopyright, typeASCIIString, 4, []byte("CC0\x00")},
+		{tagOrientation, typeUnsignedShort, 1, be16(6)},
+		{tagExifIFDPointer, typeUnsignedLong, 1, nil},
+		{tagGPSIFDPointer, typeUnsignedLong, 1, nil},
+	}
+	subBase := ifd0Base + tiffLen(ifd0)
+	ifd0[len(ifd0)-2].data = be32(uint32(subBase))
+	ifd0[len(ifd0)-1].data = be32(uint32(subBase + tiffLen(sub)))
+
+	return build()
+}
+
+type metaItem struct {
+	id          uint16
+	typ         string
+	contentType string
+	payload     []byte
+	cdsc        uint16
+}
+
+// buildMetaFile assembles a file whose items live in idat, which is all the
+// metadata readers walk.
+func buildMetaFile(items []metaItem) []byte {
+	var infes, locs, refs, idat []byte
+	var nloc int
+
+	for _, it := range items {
+		name := []byte{0}
+		body := slices.Concat(be16(it.id), be16(0), []byte(it.typ), name)
+		if it.typ == "mime" {
+			body = append(body, append([]byte(it.contentType), 0)...)
+		}
+		infes = append(infes, fullBox("infe", 2, 0, body)...)
+
+		if it.payload != nil {
+			locs = append(locs, slices.Concat(be16(it.id), be16(1), be16(0), be16(1),
+				be32(uint32(len(idat))), be32(uint32(len(it.payload))))...)
+			nloc++
+			idat = append(idat, it.payload...)
+		}
+		if it.cdsc != 0 {
+			refs = append(refs, buildBox("cdsc", be16(it.id), be16(1), be16(it.cdsc))...)
+		}
+	}
+
+	meta := fullBox("meta", 0, 0,
+		fullBox("pitm", 0, 0, be16(items[0].id)),
+		fullBox("iinf", 0, 0, be16(uint16(len(items))), infes),
+		fullBox("iref", 0, 0, refs),
+		fullBox("iloc", 1, 0, []byte{0x44, 0x00}, be16(uint16(nloc)), locs),
+		buildBox("idat", idat),
+	)
+
+	return append(buildBox("ftyp", []byte("avif"), be32(0), []byte("avifmif1")), meta...)
+}
+
+func exifItems(tiffOffset uint32, contentType string, cdsc uint16) []metaItem {
+	tiff := sampleTIFF()
+	pad := make([]byte, tiffOffset)
+
+	return []metaItem{
+		{id: 1, typ: "av01"},
+		{id: 2, typ: "Exif", payload: slices.Concat(be32(tiffOffset), pad, tiff), cdsc: cdsc},
+		{id: 3, typ: "mime", contentType: contentType, payload: []byte("<x:xmpmeta/>"), cdsc: cdsc},
+	}
+}
+
+// TestExif reads the metadata items back out of a container built around a
+// known TIFF payload, covering the header offset, the cdsc association that
+// ties an item to the image it describes, and the mime type that separates XMP
+// from any other mime item.
+func TestExif(t *testing.T) {
+	b := buildMetaFile(exifItems(0, xmpContentType, 1))
+
+	e, err := DecodeExif(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Indexed so the degrees round exactly as the parser rounds them.
+	dms := []float64{48, 51, 12.34, 2, 21, 0.5}
+	want := Exif{
+		Orientation: 6, Width: 1600, Height: 900,
+		Make: "Canon", Model: "EOS 5D", Software: "gav1d",
+		DateTime: "2024:03:02 11:00:00", DateTimeOriginal: "2024:03:01 09:15:00",
+		ExposureTime: 1.0 / 250, FNumber: 5.6, ISOSpeed: 800, FocalLength: 35, Flash: 9,
+		GPSLatitude:  dms[0] + dms[1]/60 + dms[2]/3600,
+		GPSLongitude: -(dms[3] + dms[4]/60 + dms[5]/3600),
+		GPSAltitude:  -35,
+		Copyright:    "CC0", Artist: "milan",
+	}
+	if *e != want {
+		t.Fatalf("exif =\n%+v\nwant\n%+v", *e, want)
+	}
+
+	xmp, err := RawXMP(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(xmp) != "<x:xmpmeta/>" {
+		t.Fatalf("xmp = %q", xmp)
+	}
+
+	// A writer that pads before the TIFF header must signal where it starts.
+	if _, err := DecodeExif(bytes.NewReader(buildMetaFile(exifItems(6, xmpContentType, 1)))); err != nil {
+		t.Fatalf("exif_tiff_header_offset ignored: %v", err)
+	}
+
+	// Metadata describing some other item is not this image's.
+	b = buildMetaFile(exifItems(0, xmpContentType, 9))
+	if _, err := DecodeExif(bytes.NewReader(b)); !errors.Is(err, ErrNoExif) {
+		t.Fatalf("exif without a cdsc reference to the image = %v, want ErrNoExif", err)
+	}
+	if _, err := RawXMP(bytes.NewReader(b)); !errors.Is(err, ErrNoXMP) {
+		t.Fatalf("xmp without a cdsc reference to the image = %v, want ErrNoXMP", err)
+	}
+
+	// A mime item is only XMP when it says so.
+	b = buildMetaFile(exifItems(0, "text/plain", 1))
+	if _, err := RawXMP(bytes.NewReader(b)); !errors.Is(err, ErrNoXMP) {
+		t.Fatalf("mime item of another type = %v, want ErrNoXMP", err)
+	}
+
+	b = buildMetaFile([]metaItem{{id: 1, typ: "av01"}})
+	if _, err := DecodeExif(bytes.NewReader(b)); !errors.Is(err, ErrNoExif) {
+		t.Fatalf("file without an Exif item = %v, want ErrNoExif", err)
+	}
+	if _, err := RawXMP(bytes.NewReader(b)); !errors.Is(err, ErrNoXMP) {
+		t.Fatalf("file without an XMP item = %v, want ErrNoXMP", err)
+	}
+}
+
+// TestExifFiles reads the two metadata items libavif's own tests pin the sizes
+// of. Set AVIF_CONFORMANCE_DIR to run it.
+func TestExifFiles(t *testing.T) {
+	env := os.Getenv("AVIF_CONFORMANCE_DIR")
+	if env == "" {
+		t.Skip("set AVIF_CONFORMANCE_DIR")
+	}
+
+	for _, name := range []string{"colors-animated-8bpc-alpha-exif-xmp.avif", "paris_icc_exif_xmp.avif"} {
+		var b []byte
+		for _, dir := range strings.Split(env, ":") {
+			if d, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+				b = d
+
+				break
+			}
+		}
+		if b == nil {
+			continue
+		}
+
+		raw, err := RawExif(bytes.NewReader(b))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(raw) != 1126 {
+			t.Fatalf("%s: exif = %d bytes, want 1126", name, len(raw))
+		}
+		xmp, err := RawXMP(bytes.NewReader(b))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(xmp) != 3898 {
+			t.Fatalf("%s: xmp = %d bytes, want 3898", name, len(xmp))
+		}
+
+		e, err := DecodeExif(bytes.NewReader(b))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if e.Make != "Google" || e.Model != "Pixel 4a" || e.ISOSpeed != 47 ||
+			e.FNumber != 1.7 || e.FocalLength != 4.4 || e.Flash != 16 ||
+			e.DateTimeOriginal != "2022:08:22 20:30:46" {
+			t.Fatalf("%s: exif = %+v", name, *e)
 		}
 	}
 }
