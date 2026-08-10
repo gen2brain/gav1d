@@ -28,6 +28,18 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d16.fgApplyRow = fgApplyRow16AVX2Row
 		d16.fguvApplyRow = fguvApplyRow16AVX2Row
 		d16.cdefCopy = cdefCopy16AVX2Rows
+		d16.ipred[smoothPred] = ipredSmooth16AVX2
+		d16.ipred[smoothVPred] = ipredSmoothV16AVX2
+		d16.ipred[smoothHPred] = ipredSmoothH16AVX2
+		d16.ipred[paethPred] = ipredPaeth16AVX2
+		d16.ipred[vertPred] = ipredV16AVX2
+		d16.ipred[horPred] = ipredH16AVX2
+		d16.ipred[dcPred] = ipredDc16AVX2
+		d16.ipred[topDcPred] = ipredDcTop16AVX2
+		d16.ipred[leftDcPred] = ipredDcLeft16AVX2
+		d16.ipred[dc128Pred] = ipredDc12816AVX2
+		d16.ipred[filterPred] = ipredFilter16AVX2
+		d16.ipred[z1Pred] = ipredZ116AVX2
 	}
 
 	if d8, ok := any(d).(*dspContext[uint8]); ok {

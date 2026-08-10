@@ -195,40 +195,38 @@ func ipredAngles(mode int) []int {
 	return []int{0}
 }
 
-func TestIpredAsm(t *testing.T) {
-	d, ref := newDsp[uint8](), newDspGo[uint8]()
+func runIpredAsm[P pixel](t *testing.T, modes []int, bitdepthMax int32) int {
+	d, ref := newDsp[P](), newDspGo[P]()
 
-	modes := []int{smoothPred, smoothVPred, smoothHPred, paethPred, vertPred,
-		horPred, dcPred, topDcPred, leftDcPred, dc128Pred, filterPred, z1Pred}
 	sizes := []int{4, 8, 16, 32, 64}
 	cases := 0
 
-	tl := make([]uint8, 2*ipredTL+1)
-	got := make([]uint8, 64*ipredStride)
-	want := make([]uint8, 64*ipredStride)
+	tl := make([]P, 2*ipredTL+1)
+	got := make([]P, 64*ipredStride)
+	want := make([]P, 64*ipredStride)
 
 	for iter := range 3 {
-		ipredFillTl(tl, iter, 255)
+		ipredFillTl(tl, iter, bitdepthMax)
 
 		for _, m := range modes {
 			for _, w := range sizes {
 				for _, h := range sizes {
 					for _, angle := range ipredAngles(m) {
 						for i := range got {
-							got[i] = 0xA5
-							want[i] = 0xA5
+							got[i] = P(0xA5)
+							want[i] = P(0xA5)
 						}
 
-						d.ipred[m](got, 0, ipredStride, tl, ipredTL, w, h, angle, 0, 0, 255)
-						ref.ipred[m](want, 0, ipredStride, tl, ipredTL, w, h, angle, 0, 0, 255)
+						d.ipred[m](got, 0, ipredStride, tl, ipredTL, w, h, angle, 0, 0, bitdepthMax)
+						ref.ipred[m](want, 0, ipredStride, tl, ipredTL, w, h, angle, 0, 0, bitdepthMax)
 
 						for i := range want {
 							if got[i] == want[i] {
 								continue
 							}
-							t.Fatalf("iter=%d mode=%d %dx%d angle=%d: [%d,%d] = %d, want %d",
-								iter, m, w, h, angle, i/ipredStride, i%ipredStride,
-								got[i], want[i])
+							t.Fatalf("bpc=%d iter=%d mode=%d %dx%d angle=%d: [%d,%d] = %d, want %d",
+								bitdepthMax, iter, m, w, h, angle, i/ipredStride,
+								i%ipredStride, got[i], want[i])
 						}
 						cases++
 					}
@@ -237,11 +235,24 @@ func TestIpredAsm(t *testing.T) {
 		}
 	}
 
+	return cases
+}
+
+func TestIpredAsm(t *testing.T) {
+	m8 := []int{smoothPred, smoothVPred, smoothHPred, paethPred, vertPred,
+		horPred, dcPred, topDcPred, leftDcPred, dc128Pred, filterPred, z1Pred}
+	m16 := []int{smoothPred, smoothVPred, smoothHPred, paethPred, vertPred,
+		horPred, dcPred, topDcPred, leftDcPred, dc128Pred, filterPred, z1Pred}
+
+	cases := runIpredAsm[uint8](t, m8, 255)
+	cases += runIpredAsm[uint16](t, m16, 1023)
+	cases += runIpredAsm[uint16](t, m16, 4095)
+
 	t.Logf("%d cases", cases)
 }
 
-func BenchmarkIpred(b *testing.B) {
-	d := newDsp[uint8]()
+func benchIpred[P pixel](b *testing.B, tag string, bitdepthMax int32) {
+	d := newDsp[P]()
 
 	modes := []struct {
 		mode  int
@@ -256,20 +267,25 @@ func BenchmarkIpred(b *testing.B) {
 	}
 	sizes := []int{4, 8, 16, 32}
 
-	tl := make([]uint8, 2*ipredTL+1)
-	ipredFillTl(tl, 0, 255)
-	dst := make([]uint8, 64*ipredStride)
+	tl := make([]P, 2*ipredTL+1)
+	ipredFillTl(tl, 0, bitdepthMax)
+	dst := make([]P, 64*ipredStride)
 
 	for _, m := range modes {
 		for _, w := range sizes {
 			fn := d.ipred[m.mode]
-			b.Run(m.name+"/"+strconv.Itoa(w), func(b *testing.B) {
+			b.Run(tag+"/"+m.name+"/"+strconv.Itoa(w), func(b *testing.B) {
 				for b.Loop() {
-					fn(dst, 0, ipredStride, tl, ipredTL, w, w, m.angle, 0, 0, 255)
+					fn(dst, 0, ipredStride, tl, ipredTL, w, w, m.angle, 0, 0, bitdepthMax)
 				}
 			})
 		}
 	}
+}
+
+func BenchmarkIpred(b *testing.B) {
+	benchIpred[uint8](b, "8", 255)
+	benchIpred[uint16](b, "16", 1023)
 }
 
 func TestIpred(t *testing.T) {
