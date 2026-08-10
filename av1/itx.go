@@ -1,6 +1,9 @@
 package av1
 
-import "math"
+import (
+	"math"
+	"unsafe"
+)
 
 type pixel interface{ ~uint8 | ~uint16 }
 
@@ -75,6 +78,62 @@ var itxTxtpSwap = [nTxTypes]uint8{
 	hFlipadst:        vFlipadst,
 }
 
+// widenCoefs widens one column of coefficients per step into the row buffer
+// and zeroes the lanes past the last nonzero one.
+// widenCoefs16 and widenCoefs16Rect2 are the assembly forms, set once from
+// what the CPU reports. Twelve bit coefficients are already int32 and take the
+// Go path, where the plain widening is a copy.
+var (
+	widenCoefs16      func(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
+	widenCoefs16Rect2 func(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
+)
+
+func widenCoefs[C coef](dst []int32, dstStride int, src []C, srcStride, cols, n, lanes int) {
+	var z C
+	if unsafe.Sizeof(z) == 2 && widenCoefs16 != nil && cols > 0 {
+		widenCoefs16(&dst[0], dstStride,
+			(*int16)(unsafe.Pointer(unsafe.SliceData(src))), srcStride, cols, n, lanes)
+
+		return
+	}
+	if unsafe.Sizeof(z) == 4 {
+		for x := range cols {
+			d := dst[x*dstStride:]
+			s := unsafe.Slice((*int32)(unsafe.Pointer(unsafe.SliceData(src))), len(src))
+			copy(d[:n], s[x*srcStride:][:n])
+			clear(d[n:lanes])
+		}
+
+		return
+	}
+	for x := range cols {
+		d := dst[x*dstStride:]
+		for y, v := range src[x*srcStride:][:n] {
+			d[y] = int32(v)
+		}
+		clear(d[n:lanes])
+	}
+}
+
+// widenCoefsRect2 is widenCoefs for the transforms whose sides differ by two,
+// which carry an extra 1/sqrt(2).
+func widenCoefsRect2[C coef](dst []int32, dstStride int, src []C, srcStride, cols, n, lanes int) {
+	var z C
+	if unsafe.Sizeof(z) == 2 && widenCoefs16Rect2 != nil && cols > 0 {
+		widenCoefs16Rect2(&dst[0], dstStride,
+			(*int16)(unsafe.Pointer(unsafe.SliceData(src))), srcStride, cols, n, lanes)
+
+		return
+	}
+	for x := range cols {
+		d := dst[x*dstStride:]
+		for y, v := range src[x*srcStride:][:n] {
+			d[y] = (int32(v)*181 + 128) >> 8
+		}
+		clear(d[n:lanes])
+	}
+}
+
 func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 	coeff []C, tmp []int32, eob, tx, txtp int, bitdepthMax int32,
 ) {
@@ -138,18 +197,10 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 	}
 	wide := tmp[th*ts:][:tw*ws]
 
-	for x := range sw {
-		d := wide[x*ws:]
-		if isRect2 {
-			for y, v := range coeff[x*sh:][:n] {
-				d[y] = (int32(v)*181 + 128) >> 8
-			}
-		} else {
-			for y, v := range coeff[x*sh:][:n] {
-				d[y] = int32(v)
-			}
-		}
-		clear(d[n:lanes])
+	if isRect2 {
+		widenCoefsRect2(wide, ws, coeff, sh, sw, n, lanes)
+	} else {
+		widenCoefs(wide, ws, coeff, sh, sw, n, lanes)
 	}
 	for x := sw; x < tw; x++ {
 		clear(wide[x*ws:][:lanes])

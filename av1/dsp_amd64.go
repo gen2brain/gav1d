@@ -71,3 +71,12 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.ipred[z1Pred] = ipredZ18AVX2
 	}
 }
+
+func init() {
+	if !hasAVX2 {
+		return
+	}
+
+	widenCoefs16 = widenCoefs16AVX2
+	widenCoefs16Rect2 = widenCoefs16Rect2AVX2
+}

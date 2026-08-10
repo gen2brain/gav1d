@@ -3,6 +3,18 @@
 #include "textflag.h"
 
 // func itxClipAVX2(tmp *int32, n int, rnd int32, shift int, lo, hi int32)
+#define WIDEN_SETUP                \
+	MOVQ  dst+0(FP), DI;       \
+	MOVQ  dstStride+8(FP), R8; \
+	SHLQ  $2, R8;              \
+	MOVQ  src+16(FP), SI;      \
+	MOVQ  srcStride+24(FP), R9; \
+	SHLQ  $1, R9;              \
+	MOVQ  cols+32(FP), R10;    \
+	MOVQ  n+40(FP), R11;       \
+	MOVQ  lanes+48(FP), R12;   \
+	VPXOR Y1, Y1, Y1
+
 TEXT ·itxClipAVX2(SB), NOSPLIT, $0-40
 	MOVQ         tmp+0(FP), DI
 	MOVQ         n+8(FP), CX
@@ -254,5 +266,125 @@ trtap:
 	SUBQ $8, CX
 	JNZ  trlane
 
+	VZEROUPPER
+	RET
+
+
+// func widenCoefs16AVX2(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
+TEXT ·widenCoefs16AVX2(SB), NOSPLIT, $0-56
+	WIDEN_SETUP
+	TESTQ R10, R10
+	JZ    wdone
+
+wcol:
+	MOVQ DI, DX
+	MOVQ SI, CX
+	XORQ BX, BX
+
+w8:
+	LEAQ 8(BX), AX
+	CMPQ AX, R11
+	JG   w1
+	VPMOVSXWD (CX)(BX*2), Y0
+	VMOVDQU   Y0, (DX)(BX*4)
+	MOVQ      AX, BX
+	JMP       w8
+
+w1:
+	CMPQ    BX, R11
+	JGE     wz8
+	MOVWLSX (CX)(BX*2), AX
+	MOVL    AX, (DX)(BX*4)
+	INCQ    BX
+	JMP     w1
+
+wz8:
+	LEAQ    8(BX), AX
+	CMPQ    AX, R12
+	JG      wz1
+	VMOVDQU Y1, (DX)(BX*4)
+	MOVQ    AX, BX
+	JMP     wz8
+
+wz1:
+	CMPQ BX, R12
+	JGE  wnext
+	MOVL $0, (DX)(BX*4)
+	INCQ BX
+	JMP  wz1
+
+wnext:
+	ADDQ R8, DI
+	ADDQ R9, SI
+	DECQ R10
+	JNZ  wcol
+
+wdone:
+	VZEROUPPER
+	RET
+
+// func widenCoefs16Rect2AVX2(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
+TEXT ·widenCoefs16Rect2AVX2(SB), NOSPLIT, $0-56
+	WIDEN_SETUP
+	TESTQ R10, R10
+	JZ    rdone
+
+	MOVL         $181, AX
+	MOVQ         AX, X2
+	VPBROADCASTD X2, Y2
+	MOVL         $128, AX
+	MOVQ         AX, X3
+	VPBROADCASTD X3, Y3
+
+rcol:
+	MOVQ DI, DX
+	MOVQ SI, CX
+	XORQ BX, BX
+
+r8:
+	LEAQ 8(BX), AX
+	CMPQ AX, R11
+	JG   r1
+	VPMOVSXWD (CX)(BX*2), Y0
+	VPMULLD   Y2, Y0, Y0
+	VPADDD    Y3, Y0, Y0
+	VPSRAD    $8, Y0, Y0
+	VMOVDQU   Y0, (DX)(BX*4)
+	MOVQ      AX, BX
+	JMP       r8
+
+r1:
+	CMPQ    BX, R11
+	JGE     rz8
+	MOVWLSX (CX)(BX*2), AX
+	IMULL   $181, AX
+	ADDL    $128, AX
+	SARL    $8, AX
+	MOVL    AX, (DX)(BX*4)
+	INCQ    BX
+	JMP     r1
+
+rz8:
+	LEAQ    8(BX), AX
+	CMPQ    AX, R12
+	JG      rz1
+	VMOVDQU Y1, (DX)(BX*4)
+	MOVQ    AX, BX
+	JMP     rz8
+
+rz1:
+	CMPQ BX, R12
+	JGE  rnext
+	MOVL $0, (DX)(BX*4)
+	INCQ BX
+	JMP  rz1
+
+rnext:
+	ADDQ R8, DI
+	ADDQ R9, SI
+	DECQ R10
+	JNZ  rcol
+
+rdone:
 	VZEROUPPER
 	RET

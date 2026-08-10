@@ -323,3 +323,64 @@ func BenchmarkItx(b *testing.B) {
 		})
 	}
 }
+
+// TestWidenCoefsAsm checks the widening kernels against the Go loops they
+// replace, over the shapes invTxfmAdd asks for: any number of nonzero rows,
+// lanes rounded up past it, and strides wider than either.
+func TestWidenCoefsAsm(t *testing.T) {
+	if widenCoefs16 == nil {
+		t.Skip("no widen assembly on this architecture")
+	}
+
+	asm, asmRect2 := widenCoefs16, widenCoefs16Rect2
+	cases := 0
+
+	for _, cols := range []int{1, 2, 3, 8, 16, 32} {
+		for _, n := range []int{1, 2, 5, 7, 8, 9, 15, 16, 17, 31, 32, 64} {
+			for _, extra := range []int{0, 1, 7} {
+				lanes := (n+7)/8*8 + extra*8
+				srcStride, dstStride := n+extra, lanes+extra
+
+				src := make([]int16, cols*srcStride)
+				for i := range src {
+					v := int32(cdefGen(i*7+cols, n, i)) & 0xffff
+					src[i] = int16(v - 0x8000)
+				}
+				if len(src) > 3 {
+					src[0], src[1], src[2], src[3] = 0, -32768, 32767, 1
+				}
+
+				for _, rect2 := range []bool{false, true} {
+					want := make([]int32, cols*dstStride)
+					got := make([]int32, cols*dstStride)
+					for i := range want {
+						want[i], got[i] = -1, -1
+					}
+
+					widenCoefs16, widenCoefs16Rect2 = nil, nil
+					if rect2 {
+						widenCoefsRect2(want, dstStride, src, srcStride, cols, n, lanes)
+					} else {
+						widenCoefs(want, dstStride, src, srcStride, cols, n, lanes)
+					}
+					widenCoefs16, widenCoefs16Rect2 = asm, asmRect2
+					if rect2 {
+						widenCoefsRect2(got, dstStride, src, srcStride, cols, n, lanes)
+					} else {
+						widenCoefs(got, dstStride, src, srcStride, cols, n, lanes)
+					}
+
+					for i := range want {
+						if got[i] != want[i] {
+							t.Fatalf("rect2=%v cols=%d n=%d lanes=%d strides=%d/%d: [%d] = %d, want %d",
+								rect2, cols, n, lanes, srcStride, dstStride, i, got[i], want[i])
+						}
+					}
+					cases++
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
