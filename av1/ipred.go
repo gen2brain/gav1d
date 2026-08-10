@@ -544,6 +544,11 @@ func ipredZ2[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,
 		// Without the upsample the top edge is read straight through, so the
 		// run past the last negative column is one contiguous kernel call.
 		if baseIncX == 1 {
+			if lrun := min(width, -baseX); lrun > 0 {
+				if n := z2LeftRun(dst, row+x, edge[:], leftOff-1, lrun, ypos, dy); n > 0 {
+					x, baseX, ypos = x+n, baseX+n, ypos-n*dy
+				}
+			}
 			for ; x < width && baseX < 0; x, baseX, ypos = x+1, baseX+1, ypos-dy {
 				baseY := ypos >> 6
 				fracY := int32(ypos & 0x3E)
@@ -571,6 +576,24 @@ func ipredZ2[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,
 		}
 		xpos -= dx
 	}
+}
+
+// z2LeftRun fills the columns that read the left edge, where the position
+// steps by dy so both the sample and the fraction move with the column.
+var z2Left8Asm func(dst *uint8, edge *uint8, n int, ypos, dy int32)
+
+func z2LeftRun[P pixel](dst []P, dstOff int, edge []P, edgeOff, n, ypos, dy int) int {
+	var z P
+	if unsafe.Sizeof(z) == 1 && z2Left8Asm != nil {
+		if n8 := n &^ 7; n8 > 0 {
+			z2Left8Asm((*uint8)(unsafe.Pointer(&dst[dstOff])),
+				(*uint8)(unsafe.Pointer(&edge[edgeOff])), n8, int32(ypos), int32(dy))
+
+			return n8
+		}
+	}
+
+	return 0
 }
 
 // z2TopRun fills the columns that read the top edge, where the fraction is

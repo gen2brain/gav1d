@@ -333,3 +333,71 @@ ac444col:
 
 	VZEROUPPER
 	RET
+
+DATA z2idx<>+0(SB)/4, $0
+DATA z2idx<>+4(SB)/4, $1
+DATA z2idx<>+8(SB)/4, $2
+DATA z2idx<>+12(SB)/4, $3
+DATA z2idx<>+16(SB)/4, $4
+DATA z2idx<>+20(SB)/4, $5
+DATA z2idx<>+24(SB)/4, $6
+DATA z2idx<>+28(SB)/4, $7
+GLOBL z2idx<>(SB), RODATA|NOPTR, $32
+
+// The left edge is walked by a position that steps by dy, so the sample index
+// moves unevenly and the pair has to be gathered. Gathering a dword lands both
+// taps of a lane in its low two bytes; the two above them are weighted zero.
+// func z2Left8AVX2(dst *uint8, edge *uint8, n int, ypos, dy int32)
+TEXT ·z2Left8AVX2(SB), NOSPLIT, $0-32
+	MOVQ dst+0(FP), DI
+	MOVQ edge+8(FP), SI
+	MOVQ n+16(FP), CX
+	MOVL ypos+24(FP), AX
+	MOVL dy+28(FP), DX
+
+	VMOVDQU      z2idx<>(SB), Y10
+	VMOVD        DX, X11
+	VPBROADCASTD X11, Y11
+	VPMULLD      Y10, Y11, Y10
+	MOVL         $8, BX
+	IMULL        DX, BX
+	VMOVD        BX, X12
+	VPBROADCASTD X12, Y12
+	MOVL         $0x3E, BX
+	VMOVD        BX, X13
+	VPBROADCASTD X13, Y13
+	MOVL         $64, BX
+	VMOVD        BX, X14
+	VPBROADCASTD X14, Y14
+	MOVL         $32, BX
+	VMOVD        BX, X15
+	VPBROADCASTD X15, Y15
+	VMOVD        AX, X9
+	VPBROADCASTD X9, Y9
+	VPSUBD       Y10, Y9, Y9
+	XORQ         BX, BX
+
+z2l:
+	VPSRAD  $6, Y9, Y1
+	VPAND   Y13, Y9, Y2
+	VPXOR   Y3, Y3, Y3
+	VPSUBD  Y1, Y3, Y1
+	VPSUBD  Y2, Y14, Y4
+	VPSLLD  $8, Y4, Y4
+	VPOR    Y2, Y4, Y4
+	VPCMPEQD Y5, Y5, Y5
+	VPGATHERDD Y5, (SI)(Y1*1), Y6
+	VPMADDUBSW Y4, Y6, Y6
+	VPADDD  Y15, Y6, Y6
+	VPSRLD  $6, Y6, Y6
+	VPACKUSDW Y6, Y6, Y6
+	VPERMQ  $0x08, Y6, Y6
+	VPACKUSWB X6, X6, X6
+	VMOVQ   X6, (DI)(BX*1)
+	VPSUBD  Y12, Y9, Y9
+	ADDQ    $8, BX
+	CMPQ    BX, CX
+	JLT     z2l
+
+	VZEROUPPER
+	RET
