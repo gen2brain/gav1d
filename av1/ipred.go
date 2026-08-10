@@ -2,6 +2,16 @@ package av1
 
 import "math/bits"
 
+var smWeightsPm = func() [128][2]int8 {
+	var t [128][2]int8
+	for i, w := range smWeights {
+		t[i][0] = int8(int(w) - 128)
+		t[i][1] = int8(127 - int(w))
+	}
+
+	return t
+}()
+
 func splatDc[P pixel](dst []P, dstOff, stride, width, height int, dc int32) {
 	for y := range height {
 		row := dstOff + y*stride

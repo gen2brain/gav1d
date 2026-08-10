@@ -161,6 +161,91 @@ func runCflPred[P pixel](t *testing.T, line int, mode, w, h int, alpha int32,
 	}
 }
 
+func ipredFillTl[P pixel](tl []P, iter int, bitdepthMax int32) {
+	s := uint32(iter*7919 + 1)
+	for i := range tl {
+		s = s*1103515245 + 12345
+		switch iter {
+		case 0:
+			tl[i] = P(int32(s>>16) & bitdepthMax)
+		case 1:
+			tl[i] = P(bitdepthMax * int32(i&1))
+		default:
+			tl[i] = P(bitdepthMax)
+		}
+	}
+}
+
+func TestIpredAsm(t *testing.T) {
+	d, ref := newDsp[uint8](), newDspGo[uint8]()
+
+	modes := []int{smoothPred, smoothVPred, smoothHPred, paethPred, vertPred,
+		horPred, dcPred, topDcPred, leftDcPred, dc128Pred}
+	sizes := []int{4, 8, 16, 32, 64}
+	cases := 0
+
+	tl := make([]uint8, 2*ipredTL+1)
+	got := make([]uint8, 64*ipredStride)
+	want := make([]uint8, 64*ipredStride)
+
+	for iter := range 3 {
+		ipredFillTl(tl, iter, 255)
+
+		for _, m := range modes {
+			for _, w := range sizes {
+				for _, h := range sizes {
+					for i := range got {
+						got[i] = 0xA5
+						want[i] = 0xA5
+					}
+
+					d.ipred[m](got, 0, ipredStride, tl, ipredTL, w, h, 0, 0, 0, 255)
+					ref.ipred[m](want, 0, ipredStride, tl, ipredTL, w, h, 0, 0, 0, 255)
+
+					for i := range want {
+						if got[i] == want[i] {
+							continue
+						}
+						t.Fatalf("iter=%d mode=%d %dx%d: [%d,%d] = %d, want %d",
+							iter, m, w, h, i/ipredStride, i%ipredStride, got[i], want[i])
+					}
+					cases++
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+func BenchmarkIpred(b *testing.B) {
+	d := newDsp[uint8]()
+
+	modes := []struct {
+		mode int
+		name string
+	}{
+		{smoothPred, "smooth"}, {smoothVPred, "smoothV"}, {smoothHPred, "smoothH"},
+		{paethPred, "paeth"}, {vertPred, "v"}, {horPred, "h"}, {dcPred, "dc"},
+	}
+	sizes := []int{4, 8, 16, 32}
+
+	tl := make([]uint8, 2*ipredTL+1)
+	ipredFillTl(tl, 0, 255)
+	dst := make([]uint8, 64*ipredStride)
+
+	for _, m := range modes {
+		for _, w := range sizes {
+			fn := d.ipred[m.mode]
+			b.Run(m.name+"/"+strconv.Itoa(w), func(b *testing.B) {
+				for b.Loop() {
+					fn(dst, 0, ipredStride, tl, ipredTL, w, w, 0, 0, 0, 255)
+				}
+			})
+		}
+	}
+}
+
 func TestIpred(t *testing.T) {
 	sc, closeFixture := openFixture(t, "ipred.txt")
 	defer closeFixture()
