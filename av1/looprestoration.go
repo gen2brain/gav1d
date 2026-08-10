@@ -72,6 +72,16 @@ func wienerHRow[P pixel](dst []uint16, dstOff int, src []P, srcOff, n int,
 
 // wienerFilterH folds the rounding offset and, at 8 bits, the unscaled centre
 // pixel into the taps, so the bulk of the row is an unconditional 7-tap.
+// wienerVRnd is the rounding the vertical wiener pass folds in, which the
+// kernels need before they start.
+func wienerVRnd(bitdepthMax int32) (rnd int32, shift int) {
+	bitdepth := bitdepthFromMax(bitdepthMax)
+	shift = 11 - b2i(bitdepth == 12)*2
+	rnd = int32(1)<<(shift-1) - int32(1)<<(bitdepth+shift-1)
+
+	return rnd, shift
+}
+
 // lrScratch is the wiener filter's row buffer, held per task so that a stripe
 // does not allocate one. Every row is written by wienerFilterH before the
 // vertical pass reads it.

@@ -975,10 +975,6 @@ func splitTiles(hdr *frameHeader, tiles []tileGroup, nTs int) ([][]byte, error) 
 	return out, nil
 }
 
-func scaleFacRef(refSz, thisSz int) int {
-	return ((refSz << 14) + (thisSz >> 1)) / thisSz
-}
-
 func (f *frameContext[P, C]) setupRefs(d *Decoder) error {
 	hdr := f.frameHdr
 
@@ -1002,8 +998,8 @@ func (f *frameContext[P, C]) setupRefs(d *Decoder) error {
 			return errInvalid
 		}
 		if hdr.width[0] != p.w || hdr.height != p.h {
-			f.svc[i][0].scale = scaleFacRef(p.w, hdr.width[0])
-			f.svc[i][1].scale = scaleFacRef(p.h, hdr.height)
+			f.svc[i][0].scale = scaleFac(p.w, hdr.width[0])
+			f.svc[i][1].scale = scaleFac(p.h, hdr.height)
 			f.svc[i][0].step = (f.svc[i][0].scale + 8) >> 4
 			f.svc[i][1].step = (f.svc[i][1].scale + 8) >> 4
 		} else {

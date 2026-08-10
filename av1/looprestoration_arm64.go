@@ -44,18 +44,10 @@ func wienerH16NEONRow(dst []uint16, dstOff int, src []uint16, srcOff, n int,
 	}
 }
 
-func wienerVNEONRnd(bitdepthMax int32) (rnd int32, shift int) {
-	bitdepth := bitdepthFromMax(bitdepthMax)
-	shift = 11 - b2i(bitdepth == 12)*2
-	rnd = int32(1)<<(shift-1) - int32(1)<<(bitdepth+shift-1)
-
-	return rnd, shift
-}
-
 func wienerV8NEONRow(p []uint8, pOff int, hor []uint16, rows *[7]int,
 	fv *[8]int16, w int, bitdepthMax int32,
 ) {
-	rnd, shift := wienerVNEONRnd(bitdepthMax)
+	rnd, shift := wienerVRnd(bitdepthMax)
 
 	n := w &^ 7
 	if n > 0 {
@@ -75,7 +67,7 @@ func wienerV8NEONRow(p []uint8, pOff int, hor []uint16, rows *[7]int,
 func wienerV16NEONRow(p []uint16, pOff int, hor []uint16, rows *[7]int,
 	fv *[8]int16, w int, bitdepthMax int32,
 ) {
-	rnd, shift := wienerVNEONRnd(bitdepthMax)
+	rnd, shift := wienerVRnd(bitdepthMax)
 
 	n := w &^ 7
 	if n > 0 {

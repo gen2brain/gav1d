@@ -48,6 +48,12 @@ var av1IntraPredictionEdges = [nImplIntraPredModes]intraEdgeNeeds{
 	filterPred:  {left: true, top: true, topleft: true},
 }
 
+func fill[P pixel](dst []P, v P) {
+	for i := range dst {
+		dst[i] = v
+	}
+}
+
 func prepareIntraEdges[P pixel](x int, haveLeft bool, y int, haveTop bool,
 	w, h, edgeFlags int, dst []P, dstOff, stride int,
 	sbEdge []P, sbEdgeOff int, mode int, angle *int, tw, th int,
@@ -181,12 +187,6 @@ func prepareIntraEdges[P pixel](x int, haveLeft bool, y int, haveTop bool,
 
 func bitdepthFromMax(bitdepthMax int32) int {
 	return bits.Len32(uint32(bitdepthMax))
-}
-
-func fill[P pixel](dst []P, v P) {
-	for i := range dst {
-		dst[i] = v
-	}
 }
 
 func gatherColumn[P pixel](out []P, outOff int, src []P, srcOff, stride, n int) {

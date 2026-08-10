@@ -1,7 +1,5 @@
 package av1
 
-const qindexRange = 256
-
 const (
 	obuMetaHdrCll      = 1
 	obuMetaHdrMdcv     = 2

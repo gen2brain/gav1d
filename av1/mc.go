@@ -553,10 +553,10 @@ func emuEdge[P pixel](bw, bh, iw, ih, x, y int, dst []P, dstOff, dstStride int,
 	for range centerH {
 		copy(dst[blk+leftExt:blk+leftExt+centerW], ref[refOff:refOff+centerW])
 		if leftExt != 0 {
-			memsetP(dst[blk:blk+leftExt], dst[blk+leftExt])
+			fill(dst[blk:blk+leftExt], dst[blk+leftExt])
 		}
 		if rightExt != 0 {
-			memsetP(dst[blk+leftExt+centerW:blk+leftExt+centerW+rightExt],
+			fill(dst[blk+leftExt+centerW:blk+leftExt+centerW+rightExt],
 				dst[blk+leftExt+centerW-1])
 		}
 		refOff += refStride
@@ -573,12 +573,6 @@ func emuEdge[P pixel](bw, bh, iw, ih, x, y int, dst []P, dstOff, dstStride int,
 	for range bottomExt {
 		copy(dst[dstOff:dstOff+bw], dst[dstOff-dstStride:dstOff-dstStride+bw])
 		dstOff += dstStride
-	}
-}
-
-func memsetP[P pixel](dst []P, v P) {
-	for i := range dst {
-		dst[i] = v
 	}
 }
 
