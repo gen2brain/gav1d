@@ -38,6 +38,19 @@ func lrBuffers[P pixel](b, iter int, bitdepthMax int32) (dst, lpf, left []P) {
 	return dst, lpf, left
 }
 
+// dirtyLrScratch returns a wiener row buffer holding stale filtered values, so
+// that a stripe reading a row its horizontal pass did not write shows up
+// against the fixture. The value varies per iteration, which is what makes a
+// result that depends on it fail rather than merely differ.
+func dirtyLrScratch(iter int) *lrScratch {
+	sc := &lrScratch{}
+	for i := range sc.hor {
+		sc.hor[i] = uint16(4096 + iter*997)
+	}
+
+	return sc
+}
+
 func runLR[P pixel, C coef](b, iter, kind, w, h, edges int,
 	params *looprestorationParams, bitdepthMax int32,
 ) []int {
@@ -49,7 +62,7 @@ func runLR[P pixel, C coef](b, iter, kind, w, h, edges int,
 
 	switch kind {
 	case 0:
-		lrWiener[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+		lrWiener[P, C](d, dirtyLrScratch(iter), dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
 			params, edges, bitdepthMax)
 	case 1:
 		lrSgr5x5[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
@@ -178,7 +191,7 @@ func runWiener[P pixel, C coef](d *lrContext[P, C], b, iter, w, h, edges int,
 ) []P {
 	dst, lpf, left := lrBuffers[P](b, iter, bitdepthMax)
 
-	lrWiener[P, C](d, dst, lrPad*lrStride+lrPad, lrStride, left, 0,
+	lrWiener[P, C](d, dirtyLrScratch(iter), dst, lrPad*lrStride+lrPad, lrStride, left, 0,
 		lpf, 2*lrStride+lrPad, w, h, params, edges, bitdepthMax)
 
 	return dst

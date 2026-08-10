@@ -33,7 +33,13 @@ func lrStripe[P pixel, C coef](t *taskContext[P, C], p []P, pOff int,
 		flt[1][2], flt[1][4] = int16(lr.filterV[2]), int16(lr.filterV[2])
 		flt[1][3] = 128 - (flt[1][0]+flt[1][1]+flt[1][2])*2
 
-		fn = lrWiener[P, C]
+		fn = func(lr *lrContext[P, C], dst []P, dstOff, stride int,
+			left []P, leftOff int, lpf []P, lpfOff, w, h int,
+			params *looprestorationParams, edges int, bitdepthMax int32,
+		) {
+			lrWiener(lr, &t.lrw, dst, dstOff, stride, left, leftOff, lpf, lpfOff,
+				w, h, params, edges, bitdepthMax)
+		}
 	} else {
 		sgrIdx := int(lr.typ) - restorationSgrproj
 		sp := &sgrParams[sgrIdx]

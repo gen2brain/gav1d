@@ -72,6 +72,15 @@ func wienerHRow[P pixel](dst []uint16, dstOff int, src []P, srcOff, n int,
 
 // wienerFilterH folds the rounding offset and, at 8 bits, the unscaled centre
 // pixel into the taps, so the bulk of the row is an unconditional 7-tap.
+// lrScratch is the wiener filter's row buffer, held per task so that a stripe
+// does not allocate one. Every row is written by wienerFilterH before the
+// vertical pass reads it.
+type lrScratch struct {
+	hor  [7 * restUnitStride]uint16
+	ptrs [7]int
+	rows [7]int
+}
+
 func wienerFilterH[P pixel, C coef](lr *lrContext[P, C], dst []uint16, dstOff int,
 	left []P, leftOff int, hasLeft bool, src []P, srcOff int, fh *[8]int16,
 	w, edges int, bitdepthMax int32,
@@ -136,10 +145,11 @@ func wienerVRow[P pixel](p []P, pOff int, hor []uint16, rows *[7]int,
 // wienerFilterV runs at the bottom of a stripe, where the seventh row is a
 // repeat of the sixth.
 func wienerFilterV[P pixel, C coef](lr *lrContext[P, C], p []P, pOff int, hor []uint16,
-	ptrs *[7]int, fv *[8]int16, w int, bitdepthMax int32,
+	sc *lrScratch, fv *[8]int16, w int, bitdepthMax int32,
 ) {
-	rows := [7]int{ptrs[0], ptrs[1], ptrs[2], ptrs[3], ptrs[4], ptrs[5], ptrs[5]}
-	lr.wienerV(p, pOff, hor, &rows, fv, w, bitdepthMax)
+	ptrs := &sc.ptrs
+	sc.rows = [7]int{ptrs[0], ptrs[1], ptrs[2], ptrs[3], ptrs[4], ptrs[5], ptrs[5]}
+	lr.wienerV(p, pOff, hor, &sc.rows, fv, w, bitdepthMax)
 
 	for i := range 5 {
 		ptrs[i] = ptrs[i+1]
@@ -147,14 +157,15 @@ func wienerFilterV[P pixel, C coef](lr *lrContext[P, C], p []P, pOff int, hor []
 }
 
 func wienerFilterHV[P pixel, C coef](lr *lrContext[P, C], p []P, pOff int, hor []uint16,
-	ptrs *[7]int, left []P, leftOff int, hasLeft bool, src []P, srcOff int,
+	sc *lrScratch, left []P, leftOff int, hasLeft bool, src []P, srcOff int,
 	filter *[2][8]int16, w, edges int, bitdepthMax int32,
 ) {
 	wienerFilterH(lr, hor, lrScratchRow, left, leftOff, hasLeft, src, srcOff,
 		&filter[0], w, edges, bitdepthMax)
 
-	rows := [7]int{ptrs[0], ptrs[1], ptrs[2], ptrs[3], ptrs[4], ptrs[5], lrScratchRow}
-	lr.wienerV(p, pOff, hor, &rows, &filter[1], w, bitdepthMax)
+	ptrs := &sc.ptrs
+	sc.rows = [7]int{ptrs[0], ptrs[1], ptrs[2], ptrs[3], ptrs[4], ptrs[5], lrScratchRow}
+	lr.wienerV(p, pOff, hor, &sc.rows, &filter[1], w, bitdepthMax)
 
 	copy(hor[ptrs[6]:ptrs[6]+w], hor[lrScratchRow:lrScratchRow+w])
 
@@ -164,13 +175,13 @@ func wienerFilterHV[P pixel, C coef](lr *lrContext[P, C], p []P, pOff int, hor [
 	ptrs[6] = ptrs[0]
 }
 
-func lrWiener[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
+func lrWiener[P pixel, C coef](lr *lrContext[P, C], sc *lrScratch,
+	dst []P, dstOff, stride int,
 	left []P, leftOff int, lpf []P, lpfOff, w, h int,
 	params *looprestorationParams, edges int, bitdepthMax int32,
 ) {
-	var horBuf [7 * restUnitStride]uint16
-	hor := horBuf[:]
-	var ptrs [7]int
+	hor := sc.hor[:]
+	ptrs := &sc.ptrs
 	var rows [6]int
 	for i := range 6 {
 		rows[i] = i * restUnitStride
@@ -182,7 +193,7 @@ func lrWiener[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 	stage := 0
 
 	if edges&lrHaveTop != 0 {
-		ptrs = [7]int{rows[0], rows[0], rows[1], rows[2], rows[2], rows[2], 0}
+		*ptrs = [7]int{rows[0], rows[0], rows[1], rows[2], rows[2], rows[2], 0}
 
 		wienerFilterH(lr, hor, rows[0], left, 0, false, lpf, lpfOff, fh, w, edges, bitdepthMax)
 		lpfOff += stride
@@ -220,7 +231,7 @@ func lrWiener[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 			goto vert
 		}
 	} else {
-		ptrs = [7]int{rows[0], rows[0], rows[0], rows[0], rows[0], rows[0], 0}
+		*ptrs = [7]int{rows[0], rows[0], rows[0], rows[0], rows[0], rows[0], 0}
 
 		wienerFilterH(lr, hor, rows[0], left, leftOff, true, src, srcOff, fh, w, edges, bitdepthMax)
 		leftOff += 4
@@ -255,7 +266,7 @@ func lrWiener[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		}
 
 		ptrs[6] = rows[3]
-		wienerFilterHV(lr, dst, dstOff, hor, &ptrs, left, leftOff, true, src, srcOff,
+		wienerFilterHV(lr, dst, dstOff, hor, sc, left, leftOff, true, src, srcOff,
 			&params.filter, w, edges, bitdepthMax)
 		leftOff += 4
 		srcOff += stride
@@ -268,7 +279,7 @@ func lrWiener[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		}
 
 		ptrs[6] = rows[4]
-		wienerFilterHV(lr, dst, dstOff, hor, &ptrs, left, leftOff, true, src, srcOff,
+		wienerFilterHV(lr, dst, dstOff, hor, sc, left, leftOff, true, src, srcOff,
 			&params.filter, w, edges, bitdepthMax)
 		leftOff += 4
 		srcOff += stride
@@ -283,7 +294,7 @@ func lrWiener[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 
 	ptrs[6] = ptrs[5] + restUnitStride
 	for {
-		wienerFilterHV(lr, dst, dstOff, hor, &ptrs, left, leftOff, true, src, srcOff,
+		wienerFilterHV(lr, dst, dstOff, hor, sc, left, leftOff, true, src, srcOff,
 			&params.filter, w, edges, bitdepthMax)
 		leftOff += 4
 		srcOff += stride
@@ -300,12 +311,12 @@ func lrWiener[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		goto vert
 	}
 
-	wienerFilterHV(lr, dst, dstOff, hor, &ptrs, left, 0, false, lpf, lpfBottom,
+	wienerFilterHV(lr, dst, dstOff, hor, sc, left, 0, false, lpf, lpfBottom,
 		&params.filter, w, edges, bitdepthMax)
 	lpfBottom += stride
 	dstOff += stride
 
-	wienerFilterHV(lr, dst, dstOff, hor, &ptrs, left, 0, false, lpf, lpfBottom,
+	wienerFilterHV(lr, dst, dstOff, hor, sc, left, 0, false, lpf, lpfBottom,
 		&params.filter, w, edges, bitdepthMax)
 	dstOff += stride
 
@@ -313,15 +324,15 @@ func lrWiener[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 
 vert:
 	if stage == 3 {
-		wienerFilterV(lr, dst, dstOff, hor, &ptrs, fv, w, bitdepthMax)
+		wienerFilterV(lr, dst, dstOff, hor, sc, fv, w, bitdepthMax)
 		dstOff += stride
 		stage = 2
 	}
 	if stage == 2 {
-		wienerFilterV(lr, dst, dstOff, hor, &ptrs, fv, w, bitdepthMax)
+		wienerFilterV(lr, dst, dstOff, hor, sc, fv, w, bitdepthMax)
 		dstOff += stride
 	}
-	wienerFilterV(lr, dst, dstOff, hor, &ptrs, fv, w, bitdepthMax)
+	wienerFilterV(lr, dst, dstOff, hor, sc, fv, w, bitdepthMax)
 }
 
 func rotate(sumsqPtrs, sumPtrs []int, n int) {
