@@ -7,6 +7,98 @@
 #define SSHLLL(Vd, Vn) WORD $(0x0F10A400 | ((Vn) << 5) | (Vd))
 #define SSHLLH(Vd, Vn) WORD $(0x4F10A400 | ((Vn) << 5) | (Vd))
 
+#define MULS4(Vd, Vn, Vm)  WORD $(0x4EA09C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define SMAXS4(Vd, Vn, Vm) WORD $(0x4EA06400 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define SMINS4(Vd, Vn, Vm) WORD $(0x4EA06C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define SSHRS(Vd, Vn, SH)  WORD $(0x4F000400 | ((64 - (SH)) << 16) | ((Vn) << 5) | (Vd))
+#define XTN4(Vd, Vn)       WORD $(0x0E612800 | ((Vn) << 5) | (Vd))
+#define XTNB(Vd, Vn)       WORD $(0x0E212800 | ((Vn) << 5) | (Vd))
+
+// CFLROW scales four AC samples by alpha, rounds the magnitude, puts the sign
+// back and folds the result into the DC. There is no NEON absolute here: the
+// arithmetic shift gives a mask that both negates and restores.
+#define CFLROW               \
+	SSHLLL(1, 0);        \
+	MULS4(1, 1, 17);     \
+	SSHRS(2, 1, 31);     \
+	VEOR V2.B16, V1.B16, V3.B16; \
+	VSUB V2.S4, V3.S4, V3.S4;    \
+	VADD V20.S4, V3.S4, V3.S4;   \
+	SSHRS(3, 3, 6);      \
+	VEOR V2.B16, V3.B16, V3.B16; \
+	VSUB V2.S4, V3.S4, V3.S4;    \
+	VADD V16.S4, V3.S4, V3.S4;   \
+	SMAXS4(3, 3, 19);    \
+	SMINS4(3, 3, 18);    \
+	XTN4(4, 3)
+
+#define CFLSETUP              \
+	MOVD dst+0(FP), R0;   \
+	MOVD stride+8(FP), R1; \
+	MOVD w+16(FP), R2;    \
+	MOVD h+24(FP), R3;    \
+	MOVW dc+32(FP), R4;   \
+	MOVD ac+40(FP), R5;   \
+	MOVW alpha+48(FP), R6; \
+	MOVW max+52(FP), R7;  \
+	VDUP R4, V16.S4;      \
+	VDUP R6, V17.S4;      \
+	VDUP R7, V18.S4;      \
+	VMOVI $0, V19.B16;    \
+	MOVD $32, R8;         \
+	VDUP R8, V20.S4
+
+// func cflPredict8NEON(dst *uint8, stride, w, h int, dc int32, ac *int16, alpha, max int32)
+TEXT ·cflPredict8NEON(SB), NOSPLIT, $0-56
+	CFLSETUP
+
+cfl8row:
+	MOVD $0, R10
+
+cfl8col:
+	ADD    R10<<1, R5, R11
+	FMOVD  (R11), F0
+	CFLROW
+	XTNB(4, 4)
+	ADD    R10, R0, R12
+	FMOVS  F4, (R12)
+	ADD    $4, R10, R10
+	CMP    R2, R10
+	BLT    cfl8col
+
+	ADD  R1, R0, R0
+	ADD  R2<<1, R5, R5
+	SUBS $1, R3, R3
+	BNE  cfl8row
+
+	RET
+
+// func cflPredict16NEON(dst *uint16, stride, w, h int, dc int32, ac *int16, alpha, max int32)
+TEXT ·cflPredict16NEON(SB), NOSPLIT, $0-56
+	CFLSETUP
+	LSL $1, R1, R1
+
+cfl16row:
+	MOVD $0, R10
+
+cfl16col:
+	ADD    R10<<1, R5, R11
+	FMOVD  (R11), F0
+	CFLROW
+	ADD    R10<<1, R0, R12
+	FMOVD  F4, (R12)
+	ADD    $4, R10, R10
+	CMP    R2, R10
+	BLT    cfl16col
+
+	ADD  R1, R0, R0
+	ADD  R2<<1, R5, R5
+	SUBS $1, R3, R3
+	BNE  cfl16row
+
+	RET
+
+
 // func cflAcNormNEON(ac *int16, n int, log2sz int)
 TEXT ·cflAcNormNEON(SB), NOSPLIT, $0-24
 	MOVD ac+0(FP), R0

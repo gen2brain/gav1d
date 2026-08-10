@@ -2,6 +2,34 @@
 
 #include "textflag.h"
 
+// CFLBODY scales the AC by alpha and folds it into the DC. There is no vector
+// absolute, so the arithmetic shift gives a mask that both takes the sign off
+// the magnitude and puts it back on the rounded result.
+#define CFLBODY            \
+	VSEXTVF2 V0, V1;   \
+	VMULVX   X16, V1, V1; \
+	VSRAVI   $31, V1, V2; \
+	VXORVV   V2, V1, V3;  \
+	VSUBVV   V2, V3, V3;  \
+	VADDVX   X18, V3, V3; \
+	VSRAVI   $6, V3, V3;  \
+	VXORVV   V2, V3, V3;  \
+	VSUBVV   V2, V3, V3;  \
+	VADDVX   X14, V3, V3; \
+	VMAXVX   X0, V3, V3;  \
+	VMINVX   X17, V3, V3
+
+#define CFLSETUP              \
+	MOV  dst+0(FP), X10;  \
+	MOV  stride+8(FP), X11; \
+	MOV  w+16(FP), X12;   \
+	MOV  h+24(FP), X13;   \
+	MOVW dc+32(FP), X14;  \
+	MOV  ac+40(FP), X15;  \
+	MOVW alpha+48(FP), X16; \
+	MOVW max+52(FP), X17; \
+	MOV  $32, X18
+
 // func cflAcNormRVV(ac *int16, n int, log2sz int)
 TEXT ·cflAcNormRVV(SB), NOSPLIT, $0-24
 	MOV ac+0(FP), X10
@@ -46,5 +74,72 @@ acsub:
 	ADD    $16, X13, X13
 	ADD    $-8, X14, X14
 	BNE    X0, X14, acsub
+
+	RET
+
+// func cflPredict8RVV(dst *uint8, stride, w, h int, dc int32, ac *int16, alpha, max int32)
+TEXT ·cflPredict8RVV(SB), NOSPLIT, $0-56
+	CFLSETUP
+
+cfl8row:
+	MOV X15, X19
+	MOV X10, X20
+	MOV X12, X21
+
+cfl8col:
+	VSETVLI X21, E16, MF2, TA, MA, X22
+	VLE16V  (X19), V0
+	VSETVLI X21, E32, M1, TA, MA, X22
+	CFLBODY
+	VSETVLI X21, E16, MF2, TA, MA, X22
+	VNSRLWI $0, V3, V4
+	VSETVLI X21, E8, MF4, TA, MA, X22
+	VNSRLWI $0, V4, V5
+	VSE8V   V5, (X20)
+
+	SLL $1, X22, X23
+	ADD X23, X19, X19
+	ADD X22, X20, X20
+	SUB X22, X21, X21
+	BNE X0, X21, cfl8col
+
+	ADD X11, X10, X10
+	SLL $1, X12, X23
+	ADD X23, X15, X15
+	ADD $-1, X13, X13
+	BNE X0, X13, cfl8row
+
+	RET
+
+// func cflPredict16RVV(dst *uint16, stride, w, h int, dc int32, ac *int16, alpha, max int32)
+TEXT ·cflPredict16RVV(SB), NOSPLIT, $0-56
+	CFLSETUP
+	SLL $1, X11, X11
+
+cfl16row:
+	MOV X15, X19
+	MOV X10, X20
+	MOV X12, X21
+
+cfl16col:
+	VSETVLI X21, E16, MF2, TA, MA, X22
+	VLE16V  (X19), V0
+	VSETVLI X21, E32, M1, TA, MA, X22
+	CFLBODY
+	VSETVLI X21, E16, MF2, TA, MA, X22
+	VNSRLWI $0, V3, V4
+	VSE16V  V4, (X20)
+
+	SLL $1, X22, X23
+	ADD X23, X19, X19
+	ADD X23, X20, X20
+	SUB X22, X21, X21
+	BNE X0, X21, cfl16col
+
+	ADD X11, X10, X10
+	SLL $1, X12, X23
+	ADD X23, X15, X15
+	ADD $-1, X13, X13
+	BNE X0, X13, cfl16row
 
 	RET
