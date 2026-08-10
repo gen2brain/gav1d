@@ -506,3 +506,83 @@ hp32:
 	SUBS  $1, R5, R5
 	BNE   hp32
 	RET
+
+#define MLAIDX(Vd, Vn, Vm, IDX) WORD $(0x6F400000 | ((((IDX)>>2)&1)<<11) | ((((IDX)>>1)&1)<<21) | (((IDX)&1)<<20) | ((Vm)<<16) | ((Vn)<<5) | (Vd))
+#define SQSHRUN4(Vd, Vn) WORD $(0x2F008400 | ((16 - 4) << 16) | ((Vn) << 5) | (Vd))
+
+#define FI_BLOCK             \
+	MOVWU (R8), R21;         \
+	MOVBU (R10), R22;        \
+	MOVBU (R11), R23;        \
+	MOVBU (R9), R24;         \
+	ORR   R22<<32, R21, R21; \
+	ORR   R23<<40, R21, R21; \
+	ORR   R24<<48, R21, R21; \
+	FMOVD R21, F14;          \
+	VUSHLL $0, V14.B8, V15.H8; \
+	VMOV  V13.B16, V16.B16;  \
+	MLAIDX(16, 0, 15, 6);    \
+	MLAIDX(16, 1, 15, 0);    \
+	MLAIDX(16, 2, 15, 1);    \
+	MLAIDX(16, 3, 15, 2);    \
+	MLAIDX(16, 4, 15, 3);    \
+	MLAIDX(16, 5, 15, 4);    \
+	MLAIDX(16, 6, 15, 5);    \
+	SQSHRUN4(17, 16);        \
+	VMOV  V17.S[0], R21;     \
+	MOVW  R21, (R12);        \
+	VMOV  V17.S[1], R22;     \
+	MOVW  R22, (R13)
+
+// func filterIntra8NEON(dst *uint8, stride int, tl *uint8, f *int16, w, h int)
+TEXT ·filterIntra8NEON(SB), NOSPLIT, $0-48
+	MOVD dst+0(FP), R0
+	MOVD stride+8(FP), R1
+	MOVD tl+16(FP), R2
+	MOVD f+24(FP), R3
+	MOVD w+32(FP), R4
+	MOVD h+40(FP), R5
+
+	VLD1.P 32(R3), [V0.H8, V1.H8]
+	VLD1.P 32(R3), [V2.H8, V3.H8]
+	VLD1.P 32(R3), [V4.H8, V5.H8]
+	VLD1   (R3), [V6.H8]
+
+	MOVD $8, R25
+	VDUP R25, V13.H8
+
+	ADD  $1, R2, R8
+	MOVD $0, R7
+
+fiRow:
+	MOVD R0, R12
+	ADD  R1, R0, R13
+
+	SUB R7, R2, R9
+	SUB $1, R9, R10
+	SUB $2, R9, R11
+
+	MOVD R8, R14
+	MOVD $0, R6
+
+fiCol:
+	FI_BLOCK
+
+	ADD $4, R8, R8
+	SUB $1, R8, R9
+	ADD $3, R12, R10
+	ADD $3, R13, R11
+	ADD $4, R12, R12
+	ADD $4, R13, R13
+
+	ADD $4, R6, R6
+	CMP R4, R6
+	BLT fiCol
+
+	SUB  R6, R13, R8
+	ADD  R1, R0, R0
+	ADD  R1, R0, R0
+	ADD  $2, R7, R7
+	CMP  R5, R7
+	BLT  fiRow
+	RET

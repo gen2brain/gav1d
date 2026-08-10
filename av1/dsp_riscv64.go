@@ -44,5 +44,6 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.ipred[topDcPred] = ipredDcTop8RVV
 		d8.ipred[leftDcPred] = ipredDcLeft8RVV
 		d8.ipred[dc128Pred] = ipredDc1288RVV
+		d8.ipred[filterPred] = ipredFilter8RVV
 	}
 }

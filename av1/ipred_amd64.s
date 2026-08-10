@@ -596,3 +596,79 @@ hp32:
 	JNZ          hp32
 	VZEROUPPER
 	RET
+
+DATA pw8<>+0(SB)/4, $0x00080008
+GLOBL pw8<>(SB), RODATA|NOPTR, $4
+
+DATA fiShuf<>+0(SB)/8, $0x0201020100060006
+DATA fiShuf<>+8(SB)/8, $0x8005800504030403
+GLOBL fiShuf<>(SB), RODATA|NOPTR, $16
+
+// func filterIntra8AVX2(dst *uint8, stride int, tl *uint8, f *int8, w, h int)
+TEXT ·filterIntra8AVX2(SB), NOSPLIT, $0-48
+	MOVQ dst+0(FP), DI
+	MOVQ stride+8(FP), SI
+	MOVQ tl+16(FP), DX
+	MOVQ f+24(FP), R9
+	MOVQ w+32(FP), CX
+	MOVQ h+40(FP), R8
+
+	VMOVDQU      (R9), X8
+	VMOVDQU      16(R9), X9
+	VMOVDQU      32(R9), X10
+	VMOVDQU      48(R9), X11
+	VMOVDQU      fiShuf<>(SB), X6
+	VPBROADCASTD pw8<>(SB), X7
+
+	LEAQ 1(DX), R12
+	XORQ R11, R11
+
+fiRow:
+	MOVQ DI, R14
+	LEAQ (DI)(SI*1), R15
+
+	MOVQ DX, AX
+	SUBQ R11, AX
+	LEAQ -1(AX), BX
+	LEAQ -2(AX), R13
+
+	XORQ R10, R10
+
+fiCol:
+	VMOVD      (R12)(R10*1), X0
+	VPINSRB    $4, (BX), X0, X0
+	VPINSRB    $5, (R13), X0, X0
+	VPINSRB    $6, (AX), X0, X0
+	VPSHUFB    X6, X0, X0
+	VPSHUFD    $0x00, X0, X1
+	VPMADDUBSW X8, X1, X1
+	VPSHUFD    $0x55, X0, X4
+	VPMADDUBSW X9, X4, X4
+	VPADDW     X7, X1, X1
+	VPADDW     X4, X1, X1
+	VPSHUFD    $0xAA, X0, X4
+	VPMADDUBSW X10, X4, X4
+	VPADDW     X4, X1, X1
+	VPSHUFD    $0xFF, X0, X4
+	VPMADDUBSW X11, X4, X4
+	VPADDW     X4, X1, X1
+	VPSRAW     $4, X1, X1
+	VPACKUSWB  X1, X1, X1
+	VMOVD      X1, (R14)(R10*1)
+	VPEXTRD    $1, X1, (R15)(R10*1)
+
+	LEAQ 3(R10), AX
+	LEAQ (R14)(AX*1), BX
+	LEAQ (R15)(AX*1), R13
+	ADDQ R12, AX
+
+	ADDQ $4, R10
+	CMPQ R10, CX
+	JLT  fiCol
+
+	MOVQ R15, R12
+	LEAQ (DI)(SI*2), DI
+	ADDQ $2, R11
+	CMPQ R11, R8
+	JLT  fiRow
+	RET

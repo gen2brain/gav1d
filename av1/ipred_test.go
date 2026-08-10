@@ -180,7 +180,7 @@ func TestIpredAsm(t *testing.T) {
 	d, ref := newDsp[uint8](), newDspGo[uint8]()
 
 	modes := []int{smoothPred, smoothVPred, smoothHPred, paethPred, vertPred,
-		horPred, dcPred, topDcPred, leftDcPred, dc128Pred}
+		horPred, dcPred, topDcPred, leftDcPred, dc128Pred, filterPred}
 	sizes := []int{4, 8, 16, 32, 64}
 	cases := 0
 
@@ -199,17 +199,28 @@ func TestIpredAsm(t *testing.T) {
 						want[i] = 0xA5
 					}
 
-					d.ipred[m](got, 0, ipredStride, tl, ipredTL, w, h, 0, 0, 0, 255)
-					ref.ipred[m](want, 0, ipredStride, tl, ipredTL, w, h, 0, 0, 0, 255)
+					for filt := range 5 {
+						d.ipred[m](got, 0, ipredStride, tl, ipredTL, w, h, filt, 0, 0, 255)
+						ref.ipred[m](want, 0, ipredStride, tl, ipredTL, w, h, filt, 0, 0, 255)
 
-					for i := range want {
-						if got[i] == want[i] {
-							continue
+						for i := range want {
+							if got[i] == want[i] {
+								continue
+							}
+							t.Fatalf("iter=%d mode=%d %dx%d filt=%d: [%d,%d] = %d, want %d",
+								iter, m, w, h, filt, i/ipredStride, i%ipredStride,
+								got[i], want[i])
 						}
-						t.Fatalf("iter=%d mode=%d %dx%d: [%d,%d] = %d, want %d",
-							iter, m, w, h, i/ipredStride, i%ipredStride, got[i], want[i])
+						cases++
+						if m != filterPred {
+							break
+						}
+						for i := range got {
+							got[i] = 0xA5
+							want[i] = 0xA5
+						}
 					}
-					cases++
+
 				}
 			}
 		}
@@ -227,6 +238,7 @@ func BenchmarkIpred(b *testing.B) {
 	}{
 		{smoothPred, "smooth"}, {smoothVPred, "smoothV"}, {smoothHPred, "smoothH"},
 		{paethPred, "paeth"}, {vertPred, "v"}, {horPred, "h"}, {dcPred, "dc"},
+		{filterPred, "filter"},
 	}
 	sizes := []int{4, 8, 16, 32}
 

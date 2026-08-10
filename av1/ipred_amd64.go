@@ -2,6 +2,32 @@
 
 package av1
 
+var smWeightsPm = func() [128][2]int8 {
+	var t [128][2]int8
+	for i, w := range smWeights {
+		t[i][0] = int8(int(w) - 128)
+		t[i][1] = int8(127 - int(w))
+	}
+
+	return t
+}()
+
+var filterIntraTapsPm = func() [5][64]int8 {
+	var t [5][64]int8
+	for f := range filterIntraTaps {
+		for j := range 8 {
+			for k := range 4 {
+				t[f][16*k+2*j] = filterIntraTaps[f][(2*k)*8+j]
+				if 2*k+1 < 7 {
+					t[f][16*k+2*j+1] = filterIntraTaps[f][(2*k+1)*8+j]
+				}
+			}
+		}
+	}
+
+	return t
+}()
+
 //go:noescape
 func smoothV8AVX2(dst *uint8, stride int, tl *uint8, weights *int8, w, h int)
 
@@ -83,4 +109,14 @@ func ipredDc1288AVX2(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
 	width, height, a, maxWidth, maxHeight int, bitdepthMax int32,
 ) {
 	splatDc8AVX2(&dst[dstOff], stride, width, height, uint8((bitdepthMax+1)>>1))
+}
+
+//go:noescape
+func filterIntra8AVX2(dst *uint8, stride int, tl *uint8, f *int8, w, h int)
+
+func ipredFilter8AVX2(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
+	width, height, filtIdx, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	filterIntra8AVX2(&dst[dstOff], stride, &tl[tlOff],
+		&filterIntraTapsPm[filtIdx&511][0], width, height)
 }

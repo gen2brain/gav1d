@@ -2,6 +2,17 @@
 
 package av1
 
+var filterIntraTapsW = func() [5][56]int16 {
+	var t [5][56]int16
+	for f := range filterIntraTaps {
+		for i := range 56 {
+			t[f][i] = int16(filterIntraTaps[f][i])
+		}
+	}
+
+	return t
+}()
+
 //go:noescape
 func smoothV8NEON(dst *uint8, stride int, tl *uint8, weights *uint8, w, h int)
 
@@ -83,4 +94,14 @@ func ipredDc1288NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
 	width, height, a, maxWidth, maxHeight int, bitdepthMax int32,
 ) {
 	splatDc8NEON(&dst[dstOff], stride, width, height, uint8((bitdepthMax+1)>>1))
+}
+
+//go:noescape
+func filterIntra8NEON(dst *uint8, stride int, tl *uint8, f *int16, w, h int)
+
+func ipredFilter8NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
+	width, height, filtIdx, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	filterIntra8NEON(&dst[dstOff], stride, &tl[tlOff],
+		&filterIntraTapsW[filtIdx&511][0], width, height)
 }

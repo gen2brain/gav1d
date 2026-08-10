@@ -341,3 +341,91 @@ hprow:
 	ADD X16, X15, X15
 	BNE X0, X14, hpcol
 	RET
+
+#define FI_BLOCK              \
+	VMVVX     X23, V8;        \
+	MOVBU     (X25), X22;     \
+	VMACCVX   V1, X22, V8;    \
+	MOVBU     0(X18), X22;    \
+	VMACCVX   V2, X22, V8;    \
+	MOVBU     1(X18), X22;    \
+	VMACCVX   V3, X22, V8;    \
+	MOVBU     2(X18), X22;    \
+	VMACCVX   V4, X22, V8;    \
+	MOVBU     3(X18), X22;    \
+	VMACCVX   V5, X22, V8;    \
+	MOVBU     (X26), X22;     \
+	VMACCVX   V6, X22, V8;    \
+	MOVBU     (X28), X22;     \
+	VMACCVX   V7, X22, V8;    \
+	VSRAVI    $4, V8, V8;     \
+	VMAXVX    X0, V8, V8;     \
+	VMINVX    X24, V8, V8;    \
+	VSLIDEDOWNVI $4, V8, V9;  \
+	VSETIVLI  $4, E8, MF2, TA, MA, X30; \
+	VNSRLWI   $0, V8, V10;    \
+	VNSRLWI   $0, V9, V11;    \
+	VSE8V     V10, (X20);     \
+	VSE8V     V11, (X21);     \
+	VSETIVLI  $8, E16, M1, TA, MA, X30
+
+// func filterIntra8RVV(dst *uint8, stride int, tl *uint8, f *int16, w, h int)
+TEXT ·filterIntra8RVV(SB), NOSPLIT, $0-48
+	MOV dst+0(FP), X5
+	MOV stride+8(FP), X6
+	MOV tl+16(FP), X7
+	MOV f+24(FP), X10
+	MOV w+32(FP), X12
+	MOV h+40(FP), X13
+
+	VSETIVLI $8, E16, M1, TA, MA, X30
+
+	VLE16V (X10), V1
+	ADD    $16, X10, X10
+	VLE16V (X10), V2
+	ADD    $16, X10, X10
+	VLE16V (X10), V3
+	ADD    $16, X10, X10
+	VLE16V (X10), V4
+	ADD    $16, X10, X10
+	VLE16V (X10), V5
+	ADD    $16, X10, X10
+	VLE16V (X10), V6
+	ADD    $16, X10, X10
+	VLE16V (X10), V7
+
+	MOV $8, X23
+	MOV $255, X24
+
+	ADD $1, X7, X18
+	MOV $0, X17
+
+fiRow:
+	MOV X5, X20
+	ADD X6, X5, X21
+
+	SUB X17, X7, X25
+	SUB $1, X25, X26
+	SUB $2, X25, X28
+
+	MOV $0, X15
+
+fiCol:
+	FI_BLOCK
+
+	ADD $4, X18, X18
+	SUB $1, X18, X25
+	ADD $3, X20, X26
+	ADD $3, X21, X28
+	ADD $4, X20, X20
+	ADD $4, X21, X21
+
+	ADD $4, X15, X15
+	BLT X15, X12, fiCol
+
+	SUB X12, X21, X18
+	ADD X6, X5, X5
+	ADD X6, X5, X5
+	ADD $2, X17, X17
+	BLT X17, X13, fiRow
+	RET
