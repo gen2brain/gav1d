@@ -311,3 +311,53 @@ func cdefDirAsmDepth[P pixel](t *testing.T, bitdepthMax int32) int {
 
 	return cases
 }
+
+// TestCdefDirCostAsm checks the direction costs against the Go loops they
+// replace. The sums are whatever the block sums can produce, including the
+// negatives and the wide magnitudes that make the squares wrap.
+func TestCdefDirCostAsm(t *testing.T) {
+	if cdefDirCosts == nil {
+		t.Skip("no direction cost assembly on this architecture")
+	}
+
+	for iter := range 64 {
+		var s cdefSums
+		fill := func(v []int32, seed int) {
+			for i := range v {
+				g := int32(cdefGen(iter*31+seed, i, iter))
+				switch iter & 3 {
+				case 0:
+					v[i] = g & 0x7ff
+				case 1:
+					v[i] = -(g & 0x7ff)
+				case 2:
+					v[i] = g
+				default:
+					v[i] = g &^ 0xffff
+				}
+			}
+		}
+		for i := range s.hv {
+			fill(s.hv[i][:], i)
+		}
+		for i := range s.diag {
+			fill(s.diag[i][:], 4+i)
+		}
+		for i := range s.alt {
+			fill(s.alt[i][:], 8+i)
+		}
+
+		var want, got [8]uint32
+		cdefDirCostsGo(&s, &want)
+		cdefDirCosts(&s, &got)
+		if got != want {
+			t.Fatalf("iter=%d: costs %v, want %v", iter, got, want)
+		}
+
+		wd, wc := cdefBestDir(&want)
+		gd, gc := cdefBestDir(&got)
+		if wd != gd || wc != gc {
+			t.Fatalf("iter=%d: dir %d/%d cost %d/%d", iter, gd, wd, gc, wc)
+		}
+	}
+}

@@ -229,8 +229,36 @@ func cdefBlockSums[P pixel](s *cdefSums, img []P, imgOff, stride int, bitdepthMi
 	}
 }
 
+// cdefDirCosts fills in the eight direction costs. The assembly form folds the
+// divide table into one weight per lane, so it is selected here rather than
+// through the dsp table, which is typed on the pixel and these are not.
+var cdefDirCosts func(s *cdefSums, cost *[8]uint32)
+
 func cdefDirCost(s *cdefSums) (int, uint32) {
 	var cost [8]uint32
+	if cdefDirCosts != nil {
+		cdefDirCosts(s, &cost)
+	} else {
+		cdefDirCostsGo(s, &cost)
+	}
+
+	return cdefBestDir(&cost)
+}
+
+func cdefBestDir(cost *[8]uint32) (int, uint32) {
+	bestDir := 0
+	bestCost := cost[0]
+	for n := 1; n < 8; n++ {
+		if cost[n] > bestCost {
+			bestCost = cost[n]
+			bestDir = n
+		}
+	}
+
+	return bestDir, (bestCost - cost[bestDir^4]) >> 10
+}
+
+func cdefDirCostsGo(s *cdefSums, cost *[8]uint32) {
 	for n := range 8 {
 		cost[2] += uint32(s.hv[0][n] * s.hv[0][n])
 		cost[6] += uint32(s.hv[1][n] * s.hv[1][n])
@@ -260,17 +288,6 @@ func cdefDirCost(s *cdefSums) (int, uint32) {
 				s.alt[n][10-m]*s.alt[n][10-m]) * d
 		}
 	}
-
-	bestDir := 0
-	bestCost := cost[0]
-	for n := 1; n < 8; n++ {
-		if cost[n] > bestCost {
-			bestCost = cost[n]
-			bestDir = n
-		}
-	}
-
-	return bestDir, (bestCost - cost[bestDir^4]) >> 10
 }
 
 func cdefFindDir[P pixel](img []P, imgOff, stride int, bitdepthMax int32) (int, uint32) {
