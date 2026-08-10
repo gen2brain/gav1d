@@ -63,3 +63,8 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.ipred[z1Pred] = ipredZ18RVV
 	}
 }
+
+func init() {
+	widenCoefs16 = widenCoefs16RVV
+	widenCoefs16Rect2 = widenCoefs16Rect2RVV
+}

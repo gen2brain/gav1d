@@ -156,3 +156,114 @@ trlane:
 	BNEZ X12, trtap
 
 	RET
+
+// func widenCoefs16RVV(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
+TEXT ·widenCoefs16RVV(SB), NOSPLIT, $0-56
+	MOV  dst+0(FP), X10
+	MOV  dstStride+8(FP), X11
+	SLLI $2, X11, X11
+	MOV  src+16(FP), X12
+	MOV  srcStride+24(FP), X13
+	SLLI $1, X13, X13
+	MOV  cols+32(FP), X14
+	MOV  n+40(FP), X15
+	MOV  lanes+48(FP), X16
+	BEQZ X14, wdone
+
+wcol:
+	MOV X10, X17
+	MOV X12, X18
+	MOV X15, X19
+
+wrun:
+	BEQZ     X19, wzinit
+	VSETVLI  X19, E32, M1, TA, MA, X5
+	VLE16V   (X18), V1
+	VSEXTVF2 V1, V2
+	VSE32V   V2, (X17)
+	SLLI     $2, X5, X6
+	ADD      X6, X17
+	SLLI     $1, X5, X6
+	ADD      X6, X18
+	SUB      X5, X19
+	JMP      wrun
+
+wzinit:
+	SUB X15, X16, X19
+
+wzero:
+	BEQZ    X19, wnext
+	VSETVLI X19, E32, M1, TA, MA, X5
+	VMVVX   X0, V1
+	VSE32V  V1, (X17)
+	SLLI    $2, X5, X6
+	ADD     X6, X17
+	SUB     X5, X19
+	JMP     wzero
+
+wnext:
+	ADD  X11, X10
+	ADD  X13, X12
+	ADDI $-1, X14
+	BNEZ X14, wcol
+
+wdone:
+	RET
+
+// func widenCoefs16Rect2RVV(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
+TEXT ·widenCoefs16Rect2RVV(SB), NOSPLIT, $0-56
+	MOV  dst+0(FP), X10
+	MOV  dstStride+8(FP), X11
+	SLLI $2, X11, X11
+	MOV  src+16(FP), X12
+	MOV  srcStride+24(FP), X13
+	SLLI $1, X13, X13
+	MOV  cols+32(FP), X14
+	MOV  n+40(FP), X15
+	MOV  lanes+48(FP), X16
+	MOV  $181, X20
+	MOV  $128, X21
+	BEQZ X14, rdone
+
+rcol:
+	MOV X10, X17
+	MOV X12, X18
+	MOV X15, X19
+
+rrun:
+	BEQZ     X19, rzinit
+	VSETVLI  X19, E32, M1, TA, MA, X5
+	VLE16V   (X18), V1
+	VSEXTVF2 V1, V2
+	VMULVX   X20, V2, V2
+	VADDVX   X21, V2, V2
+	VSRAVI   $8, V2, V2
+	VSE32V   V2, (X17)
+	SLLI     $2, X5, X6
+	ADD      X6, X17
+	SLLI     $1, X5, X6
+	ADD      X6, X18
+	SUB      X5, X19
+	JMP      rrun
+
+rzinit:
+	SUB X15, X16, X19
+
+rzero:
+	BEQZ    X19, rnext
+	VSETVLI X19, E32, M1, TA, MA, X5
+	VMVVX   X0, V1
+	VSE32V  V1, (X17)
+	SLLI    $2, X5, X6
+	ADD     X6, X17
+	SUB     X5, X19
+	JMP     rzero
+
+rnext:
+	ADD  X11, X10
+	ADD  X13, X12
+	ADDI $-1, X14
+	BNEZ X14, rcol
+
+rdone:
+	RET

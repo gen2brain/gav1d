@@ -31,3 +31,9 @@ func itxTransposeRVV(wide, out *int32, w, ws, ts, n int)
 func itxTransposeVec(wide, tmp []int32, w, ws, ts, n int) {
 	itxTransposeRVV(&wide[0], &tmp[0], w, ws, ts, n)
 }
+
+//go:noescape
+func widenCoefs16RVV(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
+
+//go:noescape
+func widenCoefs16Rect2RVV(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
