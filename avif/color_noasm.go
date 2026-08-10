@@ -2,6 +2,18 @@
 
 package avif
 
-func rowFn() convertRow { return convertRowGo }
+func rowFn(ssHor int) convertRow {
+	if ssHor == 0 {
+		return convertRow444Go
+	}
 
-func rowFn16() convertRow16 { return convertRow16Go }
+	return convertRowGo
+}
+
+func rowFn16(ssHor int) convertRow16 {
+	if ssHor == 0 {
+		return convertRow16x444Go
+	}
+
+	return convertRow16Go
+}

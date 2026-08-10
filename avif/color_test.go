@@ -15,14 +15,18 @@ func rowGen(iter, kind, i int) uint32 {
 // one over every width and each matrix, comparing the whole destination so a
 // kernel that writes past the row fails.
 func TestConvertRowAsm(t *testing.T) {
-	asm := rowFn()
 	matrices := []int{mcBT601, mcBT709, mcBT2020NCL}
 	cases := 0
 
 	for iter := range 4 {
-		for _, matrix := range matrices {
-			for _, full := range []bool{false, true} {
-				s := &colorState{matrix: matrix, fullRange: full, depth: 8, ssHor: 1}
+		for _, ssHor := range []int{0, 1} {
+			asm, ref := rowFn(ssHor), convertRowGo
+			if ssHor == 0 {
+				ref = convertRow444Go
+			}
+			for _, matrix := range matrices {
+				full := iter&1 != 0
+				s := &colorState{matrix: matrix, fullRange: full, depth: 8, ssHor: ssHor}
 				s.maxChannel = 255
 				s.outMax = 255
 				s.kr, s.kg, s.kb = yuvCoefficients(matrix)
@@ -31,7 +35,7 @@ func TestConvertRowAsm(t *testing.T) {
 				c := s.rowConsts()
 
 				for n := 1; n <= 40; n++ {
-					uw := (n + 1) >> 1
+					uw := (n + ssHor) >> ssHor
 					yf := make([]float32, n)
 					a := make([]uint8, n)
 					for i := range yf {
@@ -54,14 +58,14 @@ func TestConvertRowAsm(t *testing.T) {
 					}
 
 					asm(got, yf, rows[0], rows[1], rows[2], rows[3], a, n, &c)
-					convertRowGo(want, yf, rows[0], rows[1], rows[2], rows[3], a, n, &c)
+					ref(want, yf, rows[0], rows[1], rows[2], rows[3], a, n, &c)
 
 					for i := range want {
 						if got[i] == want[i] {
 							continue
 						}
-						t.Fatalf("matrix=%d full=%v n=%d: buf[%d] = %d, want %d",
-							matrix, full, n, i, got[i], want[i])
+						t.Fatalf("ssHor=%d matrix=%d full=%v n=%d: buf[%d] = %d, want %d",
+							ssHor, matrix, full, n, i, got[i], want[i])
 					}
 					cases++
 				}
@@ -73,15 +77,19 @@ func TestConvertRowAsm(t *testing.T) {
 }
 
 func TestConvertRow16Asm(t *testing.T) {
-	asm := rowFn16()
 	matrices := []int{mcBT601, mcBT709, mcBT2020NCL}
 	cases := 0
 
 	for iter := range 4 {
-		for _, matrix := range matrices {
-			for _, full := range []bool{false, true} {
+		for _, ssHor := range []int{0, 1} {
+			asm, ref := rowFn16(ssHor), convertRow16Go
+			if ssHor == 0 {
+				ref = convertRow16x444Go
+			}
+			for _, matrix := range matrices {
+				full := iter&1 != 0
 				for _, depth := range []int{10, 12} {
-					s := &colorState{matrix: matrix, fullRange: full, depth: depth, ssHor: 1}
+					s := &colorState{matrix: matrix, fullRange: full, depth: depth, ssHor: ssHor}
 					s.maxChannel = 1<<depth - 1
 					s.outMax = 65535
 					s.kr, s.kg, s.kb = yuvCoefficients(matrix)
@@ -90,7 +98,7 @@ func TestConvertRow16Asm(t *testing.T) {
 					c := s.rowConsts()
 
 					for n := 1; n <= 40; n++ {
-						uw := (n + 1) >> 1
+						uw := (n + ssHor) >> ssHor
 						yf := make([]float32, n)
 						a := make([]uint16, n)
 						for i := range yf {
@@ -113,14 +121,14 @@ func TestConvertRow16Asm(t *testing.T) {
 						}
 
 						asm(got, yf, rows[0], rows[1], rows[2], rows[3], a, n, &c)
-						convertRow16Go(want, yf, rows[0], rows[1], rows[2], rows[3], a, n, &c)
+						ref(want, yf, rows[0], rows[1], rows[2], rows[3], a, n, &c)
 
 						for i := range want {
 							if got[i] == want[i] {
 								continue
 							}
-							t.Fatalf("matrix=%d full=%v depth=%d n=%d: buf[%d] = %d, want %d",
-								matrix, full, depth, n, i, got[i], want[i])
+							t.Fatalf("ssHor=%d matrix=%d full=%v depth=%d n=%d: buf[%d] = %d, want %d",
+								ssHor, matrix, full, depth, n, i, got[i], want[i])
 						}
 						cases++
 					}

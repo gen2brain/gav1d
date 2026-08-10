@@ -30,11 +30,11 @@ type convertRow func(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
 type convertRow16 func(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
 	n int, c *rowConsts)
 
-// fastRow reports whether the row kernel covers this image. It handles 8-bit
-// input and output, subsampled chroma and the three-coefficient matrices; the
-// scalar path keeps everything else.
+// fastRow reports whether the row kernel covers this image. It handles both
+// chroma layouts, matching input and output depth and the three-coefficient
+// matrices; the scalar path keeps everything else.
 func (s *colorState) fastRow(outDepth int) bool {
-	if !s.hasColor || s.ssHor != 1 {
+	if !s.hasColor {
 		return false
 	}
 	if s.depth == 8 != (outDepth == 8) {
@@ -71,6 +71,46 @@ func padUV(dst []float32, tab []float32, src []byte, stride, y, uw int) []float3
 	dst[uw+1] = dst[uw]
 
 	return dst
+}
+
+// convertRow444Go and convertRow16x444Go are the full chroma references. The
+// sample sits under the pixel, so the four taps collapse to the padded sample
+// and the second row goes unread.
+func convertRow444Go(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
+	n int, c *rowConsts,
+) {
+	for x := range n {
+		yy := yf[x]
+		cb, cr := u0[x+1], v0[x+1]
+
+		r := yy + c.crCoef*cr
+		b := yy + c.cbCoef*cb
+		g := yy - (2*((c.gcr*cr)+(c.gcb*cb)))/c.kg
+
+		dst[4*x] = uint8(0.5 + clampF(r)*c.outMax)
+		dst[4*x+1] = uint8(0.5 + clampF(g)*c.outMax)
+		dst[4*x+2] = uint8(0.5 + clampF(b)*c.outMax)
+		dst[4*x+3] = a[x]
+	}
+}
+
+func convertRow16x444Go(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
+	n int, c *rowConsts,
+) {
+	for x := range n {
+		yy := yf[x]
+		cb, cr := u0[x+1], v0[x+1]
+
+		r := yy + c.crCoef*cr
+		b := yy + c.cbCoef*cb
+		g := yy - (2*((c.gcr*cr)+(c.gcb*cb)))/c.kg
+
+		o := dst[8*x : 8*x+8 : 8*x+8]
+		binary.BigEndian.PutUint16(o[0:], uint16(0.5+clampF(r)*c.outMax))
+		binary.BigEndian.PutUint16(o[2:], uint16(0.5+clampF(g)*c.outMax))
+		binary.BigEndian.PutUint16(o[4:], uint16(0.5+clampF(b)*c.outMax))
+		binary.BigEndian.PutUint16(o[6:], a[x])
+	}
 }
 
 // convertRow16Go is the reference the 16-bit kernels are tested against.

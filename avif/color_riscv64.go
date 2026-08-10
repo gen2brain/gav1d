@@ -5,7 +5,13 @@ package avif
 //go:noescape
 func convertRowRVV(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint8, n int, c *rowConsts)
 
-func rowFn() convertRow { return convertRowVec }
+func rowFn(ssHor int) convertRow {
+	if ssHor == 0 {
+		return convertRow444Go
+	}
+
+	return convertRowVec
+}
 
 func convertRowVec(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
 	n int, c *rowConsts,
@@ -26,7 +32,13 @@ func convertRowVec(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
 //go:noescape
 func convertRow16RVV(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint16, n int, c *rowConsts)
 
-func rowFn16() convertRow16 { return convertRow16Vec }
+func rowFn16(ssHor int) convertRow16 {
+	if ssHor == 0 {
+		return convertRow16x444Go
+	}
+
+	return convertRow16Vec
+}
 
 func convertRow16Vec(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
 	n int, c *rowConsts,

@@ -123,9 +123,9 @@ func toImage(f *file, it *item, pic, alpha *av1.Picture, ycbcr bool) (image.Imag
 	if cs.fastRow(outDepth) {
 		cs.consts = cs.rowConsts()
 		if outDepth == 8 {
-			cs.row = rowFn()
+			cs.row = rowFn(cs.ssHor)
 		} else {
-			cs.row16 = rowFn16()
+			cs.row16 = rowFn16(cs.ssHor)
 		}
 	}
 	rgb := make([]uint16, 3*w)
