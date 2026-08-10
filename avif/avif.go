@@ -1,3 +1,87 @@
+/*
+Package avif decodes AVIF images and image sequences.
+
+	img, err := avif.Decode(r)
+
+[Decode] returns *[image.NRGBA], or *[image.NRGBA64] above 8 bits. The package
+registers itself with [image.RegisterFormat], so [image.Decode] works once it
+is imported for side effects.
+
+It handles 8, 10 and 12 bits, 4:2:0, 4:2:2, 4:4:4 and monochrome, alpha, film
+grain, tiled images stored as a grid, and the clap, irot and imir transforms.
+A file it cannot render returns an error rather than a wrong image.
+
+# Options
+
+[Options] are passed to any of the decode functions and default to zero:
+
+	img, err := avif.Decode(r, avif.Options{
+		AutoRotate:     true,    // apply the clap, irot and imir transforms
+		FrameSizeLimit: 1 << 24, // bound a frame's area, in pixels
+	})
+
+FrameSizeLimit bounds what a header may ask to allocate, so that a corrupt or
+hostile file cannot exhaust memory. Zero means [av1.DefaultFrameSizeLimit].
+
+# Color
+
+[Options.ToYCbCr] skips the conversion to RGB and hands back the planes the
+bitstream carries: *[image.YCbCr], *[image.NYCbCrA] with alpha, or
+*[image.Gray] for monochrome. Above 8 bits there is no such image type, so
+*[image.NRGBA64] is returned anyway.
+
+[image.YCbCr] reads its planes as full-range BT.601 whatever the file signals,
+which is rarely what the file means. [DecodeColor] reports what they actually
+are, so this is for reaching the samples rather than for display:
+
+	img, ci, err := avif.DecodeColor(r, avif.Options{ToYCbCr: true})
+
+[ColorInfo] carries the CICP code points and the range flag, plus the ICC
+profile when the file has one. Matrix and FullRange are what the conversion to
+RGB uses. Primaries and Transfer are reported but not applied, so RGB output
+stays in the file's own color space; converting between color spaces is the
+caller's to do, and [ApplyGainMap] is the one place this package does it.
+
+# Sequences
+
+[DecodeAll] returns every frame of an image sequence with its duration, and how
+many times the animation repeats. A still image gives one frame.
+
+	anim, err := avif.DecodeAll(r)
+
+LoopCount follows [image/gif]: zero repeats forever, -1 shows each frame once,
+and any other value plays the animation LoopCount+1 times.
+
+# Metadata
+
+[DecodeExif] reads the Exif item a file describes its image with, and
+[RawExif] and [RawXMP] return the Exif and XMP payloads whole. All three
+report [ErrNoExif] or [ErrNoXMP] when the file carries no such item.
+
+	exif, err := avif.DecodeExif(r)
+
+# Gain maps
+
+A gain map is a second image and a set of coefficients that together take an
+image to an HDR rendition of itself. [DecodeGainMap] returns the base image and
+the [GainMap], and [ApplyGainMap] combines them for a display whose headroom is
+a given number of stops above SDR white:
+
+	base, gm, err := avif.DecodeGainMap(r)
+	if gm != nil {
+		img, err := avif.ApplyGainMap(base, ci, gm, headroom, out)
+	}
+
+The headroom is a property of the display rather than of the file, so it is the
+caller's to supply. A file without a gain map, or with one this package does
+not implement, yields a nil [GainMap] and a base image that is still usable on
+its own.
+
+# The bitstream
+
+The [github.com/gen2brain/gav1d/av1] package decodes AV1 on its own, which is
+what to reach for to decode video rather than images.
+*/
 package avif
 
 import (

@@ -1,3 +1,63 @@
+/*
+Package av1 decodes the AV1 bitstream.
+
+It is a port of dav1d and decodes bit-exactly against it, in pure Go with no
+dependencies: 8, 10 and 12 bits, 4:2:0, 4:2:2, 4:4:4 and monochrome, intra and
+inter prediction, film grain, superres, and scalable streams.
+
+A [Decoder] is fed whole temporal units, which is what a container hands over:
+
+	d := av1.Decoder{}
+
+	for _, tu := range temporalUnits {
+		pics, err := d.DecodeOBUs(tu)
+		...
+	}
+
+[Decoder.DecodeOBUs] returns the pictures a temporal unit shows, in output
+order, and is the simpler of the two interfaces. It decodes one frame at a
+time, which is all a still image needs.
+
+# Video
+
+For video, [Decoder.Send] and [Decoder.Receive] keep several frames in flight:
+
+	d := av1.Decoder{}
+
+	for _, tu := range temporalUnits {
+		if err := d.Send(tu); err != nil {
+			...
+		}
+		pic, err := d.Receive()
+		...
+	}
+
+Receive hands back pictures in output order and returns a nil picture once the
+queue is empty. Call the two from one goroutine. [Decoder.Flush] drops what is
+queued and forgets the reference frames, which is what seeking needs.
+
+# Threads
+
+[Decoder.Threads] bounds the goroutines decoding a frame's tiles and defaults
+to GOMAXPROCS. It only helps streams that carry more than one tile.
+
+[Decoder.FrameThreads] bounds how many frames decode at once, each holding its
+own buffers. It is the one that helps most video, and only Send and Receive
+benefit from it.
+
+# Pictures
+
+A [Picture] holds its planes as bytes, native-endian uint16 samples above 8
+bits, with strides in bytes. [Picture.Release] hands the memory back to the
+decoder to be reused by a later frame; it is optional, and a picture that is
+never released is collected as any other value would be.
+
+# Assembly
+
+SIMD support for amd64, arm64 and riscv64 is written in Go assembly and
+selected at run time from what the CPU reports. Building with the noasm tag
+leaves pure Go everywhere, which decodes the same pixels more slowly.
+*/
 package av1
 
 import (
