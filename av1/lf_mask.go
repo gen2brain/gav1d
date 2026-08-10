@@ -215,14 +215,13 @@ func decompTx(txa *txaBuf, yOff4, xOff4, from, depth, yOff, xOff int,
 }
 
 func maskEdgesInter(masks *[2][32][3][2]uint16, by4, bx4, w4, h4 int, skip bool,
-	maxTx int, txMasks *[2]uint16, a, l []uint8, aOff, lOff int,
+	maxTx int, txMasks *[2]uint16, a, l []uint8, aOff, lOff int, txa *txaBuf,
 ) {
 	tDim := &txfmDimensions[maxTx]
 
-	var txa txaBuf
 	for yOff, y := 0, 0; y < h4; y, yOff = y+int(tDim.h), yOff+1 {
 		for xOff, x := 0, 0; x < w4; x, xOff = x+int(tDim.w), xOff+1 {
-			decompTx(&txa, y, x, maxTx, 0, yOff, xOff, txMasks)
+			decompTx(txa, y, x, maxTx, 0, yOff, xOff, txMasks)
 		}
 	}
 
@@ -393,6 +392,7 @@ func createLfMaskInter(lflvl *av1Filter, levelCache []uint8, b4Stride int,
 	filterLevel *[4]uint8, bx, by, iw, ih int, skip bool, bs, maxYtx int,
 	txMasks *[2]uint16, uvtx, layout int,
 	ay, ly, auv, luv []uint8, ayOff, lyOff, auvOff, luvOff int, hasChroma bool,
+	txa *txaBuf,
 ) {
 	bDim := &blockDimensions[bs]
 	bw4 := min(iw-bx, int(bDim[0]))
@@ -400,17 +400,20 @@ func createLfMaskInter(lflvl *av1Filter, levelCache []uint8, b4Stride int,
 	bx4, by4 := bx&31, by&31
 
 	if bw4 > 0 && bh4 > 0 {
+		l0, l1 := filterLevel[0], filterLevel[1]
 		off := (by*b4Stride + bx) * 4
+		n := bw4 * 4
 		for range bh4 {
-			for x := range bw4 {
-				levelCache[off+x*4+0] = filterLevel[0]
-				levelCache[off+x*4+1] = filterLevel[1]
+			row := levelCache[off : off+n : off+n]
+			for x := 0; x+1 < len(row); x += 4 {
+				row[x] = l0
+				row[x+1] = l1
 			}
 			off += b4Stride * 4
 		}
 
 		maskEdgesInter(&lflvl.filterY, by4, bx4, bw4, bh4, skip, maxYtx, txMasks,
-			ay, ly, ayOff, lyOff)
+			ay, ly, ayOff, lyOff, txa)
 	}
 
 	if !hasChroma {
@@ -428,11 +431,14 @@ func createLfMaskInter(lflvl *av1Filter, levelCache []uint8, b4Stride int,
 
 	cbx4, cby4 := bx4>>ssHor, by4>>ssVer
 
+	l2, l3 := filterLevel[2], filterLevel[3]
 	off := ((by>>ssVer)*b4Stride + (bx >> ssHor)) * 4
+	n := cbw4 * 4
 	for range cbh4 {
-		for x := range cbw4 {
-			levelCache[off+x*4+2] = filterLevel[2]
-			levelCache[off+x*4+3] = filterLevel[3]
+		row := levelCache[off : off+n : off+n]
+		for x := 2; x+1 < len(row); x += 4 {
+			row[x] = l2
+			row[x+1] = l3
 		}
 		off += b4Stride * 4
 	}

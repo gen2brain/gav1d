@@ -74,9 +74,10 @@ func TestCreateLfMaskInter(t *testing.T) {
 			lvls[i] = filterLevel[i][lvlRef][lvlGmv]
 		}
 
+		var txa txaBuf
 		createLfMaskInter(&lflvl, levelCache, lfmaskB4Stride, &lvls,
 			bx, by, iw, ih, skip, bs, maxYtx, &txMasks, uvtx, layout,
-			ay[:], ly[:], auv[:], luv[:], 0, 0, 0, 0, hasChroma)
+			ay[:], ly[:], auv[:], luv[:], 0, 0, 0, 0, hasChroma, &txa)
 
 		for i := range 2 {
 			for j := range 32 {
@@ -138,4 +139,25 @@ func TestCreateLfMaskInter(t *testing.T) {
 	}
 
 	t.Logf("%d cases", cases)
+}
+
+func BenchmarkCreateLfMaskInter(b *testing.B) {
+	var lflvl av1Filter
+	var txa txaBuf
+	var ay, ly, auv, luv [32]uint8
+	levelCache := make([]uint8, lfmaskB4Stride*lfmaskIH*4)
+	lvls := [4]uint8{20, 24, 18, 22}
+	txMasks := [2]uint16{0x5a5a, 0x3c3c}
+
+	for _, bs := range []int{bs16x16, bs32x32, bs64x64} {
+		bDim := &blockDimensions[bs]
+		b.Run(strconv.Itoa(int(bDim[0])*4)+"x"+strconv.Itoa(int(bDim[1])*4), func(b *testing.B) {
+			for b.Loop() {
+				createLfMaskInter(&lflvl, levelCache, lfmaskB4Stride, &lvls,
+					0, 0, 32, 32, false, bs, tx16x16, &txMasks, tx8x8,
+					pixelLayoutI420, ay[:], ly[:], auv[:], luv[:], 0, 0, 0, 0,
+					true, &txa)
+			}
+		})
+	}
 }

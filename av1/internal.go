@@ -95,6 +95,7 @@ type scratch[P pixel] struct {
 	txtpMap    [32 * 32]uint8
 	itx        [itxScratchLen]int32
 	mcMid      [135 * mcMidStride]int16
+	lfTxa      txaBuf
 	cdefLrBak  [2][3][16]P
 	lrBorder   [2][(128 + 8) * 4]P
 	lrParams   looprestorationParams

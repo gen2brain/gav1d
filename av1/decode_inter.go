@@ -586,7 +586,7 @@ func (t *taskContext[P, C]) finishInterBlock(b *av1Block, bs, segPred int,
 		createLfMaskInter(t.lfMask, f.lf.level, f.b4Stride, &lfLvls,
 			t.bx, t.by, f.w4, f.h4, b.skip != 0, bs, ytx, &txMasks, uvtx,
 			f.layout, t.a.txLpfY[:], t.l.txLpfY[:], auv, luv,
-			bx4, by4, auvOff, luvOff, g.hasChroma)
+			bx4, by4, auvOff, luvOff, g.hasChroma, &t.scratch.lfTxa)
 	}
 
 	if isComp {
