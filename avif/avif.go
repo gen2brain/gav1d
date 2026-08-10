@@ -113,6 +113,10 @@ func (f *file) dimensions(it *item) (int, int, error) {
 
 // decodeItem decodes a single av01 item to a picture.
 func (f *file) decodeItem(it *item) (*av1.Picture, error) {
+	if it.unsupported {
+		return nil, errUnsupported
+	}
+
 	data, err := f.meta.data(it, f.data)
 	if err != nil {
 		return nil, err
@@ -129,6 +133,15 @@ func (f *file) decodeItem(it *item) (*av1.Picture, error) {
 	}
 	if len(pics) == 0 {
 		return nil, errInvalid
+	}
+
+	// 0xffff selects every layer, which is the last picture decoded.
+	if p := f.meta.prop(it, "lsel"); p != nil && p.layer != 0xffff {
+		if int(p.layer) >= len(pics) {
+			return nil, errInvalid
+		}
+
+		return pics[p.layer], nil
 	}
 
 	return pics[len(pics)-1], nil
@@ -177,6 +190,10 @@ func (f *file) gridOf(it *item) (gridInfo, []uint32, error) {
 }
 
 func (f *file) decodeGrid(it *item) (*av1.Picture, error) {
+	if it.unsupported {
+		return nil, errUnsupported
+	}
+
 	g, tiles, err := f.gridOf(it)
 	if err != nil {
 		return nil, err

@@ -143,7 +143,14 @@ type item struct {
 	method     uint8
 	baseOffset uint64
 
-	props []int
+	props []itemProp
+
+	unsupported bool
+}
+
+type itemProp struct {
+	idx       int
+	essential bool
 }
 
 type itemRef struct {
@@ -163,6 +170,7 @@ type property struct {
 	axis  uint8
 	clap  [8]uint32
 	opIdx uint8
+	layer uint16
 	colr  *colorInfo
 }
 
@@ -249,7 +257,32 @@ func parseMeta(payload []byte) (*metaBox, error) {
 		return nil, err
 	}
 
+	m.markUnsupported()
+
 	return m, nil
+}
+
+// knownProps are the property types this reader implements. An item with an
+// essential association to anything else must not be processed.
+var knownProps = map[string]bool{
+	"ispe": true, "av1C": true, "pixi": true, "auxC": true, "a1op": true,
+	"irot": true, "imir": true, "clap": true, "colr": true, "lsel": true,
+	"a1lx": true,
+}
+
+func (m *metaBox) markUnsupported() {
+	for _, it := range m.items {
+		for _, ip := range it.props {
+			if !ip.essential {
+				continue
+			}
+			if ip.idx >= len(m.props) || !knownProps[m.props[ip.idx].typ] {
+				it.unsupported = true
+
+				break
+			}
+		}
+	}
 }
 
 func (m *metaBox) item(id uint32) *item {
@@ -434,6 +467,9 @@ func (m *metaBox) parseIpco(b []byte) error {
 		case "a1op":
 			p.opIdx = r.u8()
 
+		case "lsel":
+			p.layer = r.u16()
+
 		case "irot":
 			p.angle = r.u8() & 3
 
@@ -487,18 +523,21 @@ func (m *metaBox) parseIpma(b []byte) error {
 		n := int(r.u8())
 		for range n {
 			var idx int
+			var essential bool
 			if flags&1 != 0 {
-				idx = int(r.u16() & 0x7fff)
+				v := r.u16()
+				idx, essential = int(v&0x7fff), v&0x8000 != 0
 			} else {
-				idx = int(r.u8() & 0x7f)
+				v := r.u8()
+				idx, essential = int(v&0x7f), v&0x80 != 0
 			}
 			if r.err {
 				return errInvalid
 			}
-			if idx == 0 || idx > len(m.props) {
+			if idx == 0 {
 				continue
 			}
-			it.props = append(it.props, idx-1)
+			it.props = append(it.props, itemProp{idx: idx - 1, essential: essential})
 		}
 		if r.err {
 			return errInvalid
@@ -552,9 +591,9 @@ func (m *metaBox) prop(it *item, typ string) *property {
 	if it == nil {
 		return nil
 	}
-	for _, i := range it.props {
-		if m.props[i].typ == typ {
-			return &m.props[i]
+	for _, ip := range it.props {
+		if ip.idx < len(m.props) && m.props[ip.idx].typ == typ {
+			return &m.props[ip.idx]
 		}
 	}
 

@@ -717,3 +717,147 @@ func abs(v int) int {
 
 	return v
 }
+
+type rawBox struct {
+	typ            string
+	off, hdr, size int
+}
+
+func rawBoxes(b []byte, off, end int) []rawBox {
+	var out []rawBox
+	for off+8 <= end {
+		size := int(binary.BigEndian.Uint32(b[off:]))
+		typ := string(b[off+4 : off+8])
+		hdr := 8
+		switch size {
+		case 1:
+			if off+16 > end {
+				return out
+			}
+			size = int(binary.BigEndian.Uint64(b[off+8:]))
+			hdr = 16
+		case 0:
+			size = end - off
+		}
+		if size < hdr || off+size > end {
+			return out
+		}
+		out = append(out, rawBox{typ, off, hdr, size})
+		off += size
+	}
+
+	return out
+}
+
+func findRawBox(b []byte, path ...string) (rawBox, bool) {
+	off, end := 0, len(b)
+	var found rawBox
+	for _, want := range path {
+		ok := false
+		for _, x := range rawBoxes(b, off, end) {
+			if x.typ != want {
+				continue
+			}
+			found, ok = x, true
+			off, end = x.off+x.hdr, x.off+x.size
+			if want == "meta" {
+				off += 4
+			}
+
+			break
+		}
+		if !ok {
+			return rawBox{}, false
+		}
+	}
+
+	return found, true
+}
+
+// setEssential marks every association to the one-based property idx as
+// essential, and reports whether it found one.
+func setEssential(b []byte, idx int) bool {
+	box, ok := findRawBox(b, "meta", "iprp", "ipma")
+	if !ok {
+		return false
+	}
+
+	p := box.off + box.hdr
+	ver := int(b[p])
+	flags := int(binary.BigEndian.Uint32(b[p:]) & 0xffffff)
+	p += 4
+	count := int(binary.BigEndian.Uint32(b[p:]))
+	p += 4
+
+	set := false
+	for range count {
+		if ver < 1 {
+			p += 2
+		} else {
+			p += 4
+		}
+		n := int(b[p])
+		p++
+		for range n {
+			if flags&1 != 0 {
+				if int(binary.BigEndian.Uint16(b[p:])&0x7fff) == idx {
+					b[p] |= 0x80
+					set = true
+				}
+				p += 2
+			} else {
+				if int(b[p]&0x7f) == idx {
+					b[p] |= 0x80
+					set = true
+				}
+				p++
+			}
+		}
+	}
+
+	return set
+}
+
+// TestEssentialProperty checks that an item carrying an essential property the
+// reader does not implement is refused, and that the same property left
+// non-essential is ignored.
+func TestEssentialProperty(t *testing.T) {
+	for _, name := range []string{"bt709-full.avif", "grid-2x2.avif", "alpha-420.avif"} {
+		orig, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ipco, ok := findRawBox(orig, "meta", "iprp", "ipco")
+		if !ok {
+			t.Fatalf("%s: no ipco", name)
+		}
+		props := rawBoxes(orig, ipco.off+ipco.hdr, ipco.off+ipco.size)
+
+		idx := 0
+		for i, p := range props {
+			if p.typ == "pixi" {
+				idx = i + 1
+
+				break
+			}
+		}
+		if idx == 0 {
+			t.Fatalf("%s: no pixi property to rename", name)
+		}
+
+		b := bytes.Clone(orig)
+		copy(b[props[idx-1].off+4:], "zzzz")
+
+		if _, err := Decode(bytes.NewReader(b)); err != nil {
+			t.Fatalf("%s: unknown non-essential property should be ignored: %v", name, err)
+		}
+
+		if !setEssential(b, idx) {
+			t.Fatalf("%s: no association to property %d", name, idx)
+		}
+		if _, err := Decode(bytes.NewReader(b)); !errors.Is(err, errUnsupported) {
+			t.Fatalf("%s: unknown essential property = %v, want errUnsupported", name, err)
+		}
+	}
+}
