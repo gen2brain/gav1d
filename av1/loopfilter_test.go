@@ -158,7 +158,7 @@ func runLFEdge[P pixel](d *dspContext[P], iter, wd, stridea, strideb, lines int,
 	buf := make([]P, lfRows*lfStride)
 	for k := range buf {
 		v := int32(lrGen(iter, 5, k))
-		switch iter & 3 {
+		switch iter & 7 {
 		case 0:
 			buf[k] = P(v & bitdepthMax)
 		case 1:
@@ -167,6 +167,20 @@ func runLFEdge[P pixel](d *dspContext[P], iter, wd, stridea, strideb, lines int,
 			buf[k] = P(flat + (v & 1))
 		case 2:
 			buf[k] = P(flat + (v & 3))
+		case 4:
+			// Alternating groups of four lines, flat and not, constant along
+			// the taps so the flat runs stay flat. An eight line call then
+			// masks one half out and filters the other, which is the only
+			// shape that catches a mask compared at the wrong width.
+			line := k % lfStride
+			if stridea != 1 {
+				line = k / lfStride
+			}
+			if line/4&1 == 0 {
+				buf[k] = P(flat + (v & 1))
+			} else {
+				buf[k] = P(v & bitdepthMax)
+			}
 		default:
 			buf[k] = P(flat + (v & 7) - 4 + int32(k%lfStride)/16)
 		}

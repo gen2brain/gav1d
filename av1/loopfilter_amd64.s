@@ -305,7 +305,7 @@ GLOBL lpfWordInv<>(SB), RODATA|NOPTR, $16
 	ACCGT(V2, SQ5, V8, V5, V14); \
 	ACCGT(V2, SQ6, V8, V5, V14); \
 	VPMOVMSKB    V14, DX; \
-	CMPL         DX, $0xffff; \
+	CMPL         DX, MSKALL; \
 	JEQ          scatter; \
 	VMOVDQU SP6, V0; \
 	VMOVDQU V0, -13*LW(BX); \
