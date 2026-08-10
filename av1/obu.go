@@ -182,6 +182,7 @@ type Decoder struct {
 	out   []*Picture
 
 	tc sync.Pool
+	fb sync.Pool
 
 	sem  chan struct{}
 	wg   sync.WaitGroup

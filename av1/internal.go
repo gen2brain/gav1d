@@ -112,6 +112,8 @@ type frameContext[P pixel, C coef] struct {
 
 	pool  *picPool
 	tc    *sync.Pool
+	fb    *sync.Pool
+	bufs  *frameBufs[P]
 	mem   *picMem
 	srMem *picMem
 

@@ -149,6 +149,7 @@ func setupFrame[P pixel, C coef](d *Decoder, tiles []tileGroup, p *pendingFrame)
 		bpc:      8 + 2*int(seqHdr.hbd),
 		pool:     &d.pool,
 		tc:       &d.tc,
+		fb:       &d.fb,
 
 		reconIntra: reconBIntra[P, C],
 		reconInter: reconBInter[P, C],
@@ -203,8 +204,15 @@ func setupFrame[P pixel, C coef](d *Decoder, tiles []tileGroup, p *pendingFrame)
 	f.setupRefmvs(d, seqHdr)
 	f.setupJntWeights()
 
+	b, ok := d.fb.Get().(*frameBufs[P])
+	if !ok {
+		b = &frameBufs[P]{}
+	}
+	f.bufs = b
+
 	for pl := range 3 {
-		f.ipredEdge[pl] = make([]P, f.sb128w*128*(sbh+1))
+		b.ipredEdge[pl] = reuse(b.ipredEdge[pl], f.sb128w*128*(sbh+1))
+		f.ipredEdge[pl] = b.ipredEdge[pl]
 	}
 
 	nTs := int(frameHdr.tiling.cols) * int(frameHdr.tiling.rows)
@@ -213,30 +221,36 @@ func setupFrame[P pixel, C coef](d *Decoder, tiles []tileGroup, p *pendingFrame)
 		return nil, err
 	}
 
-	f.a = make([]blockContext, f.sb128w*int(frameHdr.tiling.rows))
+	b.a = reuse(b.a, f.sb128w*int(frameHdr.tiling.rows))
+	f.a = b.a
 	for i := range f.a {
 		resetContext(&f.a[i], isKeyOrIntra(frameHdr))
 	}
 
 	sb128h := f.sb128h
-	f.lflvl = make([]av1Filter, f.sb128w*sb128h)
-	f.lf.level = make([]uint8, f.sb128w*sb128h*32*32*4+3)
+	b.lflvl = reuse(b.lflvl, f.sb128w*sb128h)
+	f.lflvl = b.lflvl
+	b.level = reuse(b.level, f.sb128w*sb128h*32*32*4+3)
+	f.lf.level = b.level
 	calcEIH(&f.lf.limLut, int(frameHdr.loopfilter.sharpness))
 	calcLfValues(&f.lf.lvl, frameHdr, &[4]int8{})
 
 	alignH := (f.bh + 31) &^ 31
-	f.lf.txLpfRightEdge[0] = make([]uint8, alignH*int(frameHdr.tiling.cols))
-	f.lf.txLpfRightEdge[1] = make([]uint8, (alignH>>f.ssVer)*int(frameHdr.tiling.cols))
+	b.txLpf[0] = reuse(b.txLpf[0], alignH*int(frameHdr.tiling.cols))
+	b.txLpf[1] = reuse(b.txLpf[1], (alignH>>f.ssVer)*int(frameHdr.tiling.cols))
+	f.lf.txLpfRightEdge = b.txLpf
 
 	f.lf.restorePlanes = b2i(frameHdr.restoration.typ[0] != restorationNone) |
 		b2i(frameHdr.restoration.typ[1] != restorationNone)<<1 |
 		b2i(frameHdr.restoration.typ[2] != restorationNone)<<2
 	f.srSb128w = (f.srWidth + 127) >> 7
-	f.lrMask = make([]av1Restoration, f.srSb128w*sb128h)
+	b.lrMask = reuse(b.lrMask, f.srSb128w*sb128h)
+	f.lrMask = b.lrMask
 
 	if seqHdr.cdef != 0 || f.lf.restorePlanes != 0 {
 		const lrNumLines = 12
-		f.lf.lrLineBuf = make([]P, 64+f.srStride[0]*lrNumLines+f.srStride[1]*lrNumLines*2)
+		b.lrLineBuf = reuse(b.lrLineBuf, 64+f.srStride[0]*lrNumLines+f.srStride[1]*lrNumLines*2)
+		f.lf.lrLineBuf = b.lrLineBuf
 		off := 64
 		f.lf.lrLpfLine[0] = off
 		off += f.srStride[0] * lrNumLines
@@ -246,7 +260,8 @@ func setupFrame[P pixel, C coef](d *Decoder, tiles []tileGroup, p *pendingFrame)
 
 	if seqHdr.cdef != 0 {
 		yStride, uvStride := f.stride[0], f.stride[1]
-		f.lf.cdefLineBuf = make([]P, 32+yStride*sbh*4+uvStride*sbh*8)
+		b.cdefLineBuf = reuse(b.cdefLineBuf, 32+yStride*sbh*4+uvStride*sbh*8)
+		f.lf.cdefLineBuf = b.cdefLineBuf
 		off := 32
 		f.lf.cdefLine[0][0] = off
 		f.lf.cdefLine[1][0] = off + 2*yStride
@@ -476,12 +491,44 @@ func (f *frameContext[P, C]) allocPicture(w int, planes *[3][]P, stride *[3]int)
 
 // releasePlanes drops the frame's own hold on its memory, which it keeps for as
 // long as it decodes so a later frame cannot recycle it underneath.
+// frameBufs holds the tables a frame sizes from its own dimensions. None of
+// them outlive the frame, so the decoder keeps them for the next one, which
+// reuses the memory whenever the geometry has not grown.
+type frameBufs[P pixel] struct {
+	ipredEdge   [3][]P
+	a           []blockContext
+	lflvl       []av1Filter
+	level       []uint8
+	txLpf       [2][]uint8
+	lrMask      []av1Restoration
+	lrLineBuf   []P
+	cdefLineBuf []P
+}
+
+// reuse returns n zeroed elements, keeping the backing array when it is
+// already large enough. It stands in for make, so a caller cannot tell the
+// difference; what it saves is the allocation, not the zeroing.
+func reuse[T any](s []T, n int) []T {
+	if cap(s) < n {
+		return make([]T, n)
+	}
+	s = s[:n]
+	clear(s)
+
+	return s
+}
+
 func (f *frameContext[P, C]) releasePlanes() {
 	if f.srMem != f.mem {
 		f.srMem.release()
 	}
 	f.mem.release()
 	f.mem, f.srMem = nil, nil
+
+	if f.bufs != nil {
+		f.fb.Put(f.bufs)
+		f.bufs = nil
+	}
 }
 
 func (f *frameContext[P, C]) allocPlanes() error {
