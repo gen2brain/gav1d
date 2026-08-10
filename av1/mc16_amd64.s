@@ -153,3 +153,27 @@ cols3:
 	ROWSTEP(rows3)
 	VZEROUPPER
 	RET
+
+// func mcTapPrepMid16AVX2(dst *int16, dstStride int, src *int16, srcStride, tapStride int, f *[8]int32, w, h int, rnd int32, shift int, maxv int32)
+TEXT ·mcTapPrepMid16AVX2(SB), NOSPLIT, $0-84
+	FSETUP
+
+rows4:
+	MOVQ w+48(FP), DX
+	MOVQ SI, R11
+	MOVQ DI, R13
+
+cols4:
+	MOVQ R11, CX
+	TAPS8(VPMOVSXWD)
+	VPACKSSDW Y0, Y0, Y0
+	VPERMQ    $0x08, Y0, Y0
+	VMOVDQU   X0, (R13)
+	ADDQ      $16, R11
+	ADDQ      $16, R13
+	SUBQ      $8, DX
+	JNZ       cols4
+
+	ROWSTEP(rows4)
+	VZEROUPPER
+	RET

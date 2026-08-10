@@ -170,3 +170,25 @@ cols3:
 
 	ROWSTEP(rows3)
 	RET
+
+// func mcTapPrepMid16NEON(dst *int16, dstStride int, src *int16, srcStride, tapStride int, f *[8]int32, w, h int, rnd int32, shift int, maxv int32)
+TEXT ·mcTapPrepMid16NEON(SB), NOSPLIT, $0-84
+	FSETUP
+
+rows4:
+	MOVD w+48(FP), R13
+	MOVD R1, R11
+	MOVD R0, R14
+
+cols4:
+	MOVD R11, R2
+	TAPS8S
+	XTN4(0, 0)
+	VST1 [V0.D1], (R14)
+	ADD  $8, R11, R11
+	ADD  $8, R14, R14
+	SUBS $4, R13, R13
+	BNE  cols4
+
+	ROWSTEP(rows4)
+	RET

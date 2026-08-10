@@ -533,6 +533,53 @@ func TestPrep8tapAsm(t *testing.T) {
 	t.Logf("%d cases", cases)
 }
 
+func TestPrep8tap16Asm(t *testing.T) {
+	d, ref := newDsp[uint16](), newDspGo[uint16]()
+	base := mcPad*mcStride + mcPad
+	widths := []int{2, 4, 8, 16, 32, 64, 128}
+	heights := []int{2, 4, 8, 16, 64}
+	subpel := []int{0, 1, 7, 15}
+	cases := 0
+
+	got := make([]int16, 128*128+64)
+	want := make([]int16, 128*128+64)
+
+	for _, pixMax := range []int32{1023, 4095} {
+		for iter := range 2 {
+			m := mcFill[uint16](0, iter, pixMax)
+			for _, filter2d := range filter2dFilterType {
+				for _, mx := range subpel {
+					for _, my := range subpel {
+						for _, w := range widths {
+							for _, h := range heights {
+								for i := range got {
+									got[i], want[i] = -1, -1
+								}
+								d.prep8tap(mcMidBuf[:], got, m.src, base, mcStride,
+									w, h, mx, my, filter2d, pixMax)
+								ref.prep8tap(mcMidBuf[:], want, m.src, base, mcStride,
+									w, h, mx, my, filter2d, pixMax)
+
+								for i := range want {
+									if got[i] == want[i] {
+										continue
+									}
+									t.Fatalf("bpc=%d %dx%d mx=%d my=%d filter=%d: [%d,%d] = %d, want %d",
+										pixMax, w, h, mx, my, filter2d, i/w, i%w,
+										got[i], want[i])
+								}
+								cases++
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
+
 // TestBilinAsm checks the bilinear filters against the pure Go ones.
 func TestBilinAsm(t *testing.T) {
 	d, ref := newDsp[uint8](), newDspGo[uint8]()

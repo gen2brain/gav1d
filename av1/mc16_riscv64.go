@@ -49,3 +49,42 @@ func put8tap16RVV(mid []int16, dst []uint16, dstOff, dstStride int, src []uint16
 			&ft, w, h, 32, 6, bitdepthMax)
 	}
 }
+
+//go:noescape
+func mcTapPrepMid16RVV(dst *int16, dstStride int, src *int16, srcStride, tapStride int,
+	f *[8]int32, w, h int, rnd int32, shift int, maxv int32)
+
+func prep8tap16RVV(mid []int16, tmp []int16, src []uint16, srcOff, srcStride,
+	w, h, mx, my, filterType int, bitdepthMax int32,
+) {
+	fh := hFilter(mx, w, filterType)
+	fv := vFilter(my, h, filterType)
+
+	if w < 8 || w&7 != 0 || (fh == nil && fv == nil) {
+		prep8tap(mid, tmp, src, srcOff, srcStride, w, h, mx, my, filterType, bitdepthMax)
+
+		return
+	}
+
+	ib := intermediateBits(bitdepthMax)
+	rnd := int32(1)<<(5-ib) - prepBias(bitdepthMax)<<(6-ib)
+
+	switch {
+	case fh != nil && fv != nil:
+		ft := mcTaps(fh)
+		mcTapMid16RVV(&mid[0], mcMidStride, &src[srcOff-3*srcStride-3], srcStride, 1,
+			&ft, w, h+7, int32(1)<<(5-ib), 6-ib, 0)
+		ft = mcTaps(fv)
+		mcTapPrepMid16RVV(&tmp[0], w, &mid[0], mcMidStride, mcMidStride,
+			&ft, w, h, 32-prepBias(bitdepthMax)<<6, 6, 0)
+
+	case fh != nil:
+		ft := mcTaps(fh)
+		mcTapMid16RVV(&tmp[0], w, &src[srcOff-3], srcStride, 1, &ft, w, h, rnd, 6-ib, 0)
+
+	default:
+		ft := mcTaps(fv)
+		mcTapMid16RVV(&tmp[0], w, &src[srcOff-3*srcStride], srcStride, srcStride,
+			&ft, w, h, rnd, 6-ib, 0)
+	}
+}
