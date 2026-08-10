@@ -475,6 +475,7 @@ func BenchmarkDecode(b *testing.B) {
 					}
 					for _, pic := range pics {
 						pixels += int64(pic.Width * pic.Height)
+						pic.Release()
 					}
 				}
 			}
@@ -484,7 +485,10 @@ func BenchmarkDecode(b *testing.B) {
 
 	stream := func(b *testing.B, tiles, frames int) {
 		var pixels int64
-		emit := func(pic *Picture) { pixels += int64(pic.Width * pic.Height) }
+		emit := func(pic *Picture) {
+			pixels += int64(pic.Width * pic.Height)
+			pic.Release()
+		}
 		for b.Loop() {
 			d := Decoder{Threads: tiles, FrameThreads: frames}
 			if err := decodeStreaming(&d, chunks, emit); err != nil {
