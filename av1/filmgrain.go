@@ -576,6 +576,9 @@ func (f *frameContext[P, C]) grainPicture() *Picture {
 	w, h := f.srWidth, f.frameHdr.height
 	stride := [3]int{f.srStride[0], f.srStride[1], f.srStride[1]}
 
+	m := &picMem{pool: f.pool}
+	m.refs.Store(1)
+
 	var dst [3][]P
 	for pl := range 3 {
 		if f.srCur[pl] == nil {
@@ -585,7 +588,7 @@ func (f *frameContext[P, C]) grainPicture() *Picture {
 		if pl != 0 {
 			ph = (h + f.ssVer) >> f.ssVer
 		}
-		dst[pl] = make([]P, stride[pl]*ph)
+		dst[pl] = picAlloc[P](f.pool, m, stride[pl]*ph)
 	}
 
 	applyGrain(f.dsp, &f.frameHdr.filmGrain.data, f.layout, f.bpc, w, h,
@@ -596,6 +599,7 @@ func (f *frameContext[P, C]) grainPicture() *Picture {
 		Height:   h,
 		Layout:   f.layout,
 		BitDepth: f.bpc,
+		mem:      m,
 	}
 	f.setColor(p)
 	for pl := range 3 {

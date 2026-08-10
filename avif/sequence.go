@@ -383,6 +383,12 @@ func (f *file) decodeSequence(o Options) (*AVIF, error) {
 		if err != nil {
 			return nil, err
 		}
+		if !aliasesPicture(img) {
+			pic.Release()
+			if alpha != nil {
+				alpha.Release()
+			}
+		}
 		if o.AutoRotate {
 			if img, err = f.applyTransforms(img, f.primary()); err != nil {
 				return nil, err

@@ -32,6 +32,26 @@ type refPicture[P pixel] struct {
 	stride   [3]int
 	w, h     int
 	progress *frameProgress
+	m        *picMem
+}
+
+func (p *refPicture[P]) mem() *picMem { return p.m }
+
+// picHolder lets the reference slots count a frame's memory without knowing
+// which pixel type it was decoded at.
+type picHolder interface {
+	mem() *picMem
+}
+
+// setRef replaces one reference slot, counting the memory in and out.
+func (d *Decoder) setRef(i int, s refState) {
+	if h, ok := d.refs[i].pic.(picHolder); ok {
+		h.mem().release()
+	}
+	if h, ok := s.pic.(picHolder); ok {
+		h.mem().acquire()
+	}
+	d.refs[i] = s
 }
 
 type refState struct {
@@ -101,8 +121,9 @@ type Decoder struct {
 	queue []*pendingFrame
 	out   []*Picture
 
-	sem chan struct{}
-	wg  sync.WaitGroup
+	sem  chan struct{}
+	wg   sync.WaitGroup
+	pool picPool
 }
 
 func seqHdrEqual(a, b *sequenceHeader) bool {
@@ -1538,8 +1559,9 @@ func (d *Decoder) showExistingFrame() error {
 		if uint8(i) == r {
 			continue
 		}
-		d.refs[i] = *ref
-		d.refs[i].refmvs = nil
+		s := *ref
+		s.refmvs = nil
+		d.setRef(i, s)
 		d.cdf[i] = d.cdf[r]
 	}
 
@@ -1726,9 +1748,10 @@ func (d *Decoder) Flush() {
 	d.tiles = d.tiles[:0]
 	d.nTiles = 0
 	for i := range numRefFrames {
-		d.refs[i] = refState{}
+		d.setRef(i, refState{})
 		d.cdf[i] = nil
 	}
+	d.pool.drop()
 }
 
 // DecodeOBUs decodes a temporal unit and returns the pictures it shows, in output order.

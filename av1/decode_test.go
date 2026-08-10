@@ -62,6 +62,7 @@ func decodeIVF(t *testing.T, path string, threads int) []byte {
 		}
 		for _, pic := range pics {
 			planeRows(pic, &out)
+			pic.Release()
 		}
 	}
 

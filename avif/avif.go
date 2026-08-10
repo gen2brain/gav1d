@@ -531,6 +531,12 @@ func (f *file) decodeStill(o Options) (image.Image, ColorInfo, error) {
 	if err != nil {
 		return nil, ColorInfo{}, err
 	}
+	if !aliasesPicture(img) {
+		pic.Release()
+		if alpha != nil {
+			alpha.Release()
+		}
+	}
 	if !o.AutoRotate {
 		return img, ci, nil
 	}

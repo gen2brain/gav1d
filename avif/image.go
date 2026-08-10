@@ -34,6 +34,17 @@ func alphaState(alpha *av1.Picture, outDepth int, full bool) *colorState {
 // planar wraps the decoded planes without converting them, which is what the
 // bitstream already holds. image.YCbCr reads them as full-range BT.601, so a
 // file signalling anything else is exact as data but not as color.
+// aliasesPicture reports whether img shares memory with the decoded planes, in
+// which case the picture has to outlive it and must not be released.
+func aliasesPicture(img image.Image) bool {
+	switch img.(type) {
+	case *image.YCbCr, *image.NYCbCrA, *image.Gray:
+		return true
+	}
+
+	return false
+}
+
 func planar(pic, alpha *av1.Picture) (image.Image, bool) {
 	if pic.BitDepth != 8 {
 		return nil, false

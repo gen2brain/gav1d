@@ -105,6 +105,10 @@ type frameContext[P pixel, C coef] struct {
 	seqHdr   *sequenceHeader
 	frameHdr *frameHeader
 
+	pool  *picPool
+	mem   *picMem
+	srMem *picMem
+
 	bitdepthMax int32
 	bpc         int
 	layout      int

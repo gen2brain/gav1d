@@ -23,9 +23,114 @@ type Picture struct {
 	Transfer       int
 	MatrixCoeffs   int
 	FullRange      bool
+
+	mem *picMem
+}
+
+// Release hands the picture's memory back to the decoder that produced it, to
+// be reused by a later frame. It is optional: a picture that is never released
+// is collected as any other value would be. Reading Data after releasing, or
+// releasing twice, is a mistake the decoder will not survive quietly.
+func (p *Picture) Release() {
+	m := p.mem
+	p.mem = nil
+	p.Data = [3][]byte{}
+	m.release()
 }
 
 const picPad = 128
+
+// picPool hands back the sample memory of frames nobody holds any more. A
+// decoder keeps one, so the buffers it recycles are all the same shape.
+type picPool struct {
+	mu   sync.Mutex
+	free map[int][][]byte
+}
+
+// picPoolDepth bounds how many buffers of one size the pool keeps, so a stream
+// that changes resolution cannot make it grow without end.
+const picPoolDepth = 8
+
+func (p *picPool) get(n int) []byte {
+	if p == nil {
+		return make([]byte, n)
+	}
+
+	p.mu.Lock()
+	if bufs := p.free[n]; len(bufs) > 0 {
+		b := bufs[len(bufs)-1]
+		p.free[n] = bufs[:len(bufs)-1]
+		p.mu.Unlock()
+
+		return b
+	}
+	p.mu.Unlock()
+
+	return make([]byte, n)
+}
+
+func (p *picPool) put(bufs [][]byte) {
+	if p == nil {
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.free == nil {
+		p.free = make(map[int][][]byte)
+	}
+	for _, b := range bufs {
+		if len(p.free[len(b)]) < picPoolDepth {
+			p.free[len(b)] = append(p.free[len(b)], b)
+		}
+	}
+}
+
+func (p *picPool) drop() {
+	if p == nil {
+		return
+	}
+
+	p.mu.Lock()
+	p.free = nil
+	p.mu.Unlock()
+}
+
+// picMem owns one frame's sample memory. The reference slots and the Picture
+// handed to the caller each hold a count, and the memory goes back to the pool
+// only when the last of them lets go.
+type picMem struct {
+	pool *picPool
+	bufs [][]byte
+	refs atomic.Int32
+}
+
+func (m *picMem) acquire() {
+	if m != nil {
+		m.refs.Add(1)
+	}
+}
+
+func (m *picMem) release() {
+	if m == nil {
+		return
+	}
+	switch n := m.refs.Add(-1); {
+	case n == 0:
+		m.pool.put(m.bufs)
+	case n < 0:
+		panic("av1: picture released more times than it was held")
+	}
+}
+
+func picAlloc[P pixel](p *picPool, m *picMem, n int) []P {
+	var z P
+	b := p.get(n * int(unsafe.Sizeof(z)))
+	m.bufs = append(m.bufs, b)
+
+	return unsafe.Slice((*P)(unsafe.Pointer(unsafe.SliceData(b))), n)
+}
 
 // frameDecoder is the half of a frame's decode that reads no decoder state.
 type frameDecoder interface {
@@ -42,6 +147,7 @@ func setupFrame[P pixel, C coef](d *Decoder, tiles []tileGroup, p *pendingFrame)
 		frameHdr: frameHdr,
 		layout:   seqHdr.layout,
 		bpc:      8 + 2*int(seqHdr.hbd),
+		pool:     &d.pool,
 
 		reconIntra: reconBIntra[P, C],
 		reconInter: reconBInter[P, C],
@@ -156,6 +262,8 @@ func setupFrame[P pixel, C coef](d *Decoder, tiles []tileGroup, p *pendingFrame)
 }
 
 func (f *frameContext[P, C]) decode(in, out *cdfPromise) (*Picture, error) {
+	defer f.releasePlanes()
+
 	seqHdr, frameHdr := f.seqHdr, f.frameHdr
 	a := f.a
 
@@ -324,21 +432,24 @@ func (f *frameContext[P, C]) saveRefs(d *Decoder, out *pendingFrame) {
 		if hdr.refreshFrameFlags&(1<<i) == 0 {
 			continue
 		}
-		ref := &d.refs[i]
-		ref.out = out
-		ref.pic = pic
-		ref.codedW = hdr.width[0]
-		ref.segmap = f.curSegMap
-		ref.refmvs = nil
+		s := d.refs[i]
+		s.out = out
+		s.pic = pic
+		s.codedW = hdr.width[0]
+		s.segmap = f.curSegMap
+		s.refmvs = nil
 		if hdr.allowIntrabc == 0 {
-			ref.refmvs = f.mvs
+			s.refmvs = f.mvs
 		}
-		ref.refpoc = f.refPoc
+		s.refpoc = f.refPoc
+		d.setRef(i, s)
 	}
 }
 
-func (f *frameContext[P, C]) allocPicture(w int, planes *[3][]P, stride *[3]int) {
+func (f *frameContext[P, C]) allocPicture(w int, planes *[3][]P, stride *[3]int) *picMem {
 	h := f.frameHdr.height
+	m := &picMem{pool: f.pool}
+	m.refs.Store(1)
 
 	for pl := range 3 {
 		if pl != 0 && f.layout == pixelLayoutI400 {
@@ -350,7 +461,7 @@ func (f *frameContext[P, C]) allocPicture(w int, planes *[3][]P, stride *[3]int)
 			ph = (h + f.ssVer) >> f.ssVer
 		}
 		s := (pw + 2*picPad + 63) &^ 63
-		buf := make([]P, s*(ph+2*picPad))
+		buf := picAlloc[P](f.pool, m, s*(ph+2*picPad))
 		if pl == 0 {
 			stride[0] = s
 		} else {
@@ -358,18 +469,31 @@ func (f *frameContext[P, C]) allocPicture(w int, planes *[3][]P, stride *[3]int)
 		}
 		planes[pl] = buf[picPad*s+picPad:]
 	}
+
+	return m
+}
+
+// releasePlanes drops the frame's own hold on its memory, which it keeps for as
+// long as it decodes so a later frame cannot recycle it underneath.
+func (f *frameContext[P, C]) releasePlanes() {
+	if f.srMem != f.mem {
+		f.srMem.release()
+	}
+	f.mem.release()
+	f.mem, f.srMem = nil, nil
 }
 
 func (f *frameContext[P, C]) allocPlanes() error {
-	f.allocPicture(f.frameHdr.width[0], &f.cur, &f.stride)
+	f.mem = f.allocPicture(f.frameHdr.width[0], &f.cur, &f.stride)
 
 	if !f.resize {
 		f.srCur, f.srStride = f.cur, f.stride
+		f.srMem = f.mem
 
 		return nil
 	}
 
-	f.allocPicture(f.srWidth, &f.srCur, &f.srStride)
+	f.srMem = f.allocPicture(f.srWidth, &f.srCur, &f.srStride)
 
 	f.resizeStep[0] = scaleFac(f.frameHdr.width[0], f.srWidth)
 	inCw := (f.frameHdr.width[0] + f.ssHor) >> f.ssHor
@@ -387,7 +511,9 @@ func (f *frameContext[P, C]) picture() *Picture {
 		Height:   f.frameHdr.height,
 		Layout:   f.layout,
 		BitDepth: f.bpc,
+		mem:      f.srMem,
 	}
+	f.srMem.acquire()
 	f.setColor(p)
 
 	for pl := range 3 {
@@ -907,6 +1033,7 @@ func (f *frameContext[P, C]) refPicture() *refPicture[P] {
 		w:        f.srWidth,
 		h:        f.frameHdr.height,
 		progress: f.progress,
+		m:        f.srMem,
 	}
 }
 
