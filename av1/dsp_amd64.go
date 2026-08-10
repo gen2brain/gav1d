@@ -2,9 +2,14 @@
 
 package av1
 
-var hasAVX2 = cpuidAVX2()
+var (
+	hasAVX2   = cpuidAVX2()
+	hasAVX512 = cpuidAVX512ICL()
+)
 
 func cpuidAVX2() bool
+
+func cpuidAVX512ICL() bool
 
 // dspInit swaps in the assembly kernels for the bit depths that have them. The
 // assertion is on the pointer, so it costs an interface compare and no
@@ -43,6 +48,10 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d16.ipred[dc128Pred] = ipredDc12816AVX2
 		d16.ipred[filterPred] = ipredFilter16AVX2
 		d16.ipred[z1Pred] = ipredZ116AVX2
+
+		if hasAVX512 {
+			d16.loopFilter = loopFilter16AVX512
+		}
 	}
 
 	if d8, ok := any(d).(*dspContext[uint8]); ok {
@@ -69,6 +78,10 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.ipred[dc128Pred] = ipredDc1288AVX2
 		d8.ipred[filterPred] = ipredFilter8AVX2
 		d8.ipred[z1Pred] = ipredZ18AVX2
+
+		if hasAVX512 {
+			d8.loopFilter = loopFilter8AVX512
+		}
 	}
 }
 
@@ -79,4 +92,9 @@ func init() {
 
 	widenCoefs16 = widenCoefs16AVX2
 	widenCoefs16Rect2 = widenCoefs16Rect2AVX2
+
+	if hasAVX512 {
+		widenCoefs16 = widenCoefs16AVX512
+		widenCoefs16Rect2 = widenCoefs16Rect2AVX512
+	}
 }

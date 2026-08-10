@@ -44,3 +44,9 @@ func widenCoefs16AVX2(dst *int32, dstStride int, src *int16, srcStride, cols, n,
 
 //go:noescape
 func widenCoefs16Rect2AVX2(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
+
+//go:noescape
+func widenCoefs16AVX512(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
+
+//go:noescape
+func widenCoefs16Rect2AVX512(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)

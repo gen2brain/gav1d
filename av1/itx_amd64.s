@@ -15,6 +15,11 @@
 	MOVQ  lanes+48(FP), R12;   \
 	VPXOR Y1, Y1, Y1
 
+#define WIDEN_MASK(N)      \
+	MOVL  $0xff, R13;  \
+	BZHIQ N, R13, R13; \
+	KMOVW R13, K1
+
 TEXT ·itxClipAVX2(SB), NOSPLIT, $0-40
 	MOVQ         tmp+0(FP), DI
 	MOVQ         n+8(FP), CX
@@ -386,5 +391,122 @@ rnext:
 	JNZ  rcol
 
 rdone:
+	VZEROUPPER
+	RET
+
+// func widenCoefs16AVX512(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
+TEXT ·widenCoefs16AVX512(SB), NOSPLIT, $0-56
+	WIDEN_SETUP
+	TESTQ R10, R10
+	JZ    vwdone
+
+vwcol:
+	MOVQ DI, DX
+	MOVQ SI, CX
+	XORQ BX, BX
+
+vw8:
+	MOVQ R11, AX
+	SUBQ BX, AX
+	JLE  vwz8
+	CMPQ AX, $8
+	JL   vwpart
+	VPMOVSXWD (CX)(BX*2), Y0
+	VMOVDQU   Y0, (DX)(BX*4)
+	ADDQ      $8, BX
+	JMP       vw8
+
+vwpart:
+	WIDEN_MASK(AX)
+	VPMOVSXWD.Z (CX)(BX*2), K1, Y0
+	VMOVDQU32 Y0, K1, (DX)(BX*4)
+	MOVQ      R11, BX
+
+vwz8:
+	MOVQ R12, AX
+	SUBQ BX, AX
+	JLE  vwnext
+	CMPQ AX, $8
+	JL   vwzpart
+	VMOVDQU Y1, (DX)(BX*4)
+	ADDQ    $8, BX
+	JMP     vwz8
+
+vwzpart:
+	WIDEN_MASK(AX)
+	VMOVDQU32 Y1, K1, (DX)(BX*4)
+
+vwnext:
+	ADDQ R8, DI
+	ADDQ R9, SI
+	DECQ R10
+	JNZ  vwcol
+
+vwdone:
+	VZEROUPPER
+	RET
+
+// func widenCoefs16Rect2AVX512(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
+TEXT ·widenCoefs16Rect2AVX512(SB), NOSPLIT, $0-56
+	WIDEN_SETUP
+	TESTQ R10, R10
+	JZ    vrdone
+
+	MOVL         $181, AX
+	MOVQ         AX, X2
+	VPBROADCASTD X2, Y2
+	MOVL         $128, AX
+	MOVQ         AX, X3
+	VPBROADCASTD X3, Y3
+
+vrcol:
+	MOVQ DI, DX
+	MOVQ SI, CX
+	XORQ BX, BX
+
+vr8:
+	MOVQ R11, AX
+	SUBQ BX, AX
+	JLE  vrz8
+	CMPQ AX, $8
+	JL   vrpart
+	VPMOVSXWD (CX)(BX*2), Y0
+	VPMULLD   Y2, Y0, Y0
+	VPADDD    Y3, Y0, Y0
+	VPSRAD    $8, Y0, Y0
+	VMOVDQU   Y0, (DX)(BX*4)
+	ADDQ      $8, BX
+	JMP       vr8
+
+vrpart:
+	WIDEN_MASK(AX)
+	VPMOVSXWD.Z (CX)(BX*2), K1, Y0
+	VPMULLD   Y2, Y0, Y0
+	VPADDD    Y3, Y0, Y0
+	VPSRAD    $8, Y0, Y0
+	VMOVDQU32 Y0, K1, (DX)(BX*4)
+	MOVQ      R11, BX
+
+vrz8:
+	MOVQ R12, AX
+	SUBQ BX, AX
+	JLE  vrnext
+	CMPQ AX, $8
+	JL   vrzpart
+	VMOVDQU Y1, (DX)(BX*4)
+	ADDQ    $8, BX
+	JMP     vrz8
+
+vrzpart:
+	WIDEN_MASK(AX)
+	VMOVDQU32 Y1, K1, (DX)(BX*4)
+
+vrnext:
+	ADDQ R8, DI
+	ADDQ R9, SI
+	DECQ R10
+	JNZ  vrcol
+
+vrdone:
 	VZEROUPPER
 	RET
