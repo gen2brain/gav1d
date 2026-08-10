@@ -138,3 +138,101 @@ loop:
 	CBNZ R7, loop
 
 	RET
+
+// Two lookups pack the four channels as big-endian pairs, four pixels at a time.
+DATA rowSelD<>+0(SB)/8, $0x3031202110110001
+DATA rowSelD<>+8(SB)/8, $0x3435242514150405
+GLOBL rowSelD<>(SB), RODATA|NOPTR, $16
+
+DATA rowSelE<>+0(SB)/8, $0x3839282918190809
+DATA rowSelE<>+8(SB)/8, $0x3c3d2c2d1c1d0c0d
+GLOBL rowSelE<>(SB), RODATA|NOPTR, $16
+
+// func convertRow16x4NEON(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint16, n int, c *rowConsts)
+TEXT ·convertRow16x4NEON(SB), NOSPLIT, $0-72
+	MOVD dst+0(FP), R0
+	MOVD yf+8(FP), R1
+	MOVD u0+16(FP), R2
+	MOVD u1+24(FP), R3
+	MOVD v0+32(FP), R4
+	MOVD v1+40(FP), R5
+	MOVD a+48(FP), R6
+	MOVD n+56(FP), R7
+	MOVD c+64(FP), R8
+
+	MOVD $rowSelC<>(SB), R9
+	VLD1 (R9), [V16.B16]
+	MOVD $rowSelN<>(SB), R9
+	VLD1 (R9), [V17.B16]
+	MOVD $rowSelD<>(SB), R9
+	VLD1 (R9), [V18.B16]
+	MOVD $rowSelE<>(SB), R9
+	VLD1 (R9), [V19.B16]
+
+	MOVW 0(R8), R9
+	VDUP R9, V20.S4
+	MOVW 4(R8), R9
+	VDUP R9, V21.S4
+	MOVW 8(R8), R9
+	VDUP R9, V22.S4
+	MOVW 12(R8), R9
+	VDUP R9, V23.S4
+	MOVW 16(R8), R9
+	VDUP R9, V28.S4
+	MOVW 20(R8), R9
+	VDUP R9, V29.S4
+	MOVW 24(R8), R9
+	VDUP R9, V30.S4
+	MOVW 28(R8), R9
+	VDUP R9, V31.S4
+	MOVW 32(R8), R9
+	VDUP R9, V26.S4
+	MOVW 36(R8), R9
+	VDUP R9, V25.S4
+	MOVW 40(R8), R9
+	VDUP R9, V27.S4
+	VEOR V24.B16, V24.B16, V24.B16
+
+loop16:
+	VLD1 (R1), [V0.S4]
+	CHROMA(R2, R3, 1)
+	CHROMA(R4, R5, 2)
+
+	FMUL(7, 2, 23)
+	FADD(7, 0, 7)
+	FMUL(8, 1, 28)
+	FADD(8, 0, 8)
+
+	FMUL(9, 2, 29)
+	FMUL(10, 1, 30)
+	FADD(9, 9, 10)
+	FADD(9, 9, 9)
+	FDIV(9, 9, 31)
+	FSUB(9, 0, 9)
+
+	PIXEL(7)
+	PIXEL(9)
+	PIXEL(8)
+
+	VLD1   (R6), [V10.H4]
+	VUSHLL $0, V10.H4, V10.S4
+
+	VMOV V7.B16, V12.B16
+	VMOV V9.B16, V13.B16
+	VMOV V8.B16, V14.B16
+	VMOV V10.B16, V15.B16
+	VTBL V18.B16, [V12.B16, V13.B16, V14.B16, V15.B16], V11.B16
+	VST1.P [V11.B16], 16(R0)
+	VTBL V19.B16, [V12.B16, V13.B16, V14.B16, V15.B16], V11.B16
+	VST1.P [V11.B16], 16(R0)
+
+	ADD  $16, R1
+	ADD  $8, R2
+	ADD  $8, R3
+	ADD  $8, R4
+	ADD  $8, R5
+	ADD  $8, R6
+	SUB  $4, R7
+	CBNZ R7, loop16
+
+	RET

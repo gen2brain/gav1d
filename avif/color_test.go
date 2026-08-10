@@ -71,3 +71,63 @@ func TestConvertRowAsm(t *testing.T) {
 
 	t.Logf("%d cases", cases)
 }
+
+func TestConvertRow16Asm(t *testing.T) {
+	asm := rowFn16()
+	matrices := []int{mcBT601, mcBT709, mcBT2020NCL}
+	cases := 0
+
+	for iter := range 4 {
+		for _, matrix := range matrices {
+			for _, full := range []bool{false, true} {
+				for _, depth := range []int{10, 12} {
+					s := &colorState{matrix: matrix, fullRange: full, depth: depth, ssHor: 1}
+					s.maxChannel = 1<<depth - 1
+					s.outMax = 65535
+					s.kr, s.kg, s.kb = yuvCoefficients(matrix)
+					s.crCoef, s.cbCoef = 2*(1-s.kr), 2*(1-s.kb)
+					s.gcr, s.gcb = s.kr*(1-s.kr), s.kb*(1-s.kb)
+					c := s.rowConsts()
+
+					for n := 1; n <= 40; n++ {
+						uw := (n + 1) >> 1
+						yf := make([]float32, n)
+						a := make([]uint16, n)
+						for i := range yf {
+							yf[i] = float32(rowGen(iter, 0, i)%1400)/1000 - 0.2
+							a[i] = uint16(rowGen(iter, 1, i))
+						}
+						rows := make([][]float32, 4)
+						for r := range rows {
+							rows[r] = make([]float32, uw+8)
+							for i := range rows[r] {
+								rows[r][i] = float32(rowGen(iter, 2+r, i)%1200)/1000 - 0.6
+							}
+						}
+
+						got := make([]uint8, 8*n+64)
+						want := make([]uint8, 8*n+64)
+						for i := range got {
+							got[i] = uint8(rowGen(iter, 6, i))
+							want[i] = got[i]
+						}
+
+						asm(got, yf, rows[0], rows[1], rows[2], rows[3], a, n, &c)
+						convertRow16Go(want, yf, rows[0], rows[1], rows[2], rows[3], a, n, &c)
+
+						for i := range want {
+							if got[i] == want[i] {
+								continue
+							}
+							t.Fatalf("matrix=%d full=%v depth=%d n=%d: buf[%d] = %d, want %d",
+								matrix, full, depth, n, i, got[i], want[i])
+						}
+						cases++
+					}
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}

@@ -1,6 +1,10 @@
 package avif
 
-import "github.com/gen2brain/gav1d/av1"
+import (
+	"encoding/binary"
+
+	"github.com/gen2brain/gav1d/av1"
+)
 
 // rowConsts carries everything the row kernel needs. The scalar path builds the
 // same values into tables, so the kernels reproduce its arithmetic exactly
@@ -20,11 +24,20 @@ type rowConsts struct {
 type convertRow func(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
 	n int, c *rowConsts)
 
+// convertRow16 is the same row for a 16-bit output image. It writes the
+// big-endian pairs NRGBA64 stores, so the scalar path's separate widening loop
+// disappears with it.
+type convertRow16 func(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
+	n int, c *rowConsts)
+
 // fastRow reports whether the row kernel covers this image. It handles 8-bit
 // input and output, subsampled chroma and the three-coefficient matrices; the
 // scalar path keeps everything else.
 func (s *colorState) fastRow(outDepth int) bool {
-	if s.depth != 8 || outDepth != 8 || !s.hasColor || s.ssHor != 1 {
+	if !s.hasColor || s.ssHor != 1 {
+		return false
+	}
+	if s.depth == 8 != (outDepth == 8) {
 		return false
 	}
 	switch s.matrix {
@@ -58,6 +71,34 @@ func padUV(dst []float32, tab []float32, src []byte, stride, y, uw int) []float3
 	dst[uw+1] = dst[uw]
 
 	return dst
+}
+
+// convertRow16Go is the reference the 16-bit kernels are tested against.
+func convertRow16Go(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
+	n int, c *rowConsts,
+) {
+	for x := range n {
+		k := x >> 1
+		j := k
+		if x&1 != 0 {
+			j = k + 2
+		}
+		k++
+
+		yy := yf[x]
+		cb := u0[k]*c.w0 + u0[j]*c.w1 + u1[k]*c.w1 + u1[j]*c.w2
+		cr := v0[k]*c.w0 + v0[j]*c.w1 + v1[k]*c.w1 + v1[j]*c.w2
+
+		r := yy + c.crCoef*cr
+		b := yy + c.cbCoef*cb
+		g := yy - (2*((c.gcr*cr)+(c.gcb*cb)))/c.kg
+
+		o := dst[8*x : 8*x+8 : 8*x+8]
+		binary.BigEndian.PutUint16(o[0:], uint16(0.5+clampF(r)*c.outMax))
+		binary.BigEndian.PutUint16(o[2:], uint16(0.5+clampF(g)*c.outMax))
+		binary.BigEndian.PutUint16(o[4:], uint16(0.5+clampF(b)*c.outMax))
+		binary.BigEndian.PutUint16(o[6:], a[x])
+	}
 }
 
 // convertRowGo is the reference the kernels are tested against.
@@ -102,23 +143,50 @@ func (s *colorState) rowPlanes(pic *av1.Picture, y, w int) (u0, u1, v0, v1 []flo
 		}
 	}
 
-	u0 = padUV(s.uPad[0], s.tableUV, pic.Data[1], pic.Stride[1], uvY, uw)
-	v0 = padUV(s.vPad[0], s.tableUV, pic.Data[2], pic.Stride[2], uvY, uw)
+	u0 = s.padRow(s.uPad[0], pic.Data[1], pic.Stride[1], uvY, uw)
+	v0 = s.padRow(s.vPad[0], pic.Data[2], pic.Stride[2], uvY, uw)
 	if adjRow == 0 {
 		return u0, u0, v0, v0
 	}
 
-	u1 = padUV(s.uPad[1], s.tableUV, pic.Data[1], pic.Stride[1], uvY+adjRow, uw)
-	v1 = padUV(s.vPad[1], s.tableUV, pic.Data[2], pic.Stride[2], uvY+adjRow, uw)
+	u1 = s.padRow(s.uPad[1], pic.Data[1], pic.Stride[1], uvY+adjRow, uw)
+	v1 = s.padRow(s.vPad[1], pic.Data[2], pic.Stride[2], uvY+adjRow, uw)
 
 	return u0, u1, v0, v1
 }
 
+// padRow normalizes one chroma row at whatever depth the picture carries.
+func (s *colorState) padRow(dst []float32, src []byte, stride, y, uw int) []float32 {
+	if s.depth == 8 {
+		return padUV(dst, s.tableUV, src, stride, y, uw)
+	}
+
+	row := src[y*stride : y*stride+2*uw]
+	tab, maxCh := s.tableUV, uint16(s.maxChannel)
+	for i := range uw {
+		dst[i+1] = tab[min(binary.NativeEndian.Uint16(row[2*i:]), maxCh)]
+	}
+	dst[0] = dst[1]
+	dst[uw+1] = dst[uw]
+
+	return dst
+}
+
 // lumaRow normalizes one luma row.
 func (s *colorState) lumaRow(pic *av1.Picture, y, w int) []float32 {
-	row := pic.Data[0][y*pic.Stride[0] : y*pic.Stride[0]+w]
-	for i, v := range row {
-		s.yf[i] = s.tableY[v]
+	if s.depth == 8 {
+		row := pic.Data[0][y*pic.Stride[0] : y*pic.Stride[0]+w]
+		for i, v := range row {
+			s.yf[i] = s.tableY[v]
+		}
+
+		return s.yf
+	}
+
+	row := pic.Data[0][y*pic.Stride[0] : y*pic.Stride[0]+2*w]
+	tab, maxCh := s.tableY, uint16(s.maxChannel)
+	for i := range w {
+		s.yf[i] = tab[min(binary.NativeEndian.Uint16(row[2*i:]), maxCh)]
 	}
 
 	return s.yf

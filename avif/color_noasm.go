@@ -3,3 +3,5 @@
 package avif
 
 func rowFn() convertRow { return convertRowGo }
+
+func rowFn16() convertRow16 { return convertRow16Go }

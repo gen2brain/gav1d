@@ -59,6 +59,7 @@ type colorState struct {
 	uPad, vPad   [2][]float32
 	yf           []float32
 	row          convertRow
+	row16        convertRow16
 	consts       rowConsts
 	yRow         []uint16
 	uRow, vRow   [2][]uint16

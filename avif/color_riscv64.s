@@ -128,3 +128,102 @@ loop:
 	BNEZ X17, loop
 
 	RET
+
+// SWAP16 narrows one channel to halfwords and puts them in the big-endian order
+// NRGBA64 stores.
+#define SWAP16(SRC, DST)                  \
+	VSETVLI X5, E16, MF2, TA, MA, X6; \
+	VNSRLWI $0, SRC, DST;             \
+	VSRLVI  $8, DST, V20;             \
+	VSLLVI  $8, DST, DST;             \
+	VORVV   V20, DST, DST;            \
+	VSETVLI X5, E32, M1, TA, MA, X6
+
+// func convertRow16RVV(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint16, n int, c *rowConsts)
+TEXT ·convertRow16RVV(SB), NOSPLIT, $0-72
+	MOV dst+0(FP), X10
+	MOV yf+8(FP), X11
+	MOV u0+16(FP), X12
+	MOV u1+24(FP), X13
+	MOV v0+32(FP), X14
+	MOV v1+40(FP), X15
+	MOV a+48(FP), X16
+	MOV n+56(FP), X17
+	MOV c+64(FP), X18
+
+	MOVF 0(X18), F0
+	MOVF 4(X18), F1
+	MOVF 8(X18), F2
+	MOVF 12(X18), F3
+	MOVF 16(X18), F4
+	MOVF 20(X18), F5
+	MOVF 24(X18), F6
+	MOVF 28(X18), F7
+	MOVF 32(X18), F8
+	MOVF 36(X18), F9
+	MOVF 40(X18), F10
+	MOVF 44(X18), F11
+
+loop16:
+	// A strip is capped so the gather stays inside the row's slack.
+	MOV     $16, X19
+	MIN     X17, X19, X19
+	VSETVLI X19, E32, M1, TA, MA, X5
+
+	VIDV   V3
+	VSRLVI $1, V3, V4
+	VADDVI $1, V4, V6
+	VANDVI $1, V3, V5
+	VADDVV V5, V5, V5
+	VADDVV V5, V4, V7
+
+	VLE32V (X11), V0
+	CHROMA(X12, X13, V1)
+	CHROMA(X14, X15, V2)
+
+	VFMULVF F3, V2, V8
+	VFADDVV V0, V8, V8
+
+	VFMULVF F4, V1, V10
+	VFADDVV V0, V10, V10
+
+	VFMULVF F5, V2, V9
+	VFMULVF F6, V1, V4
+	VFADDVV V4, V9, V9
+	VFADDVV V9, V9, V9
+	VFDIVVF F7, V9, V9
+	VFSUBVV V9, V0, V9
+
+	PIXEL(V8)
+	PIXEL(V9)
+	PIXEL(V10)
+
+	VSETVLI  X5, E16, MF2, TA, MA, X6
+	VLE16V   (X16), V11
+	VSETVLI  X5, E32, M1, TA, MA, X6
+	VZEXTVF2 V11, V12
+
+	SWAP16(V8, V16)
+	SWAP16(V9, V17)
+	SWAP16(V10, V18)
+	SWAP16(V12, V19)
+
+	VSETVLI    X5, E16, MF2, TA, MA, X6
+	VSSEG4E16V V16, (X10)
+	VSETVLI    X5, E32, M1, TA, MA, X6
+
+	SLLI $2, X5, X6
+	ADD  X6, X11
+	SLLI $3, X5, X21
+	ADD  X21, X10
+	SRLI $1, X6, X20
+	ADD  X20, X12
+	ADD  X20, X13
+	ADD  X20, X14
+	ADD  X20, X15
+	SLLI $1, X5, X22
+	ADD  X22, X16
+	SUB  X5, X17
+	BNEZ X17, loop16
+
+	RET
