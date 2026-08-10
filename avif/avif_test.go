@@ -937,3 +937,75 @@ func TestLoopCount(t *testing.T) {
 		t.Fatalf("track one segment long = %d, want -1", got)
 	}
 }
+
+// toneMapPayload builds a one-channel tmap payload with the given versions.
+func toneMapPayload(version uint8, minVer, writerVer uint16, gammaN uint32, extra int) []byte {
+	var b []byte
+	b = append(b, version)
+	b = binary.BigEndian.AppendUint16(b, minVer)
+	b = binary.BigEndian.AppendUint16(b, writerVer)
+	b = append(b, 0x40)
+
+	u32 := func(v uint32) { b = binary.BigEndian.AppendUint32(b, v) }
+	u32(6)
+	u32(2)
+	u32(0)
+	u32(1)
+
+	u32(0xffffffff)
+	u32(1)
+	u32(11)
+	u32(1)
+	u32(gammaN)
+	u32(1)
+	u32(0)
+	u32(1)
+	u32(0)
+	u32(1)
+
+	return append(b, make([]byte, extra)...)
+}
+
+// TestParseToneMap pins the version rules the format puts on a gain map: a
+// reader must refuse one that asks for more than it implements, and must refuse
+// trailing bytes from a writer no newer than itself.
+func TestParseToneMap(t *testing.T) {
+	cases := []struct {
+		name  string
+		b     []byte
+		want  bool
+		check func(*GainMap) error
+	}{
+		{name: "supported", b: toneMapPayload(0, 0, 0, 1, 0), want: true},
+		{name: "unsupported version", b: toneMapPayload(1, 0, 0, 1, 0)},
+		{name: "unsupported minimum version", b: toneMapPayload(0, 1, 1, 1, 0)},
+		{name: "writer older than minimum", b: toneMapPayload(0, 1, 0, 1, 0)},
+		{name: "extra bytes from a known writer", b: toneMapPayload(0, 0, 0, 1, 4)},
+		{name: "extra bytes from a newer writer", b: toneMapPayload(0, 0, 1, 1, 4), want: true},
+		{name: "zero gamma", b: toneMapPayload(0, 0, 0, 0, 0)},
+		{name: "truncated", b: toneMapPayload(0, 0, 0, 1, 0)[:40]},
+	}
+
+	for _, c := range cases {
+		g, ok := parseToneMap(c.b)
+		if ok != c.want {
+			t.Fatalf("%s: ok = %v, want %v", c.name, ok, c.want)
+		}
+		if !ok {
+			continue
+		}
+		if got := g.BaseHDRHeadroom.Float(); got != 3 {
+			t.Fatalf("%s: base headroom = %v, want 3", c.name, got)
+		}
+		if !g.UseBaseColorSpace {
+			t.Fatalf("%s: use_base_colour_space not read", c.name)
+		}
+		// One channel fills the other two.
+		if g.Max[2] != g.Max[0] || g.Min[2] != g.Min[0] {
+			t.Fatalf("%s: single channel not copied to the rest", c.name)
+		}
+		if got := g.Min[0].Float(); got != -1 {
+			t.Fatalf("%s: min = %v, want -1", c.name, got)
+		}
+	}
+}
