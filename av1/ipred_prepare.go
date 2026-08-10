@@ -98,9 +98,7 @@ func prepareIntraEdges[P pixel](x int, haveLeft bool, y int, haveTop bool,
 
 		if haveLeft {
 			pxHave := min(sz, (h-y)<<2)
-			for i := range pxHave {
-				tlOut[leftOff+sz-1-i] = dst[dstOff+stride*i-1]
-			}
+			gatherColumn(tlOut, leftOff+sz-1, dst, dstOff-1, stride, pxHave)
 			if pxHave < sz {
 				fill(tlOut[leftOff:leftOff+sz-pxHave], tlOut[leftOff+sz-pxHave])
 			}
@@ -117,9 +115,7 @@ func prepareIntraEdges[P pixel](x int, haveLeft bool, y int, haveTop bool,
 
 			if haveBottomleft {
 				pxHave := min(sz, (h-y-th)<<2)
-				for i := range pxHave {
-					tlOut[leftOff-(i+1)] = dst[dstOff+(sz+i)*stride-1]
-				}
+				gatherColumn(tlOut, leftOff-1, dst, dstOff+sz*stride-1, stride, pxHave)
 				if pxHave < sz {
 					fill(tlOut[leftOff-sz:leftOff-pxHave], tlOut[leftOff-pxHave])
 				}
@@ -190,5 +186,13 @@ func bitdepthFromMax(bitdepthMax int32) int {
 func fill[P pixel](dst []P, v P) {
 	for i := range dst {
 		dst[i] = v
+	}
+}
+
+func gatherColumn[P pixel](out []P, outOff int, src []P, srcOff, stride, n int) {
+	out = out[outOff-(n-1) : outOff+1]
+	for i := range out {
+		out[len(out)-1-i] = src[srcOff]
+		srcOff += stride
 	}
 }

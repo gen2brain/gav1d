@@ -106,3 +106,29 @@ func TestPrepareIntraEdges(t *testing.T) {
 
 	t.Logf("%d cases", cases)
 }
+
+func BenchmarkPrepareIntraEdges(b *testing.B) {
+	const (
+		stride = 160
+		pad    = 72
+		rows   = 208
+	)
+
+	plane := make([]uint8, rows*stride)
+	for i := range plane {
+		plane[i] = uint8(i * 7)
+	}
+	dstOff := pad*stride + pad
+	tl := make([]uint8, 257)
+
+	for _, tw := range []int{1, 2, 4, 8, 16} {
+		b.Run(strconv.Itoa(tw*4), func(b *testing.B) {
+			angle := 0
+			for b.Loop() {
+				prepareIntraEdges(4, true, 4, true, 64, 64, edgeAllTrAndBl,
+					plane, dstOff, stride, nil, 0, paethPred, &angle, tw, tw,
+					false, tl, 128, 0xff)
+			}
+		})
+	}
+}
