@@ -17,6 +17,7 @@ func dspInit[P pixel](d *dspContext[P]) {
 	d.itxClip = itxClipVec
 	d.itxCol = itxColVec
 	d.itxTranspose = itxTransposeVec
+	d.itxLanes = 8
 
 	if d16, ok := any(d).(*dspContext[uint16]); ok {
 		d16.cdefFilter = cdefFilterBlock16AVX2

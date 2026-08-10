@@ -47,22 +47,25 @@ loop:
 	SMAXS(0, 0, 6);           \
 	SMINS(0, 0, 7)
 
-// func itxAdd8NEON(dst *uint8, stride int, tmp *int32, w, h int, bitdepthMax int32)
-TEXT ·itxAdd8NEON(SB), NOSPLIT, $0-44
+// func itxAdd8NEON(dst *uint8, stride int, tmp *int32, w, h, ts int, bitdepthMax int32)
+TEXT ·itxAdd8NEON(SB), NOSPLIT, $0-52
 	MOVD dst+0(FP), R0
 	MOVD stride+8(FP), R1
 	MOVD tmp+16(FP), R2
 	MOVD w+24(FP), R3
 	MOVD h+32(FP), R4
-	MOVW bitdepthMax+40(FP), R5
+	MOVD ts+40(FP), R11
+	MOVW bitdepthMax+48(FP), R5
 	VDUP R5, V7.S4
 	VEOR V6.B16, V6.B16, V6.B16
 	MOVD $8, R6
 	VDUP R6, V5.S4
+	LSL  $2, R11, R11
 
 rows8:
 	MOVD R0, R7
 	MOVD R3, R8
+	MOVD R2, R12
 
 cols8:
 	VLD1   (R7), [V1.S4]
@@ -79,29 +82,33 @@ cols8:
 	SUB  $4, R8
 	CBNZ R8, cols8
 
+	ADD  R11, R12, R2
 	ADD  R1, R0
 	SUB  $1, R4
 	CBNZ R4, rows8
 
 	RET
 
-// func itxAdd16NEON(dst *uint16, stride int, tmp *int32, w, h int, bitdepthMax int32)
-TEXT ·itxAdd16NEON(SB), NOSPLIT, $0-44
+// func itxAdd16NEON(dst *uint16, stride int, tmp *int32, w, h, ts int, bitdepthMax int32)
+TEXT ·itxAdd16NEON(SB), NOSPLIT, $0-52
 	MOVD dst+0(FP), R0
 	MOVD stride+8(FP), R1
 	MOVD tmp+16(FP), R2
 	MOVD w+24(FP), R3
 	MOVD h+32(FP), R4
-	MOVW bitdepthMax+40(FP), R5
+	MOVD ts+40(FP), R11
+	MOVW bitdepthMax+48(FP), R5
 	VDUP R5, V7.S4
 	VEOR V6.B16, V6.B16, V6.B16
 	MOVD $8, R6
 	VDUP R6, V5.S4
 	LSL  $1, R1, R1
+	LSL  $2, R11, R11
 
 rows16:
 	MOVD R0, R7
 	MOVD R3, R8
+	MOVD R2, R12
 
 cols16:
 	VLD1   (R7), [V1.H4]
@@ -116,21 +123,23 @@ cols16:
 	SUB  $4, R8
 	CBNZ R8, cols16
 
+	ADD  R11, R12, R2
 	ADD  R1, R0
 	SUB  $1, R4
 	CBNZ R4, rows16
 
 	RET
 
-// func itxTransposeNEON(wide, out *int32, w, sh, n int)
-TEXT ·itxTransposeNEON(SB), NOSPLIT, $0-40
+// func itxTransposeNEON(wide, out *int32, w, ws, ts, n int)
+TEXT ·itxTransposeNEON(SB), NOSPLIT, $0-48
 	MOVD wide+0(FP), R0
 	MOVD out+8(FP), R1
 	MOVD w+16(FP), R2
-	MOVD sh+24(FP), R3
-	MOVD n+32(FP), R4
+	MOVD ws+24(FP), R3
+	MOVD ts+32(FP), R5
+	MOVD n+40(FP), R4
 	LSL  $2, R3, R3
-	LSL  $2, R2, R5
+	LSL  $2, R5, R5
 
 trlane:
 	MOVD R0, R6

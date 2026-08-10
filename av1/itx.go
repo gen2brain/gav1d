@@ -131,15 +131,15 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 	}
 
 	n := lastNonzeroCol + 1
-	wide := tmp[w*h:][:w*sh]
-
-	lanes := n
-	if dsp.itxCol != nil && sh >= 8 {
-		lanes = min((n+7)&^7, sh)
+	lanes, ws, ts, tw, th := n, sh, w, w, h
+	if g := dsp.itxLanes; g > 0 {
+		ws, ts, tw, th = max(sh, g), max(w, g), max(w, g), max(h, g)
+		lanes = min((n+g-1)/g*g, ws)
 	}
+	wide := tmp[th*ts:][:tw*ws]
 
 	for x := range sw {
-		d := wide[x*sh:]
+		d := wide[x*ws:]
 		if isRect2 {
 			for y, v := range coeff[x*sh:][:n] {
 				d[y] = (int32(v)*181 + 128) >> 8
@@ -151,30 +151,30 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 		}
 		clear(d[n:lanes])
 	}
-	for x := sw; x < w; x++ {
-		clear(wide[x*sh:][:lanes])
+	for x := sw; x < tw; x++ {
+		clear(wide[x*ws:][:lanes])
 	}
 
 	clear(coeff[:sw*sh])
 
-	if dsp.itxCol == nil || !dsp.itxCol(wide, lanes, sh, w, int(txtps[0]), rowClipMin, rowClipMax, tmp[itxDct64Scratch:]) {
+	if dsp.itxCol == nil || !dsp.itxCol(wide, lanes, ws, w, int(txtps[0]), rowClipMin, rowClipMax, tmp[itxDct64Scratch:]) {
 		for y := range n {
-			first1d(wide, y, sh, rowClipMin, rowClipMax)
+			first1d(wide, y, ws, rowClipMin, rowClipMax)
 		}
 		lanes = n
 	}
 
-	dsp.itxTranspose(wide, tmp, w, sh, lanes)
-	dsp.itxClip(tmp[:lanes*w], rnd, shift, colClipMin, colClipMax)
-	clear(tmp[lanes*w : h*w])
+	dsp.itxTranspose(wide, tmp, tw, ws, ts, lanes)
+	dsp.itxClip(tmp[:lanes*ts], rnd, shift, colClipMin, colClipMax)
+	clear(tmp[lanes*ts : th*ts])
 
-	if dsp.itxCol == nil || !dsp.itxCol(tmp, w, w, h, int(txtps[1]), colClipMin, colClipMax, tmp[itxDct64Scratch:]) {
+	if dsp.itxCol == nil || !dsp.itxCol(tmp, ts, ts, h, int(txtps[1]), colClipMin, colClipMax, tmp[itxDct64Scratch:]) {
 		for x := range w {
-			second1d(tmp, x, w, colClipMin, colClipMax)
+			second1d(tmp, x, ts, colClipMin, colClipMax)
 		}
 	}
 
-	dsp.itxAdd(dst, dstOff, stride, tmp, w, h, bitdepthMax)
+	dsp.itxAdd(dst, dstOff, stride, tmp, w, h, ts, bitdepthMax)
 }
 
 func invTxfmAddWht4x4[P pixel, C coef](dst []P, dstOff, stride int, coeff []C,
@@ -216,11 +216,11 @@ func itxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int,
 	invTxfmAdd(dsp, dst, dstOff, stride, coeff, tmp, eob, tx, txtp, bitdepthMax)
 }
 
-func itxTransposeGo(wide, tmp []int32, w, sh, n int) {
+func itxTransposeGo(wide, tmp []int32, w, ws, ts, n int) {
 	for y := range n {
-		d := tmp[y*w:][:w]
+		d := tmp[y*ts:][:w]
 		for x := range d {
-			d[x] = wide[x*sh+y]
+			d[x] = wide[x*ws+y]
 		}
 	}
 }
@@ -231,12 +231,12 @@ func itxClipGo(tmp []int32, rnd int32, shift int, lo, hi int32) {
 	}
 }
 
-func itxAddGo[P pixel](dst []P, dstOff, stride int, tmp []int32, w, h int,
+func itxAddGo[P pixel](dst []P, dstOff, stride int, tmp []int32, w, h, ts int,
 	bitdepthMax int32,
 ) {
 	for y := range h {
 		row := dst[dstOff+y*stride:][:w]
-		src := tmp[y*w:][:w]
+		src := tmp[y*ts:][:w]
 		for x, v := range src {
 			row[x] = P(clip(int32(row[x])+((v+8)>>4), 0, bitdepthMax))
 		}

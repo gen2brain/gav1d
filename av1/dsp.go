@@ -26,10 +26,14 @@ type dspContext[P pixel] struct {
 		w, h, mx, my, filterType int, bitdepthMax int32)
 
 	itxClip func(tmp []int32, rnd int32, shift int, lo, hi int32)
-	itxAdd  func(dst []P, dstOff, stride int, tmp []int32, w, h int, bitdepthMax int32)
+	itxAdd  func(dst []P, dstOff, stride int, tmp []int32, w, h, ts int, bitdepthMax int32)
 	itxCol  func(tmp []int32, lanes, stride, n, txtp int, lo, hi int32, scratch []int32) bool
 
-	itxTranspose func(wide, tmp []int32, w, sh, n int)
+	itxTranspose func(wide, tmp []int32, w, ws, ts, n int)
+
+	// itxLanes is the lane count the one-dimensional kernels step in, which the
+	// transform buffers are padded out to.
+	itxLanes int
 
 	// Converting a generic function to a func value allocates a closure for
 	// the dictionary, so the predictors are resolved once per frame here

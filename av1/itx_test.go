@@ -182,31 +182,39 @@ func itxTailCase[P pixel](t *testing.T, d *dspContext[P], iter, w, h int,
 	for i := range wide {
 		wide[i] = int32(gen(2, i)) >> 8
 	}
-	for _, n := range []int{sh, min(8, sh), 4} {
-		tref := make([]int32, w*h)
-		tgot := make([]int32, w*h)
-		itxTransposeGo(wide, tref, w, sh, n)
-		d.itxTranspose(wide, tgot, w, sh, n)
-		for i := range tref {
-			if tgot[i] != tref[i] {
-				t.Fatalf("%dx%d transpose n=%d buf[%d] = %d, want %d",
-					w, h, n, i, tgot[i], tref[i])
+	for _, ts := range []int{w, max(w, 8)} {
+		for _, n := range []int{sh, min(8, sh), 4} {
+			tref := make([]int32, ts*h)
+			tgot := make([]int32, ts*h)
+			itxTransposeGo(wide, tref, w, sh, ts, n)
+			d.itxTranspose(wide, tgot, w, sh, ts, n)
+			for i := range tref {
+				if tgot[i] != tref[i] {
+					t.Fatalf("%dx%d transpose ts=%d n=%d buf[%d] = %d, want %d",
+						w, h, ts, n, i, tgot[i], tref[i])
+				}
 			}
 		}
 	}
 
-	dref := make([]P, stride*(h+2))
-	dgot := make([]P, stride*(h+2))
-	for i := range dref {
-		dref[i] = P(int32(gen(1, i)) & bitdepthMax)
-		dgot[i] = dref[i]
-	}
-	itxAddGo(dref, stride, stride, ref, w, h, bitdepthMax)
-	d.itxAdd(dgot, stride, stride, got, w, h, bitdepthMax)
-	for i := range dref {
-		if dgot[i] != dref[i] {
-			t.Fatalf("bpc=%d %dx%d add buf[%d] = %d, want %d",
-				bitdepthFromMax(bitdepthMax), w, h, i, dgot[i], dref[i])
+	for _, ats := range []int{w, max(w, 8)} {
+		res := make([]int32, ats*h)
+		for i := range res {
+			res[i] = int32(gen(3, i)) >> 12
+		}
+		dref := make([]P, stride*(h+2))
+		dgot := make([]P, stride*(h+2))
+		for i := range dref {
+			dref[i] = P(int32(gen(1, i)) & bitdepthMax)
+			dgot[i] = dref[i]
+		}
+		itxAddGo(dref, stride, stride, res, w, h, ats, bitdepthMax)
+		d.itxAdd(dgot, stride, stride, res, w, h, ats, bitdepthMax)
+		for i := range dref {
+			if dgot[i] != dref[i] {
+				t.Fatalf("bpc=%d %dx%d ts=%d add buf[%d] = %d, want %d",
+					bitdepthFromMax(bitdepthMax), w, h, ats, i, dgot[i], dref[i])
+			}
 		}
 	}
 
@@ -279,6 +287,10 @@ func BenchmarkItx(b *testing.B) {
 		name     string
 		tx, txtp int
 	}{
+		{"4x4-dct", tx4x4, dctDct},
+		{"4x4-adst", tx4x4, adstAdst},
+		{"8x4-dct", rtx8x4, dctDct},
+		{"4x16-dct", rtx4x16, dctDct},
 		{"8x8-dct", tx8x8, dctDct},
 		{"16x16-dct", tx16x16, dctDct},
 		{"32x32-dct", tx32x32, dctDct},

@@ -41,20 +41,32 @@ loop:
 	VPMAXSD Y6, Y0, Y0;        \
 	VPMINSD Y7, Y0, Y0
 
-// func itxAdd8AVX2(dst *uint8, stride int, tmp *int32, w, h int, bitdepthMax int32)
-TEXT ·itxAdd8AVX2(SB), NOSPLIT, $0-44
+#define ADDROW4(PX)                \
+	VMOVDQU (SI), X0;          \
+	VPADDD  X5, X0, X0;        \
+	VPSRAD  $4, X0, X0;        \
+	VPADDD  PX, X0, X0;        \
+	VPMAXSD X6, X0, X0;        \
+	VPMINSD X7, X0, X0
+
+// func itxAdd8AVX2(dst *uint8, stride int, tmp *int32, w, h, ts int, bitdepthMax int32)
+TEXT ·itxAdd8AVX2(SB), NOSPLIT, $0-52
 	MOVQ         dst+0(FP), DI
 	MOVQ         stride+8(FP), DX
 	MOVQ         tmp+16(FP), SI
 	MOVQ         w+24(FP), BX
 	MOVQ         h+32(FP), CX
-	MOVL         bitdepthMax+40(FP), AX
+	MOVQ         ts+40(FP), R9
+	MOVL         bitdepthMax+48(FP), AX
 	VMOVD        AX, X7
 	VPBROADCASTD X7, Y7
 	VPXOR        Y6, Y6, Y6
 	MOVL         $8, AX
 	VMOVD        AX, X5
 	VPBROADCASTD X5, Y5
+	SHLQ         $2, R9
+	CMPQ         BX, $4
+	JEQ          rows8x4
 
 rows8:
 	XORQ R8, R8
@@ -78,14 +90,30 @@ cols8:
 	VZEROUPPER
 	RET
 
-// func itxAdd16AVX2(dst *uint16, stride int, tmp *int32, w, h int, bitdepthMax int32)
-TEXT ·itxAdd16AVX2(SB), NOSPLIT, $0-44
+rows8x4:
+	VPMOVZXBD (DI), X1
+	ADDROW4(X1)
+	VPACKUSDW X0, X0, X0
+	VPACKUSWB X0, X0, X0
+	VMOVD     X0, (DI)
+
+	ADDQ R9, SI
+	ADDQ DX, DI
+	DECQ CX
+	JNZ  rows8x4
+
+	VZEROUPPER
+	RET
+
+// func itxAdd16AVX2(dst *uint16, stride int, tmp *int32, w, h, ts int, bitdepthMax int32)
+TEXT ·itxAdd16AVX2(SB), NOSPLIT, $0-52
 	MOVQ         dst+0(FP), DI
 	MOVQ         stride+8(FP), DX
 	MOVQ         tmp+16(FP), SI
 	MOVQ         w+24(FP), BX
 	MOVQ         h+32(FP), CX
-	MOVL         bitdepthMax+40(FP), AX
+	MOVQ         ts+40(FP), R9
+	MOVL         bitdepthMax+48(FP), AX
 	VMOVD        AX, X7
 	VPBROADCASTD X7, Y7
 	VPXOR        Y6, Y6, Y6
@@ -93,6 +121,9 @@ TEXT ·itxAdd16AVX2(SB), NOSPLIT, $0-44
 	VMOVD        AX, X5
 	VPBROADCASTD X5, Y5
 	SHLQ         $1, DX
+	SHLQ         $2, R9
+	CMPQ         BX, $4
+	JEQ          rows16x4
 
 rows16:
 	XORQ R8, R8
@@ -111,6 +142,20 @@ cols16:
 	ADDQ DX, DI
 	DECQ CX
 	JNZ  rows16
+
+	VZEROUPPER
+	RET
+
+rows16x4:
+	VPMOVZXWD (DI), X1
+	ADDROW4(X1)
+	VPACKUSDW X0, X0, X0
+	VMOVQ     X0, (DI)
+
+	ADDQ R9, SI
+	ADDQ DX, DI
+	DECQ CX
+	JNZ  rows16x4
 
 	VZEROUPPER
 	RET
@@ -149,15 +194,15 @@ cols16:
 	ADDQ    S, P;     \
 	VMOVDQU Y15, (P)
 
-// func itxTransposeAVX2(wide, out *int32, w, sh, n int)
-TEXT ·itxTransposeAVX2(SB), NOSPLIT, $0-40
+// func itxTransposeAVX2(wide, out *int32, w, ws, ts, n int)
+TEXT ·itxTransposeAVX2(SB), NOSPLIT, $0-48
 	MOVQ wide+0(FP), SI
 	MOVQ out+8(FP), DI
 	MOVQ w+16(FP), BX
-	MOVQ sh+24(FP), DX
-	MOVQ n+32(FP), CX
+	MOVQ ws+24(FP), DX
+	MOVQ ts+32(FP), R9
+	MOVQ n+40(FP), CX
 	SHLQ $2, DX
-	MOVQ BX, R9
 	SHLQ $2, R9
 
 trlane:

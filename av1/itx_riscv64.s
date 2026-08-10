@@ -36,18 +36,21 @@ loop:
 	VMAXVX X0, V1, V1; \
 	VMINVX X15, V1, V1
 
-// func itxAdd8RVV(dst *uint8, stride int, tmp *int32, w, h int, bitdepthMax int32)
-TEXT ·itxAdd8RVV(SB), NOSPLIT, $0-44
+// func itxAdd8RVV(dst *uint8, stride int, tmp *int32, w, h, ts int, bitdepthMax int32)
+TEXT ·itxAdd8RVV(SB), NOSPLIT, $0-52
 	MOV  dst+0(FP), X10
 	MOV  stride+8(FP), X11
 	MOV  tmp+16(FP), X12
 	MOV  w+24(FP), X13
 	MOV  h+32(FP), X14
-	MOVW bitdepthMax+40(FP), X15
+	MOV  ts+40(FP), X18
+	MOVW bitdepthMax+48(FP), X15
+	SLLI $2, X18, X18
 
 rows8:
 	MOV X10, X16
 	MOV X13, X17
+	MOV X12, X19
 
 cols8:
 	VSETVLI  X17, E32, M1, TA, MA, X5
@@ -69,25 +72,29 @@ cols8:
 	SUB  X5, X17
 	BNEZ X17, cols8
 
+	ADD  X18, X19, X12
 	ADD  X11, X10
 	ADDI $-1, X14
 	BNEZ X14, rows8
 
 	RET
 
-// func itxAdd16RVV(dst *uint16, stride int, tmp *int32, w, h int, bitdepthMax int32)
-TEXT ·itxAdd16RVV(SB), NOSPLIT, $0-44
+// func itxAdd16RVV(dst *uint16, stride int, tmp *int32, w, h, ts int, bitdepthMax int32)
+TEXT ·itxAdd16RVV(SB), NOSPLIT, $0-52
 	MOV  dst+0(FP), X10
 	MOV  stride+8(FP), X11
 	MOV  tmp+16(FP), X12
 	MOV  w+24(FP), X13
 	MOV  h+32(FP), X14
-	MOVW bitdepthMax+40(FP), X15
+	MOV  ts+40(FP), X18
+	MOVW bitdepthMax+48(FP), X15
 	SLLI $1, X11, X11
+	SLLI $2, X18, X18
 
 rows16:
 	MOV X10, X16
 	MOV X13, X17
+	MOV X12, X19
 
 cols16:
 	VSETVLI  X17, E32, M1, TA, MA, X5
@@ -108,21 +115,23 @@ cols16:
 	SUB  X5, X17
 	BNEZ X17, cols16
 
+	ADD  X18, X19, X12
 	ADD  X11, X10
 	ADDI $-1, X14
 	BNEZ X14, rows16
 
 	RET
 
-// func itxTransposeRVV(wide, out *int32, w, sh, n int)
-TEXT ·itxTransposeRVV(SB), NOSPLIT, $0-40
+// func itxTransposeRVV(wide, out *int32, w, ws, ts, n int)
+TEXT ·itxTransposeRVV(SB), NOSPLIT, $0-48
 	MOV  wide+0(FP), X10
 	MOV  out+8(FP), X11
 	MOV  w+16(FP), X12
-	MOV  sh+24(FP), X13
-	MOV  n+32(FP), X14
+	MOV  ws+24(FP), X13
+	MOV  ts+32(FP), X15
+	MOV  n+40(FP), X14
 	SLLI $2, X13, X13
-	SLLI $2, X12, X15
+	SLLI $2, X15, X15
 
 trtap:
 	MOV X10, X17
