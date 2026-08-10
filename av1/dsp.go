@@ -13,7 +13,7 @@ type dspContext[P pixel] struct {
 	cdefCopy cdefCopyFn[P]
 
 	loopFilter func(dst []P, dstOff int, e, i, h int32,
-		stridea, strideb int, wd int, bitdepthMax int32)
+		stridea, strideb int, wd, lines int, bitdepthMax int32)
 
 	fgApplyRow func(dst []P, dstOff int, src []P, srcOff int,
 		scaling []uint8, grain []int16, n, shift, minValue, maxValue int)

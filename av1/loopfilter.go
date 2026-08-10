@@ -7,7 +7,7 @@ type filterLUT struct {
 }
 
 func loopFilter[P pixel](dst []P, dstOff int, e, i, h int32,
-	stridea, strideb int, wd int, bitdepthMax int32,
+	stridea, strideb int, wd, lines int, bitdepthMax int32,
 ) {
 	bitdepthMin8 := bitdepthFromMax(bitdepthMax) - 8
 	fThr := int32(1) << bitdepthMin8
@@ -15,7 +15,7 @@ func loopFilter[P pixel](dst []P, dstOff int, e, i, h int32,
 	i <<= bitdepthMin8
 	h <<= bitdepthMin8
 
-	for n := 0; n < 4; n, dstOff = n+1, dstOff+stridea {
+	for n := 0; n < lines; n, dstOff = n+1, dstOff+stridea {
 		var p6, p5, p4, p3, p2 int32
 		var q2, q3, q4, q5, q6 int32
 		p1 := int32(dst[dstOff+strideb*-2])
@@ -134,27 +134,30 @@ func loopFilterHSb128y[P pixel](dsp *dspContext[P], dst []P, dstOff, stride int,
 	bitdepthMax int32,
 ) {
 	vm := vmask[0] | vmask[1] | vmask[2]
-	for y := uint32(1); vm&^(y-1) != 0; y, dstOff, lOff = y<<1, dstOff+4*stride, lOff+b4Stride*4 {
-		if vm&y == 0 {
+	for b := uint32(1); vm&^(b-1) != 0; {
+		lv, wd := lfSegY(vmask, b, l, lOff, -4)
+		if lv == 0 {
+			b, dstOff, lOff = b<<1, dstOff+4*stride, lOff+b4Stride*4
+
 			continue
 		}
-		lv := l[lOff]
-		if lv == 0 {
-			lv = l[lOff-4]
+
+		start, lines := dstOff, 0
+		for {
+			lines += 4
+			b, dstOff, lOff = b<<1, dstOff+4*stride, lOff+b4Stride*4
+			if vm&^(b-1) == 0 {
+				break
+			}
+			nlv, nwd := lfSegY(vmask, b, l, lOff, -4)
+			if nlv != lv || nwd != wd {
+				break
+			}
 		}
-		if lv == 0 {
-			continue
-		}
+
 		h := int32(lv >> 4)
 		e, i := int32(lut.e[lv]), int32(lut.i[lv])
-		idx := 0
-		switch {
-		case vmask[2]&y != 0:
-			idx = 2
-		case vmask[1]&y != 0:
-			idx = 1
-		}
-		dsp.loopFilter(dst, dstOff, e, i, h, stride, 1, 4<<idx, bitdepthMax)
+		dsp.loopFilter(dst, start, e, i, h, stride, 1, wd, lines, bitdepthMax)
 	}
 }
 
@@ -163,27 +166,30 @@ func loopFilterVSb128y[P pixel](dsp *dspContext[P], dst []P, dstOff, stride int,
 	bitdepthMax int32,
 ) {
 	vm := vmask[0] | vmask[1] | vmask[2]
-	for x := uint32(1); vm&^(x-1) != 0; x, dstOff, lOff = x<<1, dstOff+4, lOff+4 {
-		if vm&x == 0 {
+	for b := uint32(1); vm&^(b-1) != 0; {
+		lv, wd := lfSegY(vmask, b, l, lOff, -b4Stride*4)
+		if lv == 0 {
+			b, dstOff, lOff = b<<1, dstOff+4, lOff+4
+
 			continue
 		}
-		lv := l[lOff]
-		if lv == 0 {
-			lv = l[lOff-b4Stride*4]
+
+		start, lines := dstOff, 0
+		for {
+			lines += 4
+			b, dstOff, lOff = b<<1, dstOff+4, lOff+4
+			if vm&^(b-1) == 0 {
+				break
+			}
+			nlv, nwd := lfSegY(vmask, b, l, lOff, -b4Stride*4)
+			if nlv != lv || nwd != wd {
+				break
+			}
 		}
-		if lv == 0 {
-			continue
-		}
+
 		h := int32(lv >> 4)
 		e, i := int32(lut.e[lv]), int32(lut.i[lv])
-		idx := 0
-		switch {
-		case vmask[2]&x != 0:
-			idx = 2
-		case vmask[1]&x != 0:
-			idx = 1
-		}
-		dsp.loopFilter(dst, dstOff, e, i, h, 1, stride, 4<<idx, bitdepthMax)
+		dsp.loopFilter(dst, start, e, i, h, 1, stride, wd, lines, bitdepthMax)
 	}
 }
 
@@ -192,21 +198,30 @@ func loopFilterHSb128uv[P pixel](dsp *dspContext[P], dst []P, dstOff, stride int
 	bitdepthMax int32,
 ) {
 	vm := vmask[0] | vmask[1]
-	for y := uint32(1); vm&^(y-1) != 0; y, dstOff, lOff = y<<1, dstOff+4*stride, lOff+b4Stride*4 {
-		if vm&y == 0 {
+	for b := uint32(1); vm&^(b-1) != 0; {
+		lv, wd := lfSegUV(vmask, b, l, lOff, -4)
+		if lv == 0 {
+			b, dstOff, lOff = b<<1, dstOff+4*stride, lOff+b4Stride*4
+
 			continue
 		}
-		lv := l[lOff]
-		if lv == 0 {
-			lv = l[lOff-4]
+
+		start, lines := dstOff, 0
+		for {
+			lines += 4
+			b, dstOff, lOff = b<<1, dstOff+4*stride, lOff+b4Stride*4
+			if vm&^(b-1) == 0 {
+				break
+			}
+			nlv, nwd := lfSegUV(vmask, b, l, lOff, -4)
+			if nlv != lv || nwd != wd {
+				break
+			}
 		}
-		if lv == 0 {
-			continue
-		}
+
 		h := int32(lv >> 4)
 		e, i := int32(lut.e[lv]), int32(lut.i[lv])
-		idx := b2i(vmask[1]&y != 0)
-		dsp.loopFilter(dst, dstOff, e, i, h, stride, 1, 4+2*idx, bitdepthMax)
+		dsp.loopFilter(dst, start, e, i, h, stride, 1, wd, lines, bitdepthMax)
 	}
 }
 
@@ -215,20 +230,73 @@ func loopFilterVSb128uv[P pixel](dsp *dspContext[P], dst []P, dstOff, stride int
 	bitdepthMax int32,
 ) {
 	vm := vmask[0] | vmask[1]
-	for x := uint32(1); vm&^(x-1) != 0; x, dstOff, lOff = x<<1, dstOff+4, lOff+4 {
-		if vm&x == 0 {
+	for b := uint32(1); vm&^(b-1) != 0; {
+		lv, wd := lfSegUV(vmask, b, l, lOff, -b4Stride*4)
+		if lv == 0 {
+			b, dstOff, lOff = b<<1, dstOff+4, lOff+4
+
 			continue
 		}
-		lv := l[lOff]
-		if lv == 0 {
-			lv = l[lOff-b4Stride*4]
+
+		start, lines := dstOff, 0
+		for {
+			lines += 4
+			b, dstOff, lOff = b<<1, dstOff+4, lOff+4
+			if vm&^(b-1) == 0 {
+				break
+			}
+			nlv, nwd := lfSegUV(vmask, b, l, lOff, -b4Stride*4)
+			if nlv != lv || nwd != wd {
+				break
+			}
 		}
-		if lv == 0 {
-			continue
-		}
+
 		h := int32(lv >> 4)
 		e, i := int32(lut.e[lv]), int32(lut.i[lv])
-		idx := b2i(vmask[1]&x != 0)
-		dsp.loopFilter(dst, dstOff, e, i, h, 1, stride, 4+2*idx, bitdepthMax)
+		dsp.loopFilter(dst, start, e, i, h, 1, stride, wd, lines, bitdepthMax)
 	}
+}
+
+// lfSegY and lfSegUV resolve one four-sample segment to its filter level and
+// width, or a zero level where the edge is not filtered. Neighbouring segments
+// along an edge usually agree, so the drivers gather the runs that do and hand
+// the kernel all of their lines at once.
+func lfSegY(vmask *[3]uint32, b uint32, l []uint8, lOff, back int) (uint8, int) {
+	if (vmask[0]|vmask[1]|vmask[2])&b == 0 {
+		return 0, 0
+	}
+	lv := l[lOff]
+	if lv == 0 {
+		lv = l[lOff+back]
+	}
+	if lv == 0 {
+		return 0, 0
+	}
+
+	switch {
+	case vmask[2]&b != 0:
+		return lv, 16
+	case vmask[1]&b != 0:
+		return lv, 8
+	}
+
+	return lv, 4
+}
+
+func lfSegUV(vmask *[2]uint32, b uint32, l []uint8, lOff, back int) (uint8, int) {
+	if (vmask[0]|vmask[1])&b == 0 {
+		return 0, 0
+	}
+	lv := l[lOff]
+	if lv == 0 {
+		lv = l[lOff+back]
+	}
+	if lv == 0 {
+		return 0, 0
+	}
+	if vmask[1]&b != 0 {
+		return lv, 6
+	}
+
+	return lv, 4
 }

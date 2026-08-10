@@ -19,6 +19,8 @@ DATA lpfWordInv<>+0(SB)/8, $0x0b0a030209080100
 DATA lpfWordInv<>+8(SB)/8, $0x0f0e07060d0c0504
 GLOBL lpfWordInv<>(SB), RODATA|NOPTR, $16
 
+#define LW 16
+
 #define E      0(DI)
 #define I      4(DI)
 #define H      8(DI)
@@ -33,31 +35,52 @@ GLOBL lpfWordInv<>(SB), RODATA|NOPTR, $16
 
 // BX is the centre of the source array, which holds every sample widened to a
 // lane and replicated past both ends for the sliding window.
-#define SP6 -112(BX)
-#define SP5 -96(BX)
-#define SP4 -80(BX)
-#define SP3 -64(BX)
-#define SP2 -48(BX)
-#define SP1 -32(BX)
-#define SP0 -16(BX)
+#define SP6 -7*LW(BX)
+#define SP5 -6*LW(BX)
+#define SP4 -5*LW(BX)
+#define SP3 -4*LW(BX)
+#define SP2 -3*LW(BX)
+#define SP1 -2*LW(BX)
+#define SP0 -1*LW(BX)
 #define SQ0 0(BX)
-#define SQ1 16(BX)
-#define SQ2 32(BX)
-#define SQ3 48(BX)
-#define SQ4 64(BX)
-#define SQ5 80(BX)
-#define SQ6 96(BX)
+#define SQ1 1*LW(BX)
+#define SQ2 2*LW(BX)
+#define SQ3 3*LW(BX)
+#define SQ4 4*LW(BX)
+#define SQ5 5*LW(BX)
+#define SQ6 6*LW(BX)
 
-#define OP2 272(BX)
-#define OP1 288(BX)
-#define OP0 304(BX)
-#define OQ0 320(BX)
-#define OQ1 336(BX)
-#define OQ2 352(BX)
+#define OP2 17*LW(BX)
+#define OP1 18*LW(BX)
+#define OP0 19*LW(BX)
+#define OQ0 20*LW(BX)
+#define OQ1 21*LW(BX)
+#define OQ2 22*LW(BX)
 
-#define MFLAT 464(BX)
-#define MHEV  480(BX)
-#define BYTES 496(BX)
+#define MFLAT 29*LW(BX)
+#define MHEV  30*LW(BX)
+#define BYTES 31*LW(BX)
+
+// V0 to V15 and the offsets above carry the lane width, so one filter body
+// serves both the four line and the eight line kernels.
+#define V0 X0
+#define V1 X1
+#define V2 X2
+#define V3 X3
+#define V4 X4
+#define V5 X5
+#define V6 X6
+#define V7 X7
+#define V8 X8
+#define V9 X9
+#define V10 X10
+#define V11 X11
+#define V12 X12
+#define V13 X13
+#define V14 X14
+#define V15 X15
+#define MSKALL $0xffff
+#define KALL   $0x0f
 
 // GTA leaves set the lanes where |A-B| exceeds THR.
 #define GTA(A, B, THR, T) \
@@ -74,35 +97,35 @@ GLOBL lpfWordInv<>(SB), RODATA|NOPTR, $16
 	VPMINSD HI, V, V
 
 // WIDE8 and WIDE6 are one output each of the eight and six tap filters. D is
-// the doubled sample, X13 carries the rounding term and X14 the mask that
+// the doubled sample, V13 carries the rounding term and V14 the mask that
 // keeps whatever the narrow filter already wrote.
 #define WIDE8(A, B, C, D, F, G, K, DST) \
-	VMOVDQU   A, X4;            \
-	VPADDD    B, X4, X4;        \
-	VPADDD    C, X4, X4;        \
-	VPADDD    D, X4, X4;        \
-	VPADDD    D, X4, X4;        \
-	VPADDD    F, X4, X4;        \
-	VPADDD    G, X4, X4;        \
-	VPADDD    K, X4, X4;        \
-	VPADDD    X13, X4, X4;      \
-	VPSRAD    $3, X4, X4;       \
-	VPBLENDVB X14, DST, X4, X4; \
-	VMOVDQU   X4, DST
+	VMOVDQU   A, V4;            \
+	VPADDD    B, V4, V4;        \
+	VPADDD    C, V4, V4;        \
+	VPADDD    D, V4, V4;        \
+	VPADDD    D, V4, V4;        \
+	VPADDD    F, V4, V4;        \
+	VPADDD    G, V4, V4;        \
+	VPADDD    K, V4, V4;        \
+	VPADDD    V13, V4, V4;      \
+	VPSRAD    $3, V4, V4;       \
+	VPBLENDVB V14, DST, V4, V4; \
+	VMOVDQU   V4, DST
 
 #define WIDE6(A, B, C, D, F, DST)   \
-	VMOVDQU   A, X4;            \
-	VPADDD    B, X4, X4;        \
-	VPADDD    B, X4, X4;        \
-	VPADDD    C, X4, X4;        \
-	VPADDD    C, X4, X4;        \
-	VPADDD    D, X4, X4;        \
-	VPADDD    D, X4, X4;        \
-	VPADDD    F, X4, X4;        \
-	VPADDD    X13, X4, X4;      \
-	VPSRAD    $3, X4, X4;       \
-	VPBLENDVB X14, DST, X4, X4; \
-	VMOVDQU   X4, DST
+	VMOVDQU   A, V4;            \
+	VPADDD    B, V4, V4;        \
+	VPADDD    B, V4, V4;        \
+	VPADDD    C, V4, V4;        \
+	VPADDD    C, V4, V4;        \
+	VPADDD    D, V4, V4;        \
+	VPADDD    D, V4, V4;        \
+	VPADDD    F, V4, V4;        \
+	VPADDD    V13, V4, V4;      \
+	VPSRAD    $3, V4, V4;       \
+	VPBLENDVB V14, DST, V4, V4; \
+	VMOVDQU   V4, DST
 
 // The same three, with the lane masks in K registers. K1 holds the lanes left
 // alone, K2 the high edge variance, K3 the flat lanes and K5 the complement of
@@ -117,30 +140,30 @@ GLOBL lpfWordInv<>(SB), RODATA|NOPTR, $16
 	KORW M, ACC, ACC
 
 #define WIDE8K(A, B, C, D, F, G, K, DST) \
-	VMOVDQU   A, X4;            \
-	VPADDD    B, X4, X4;        \
-	VPADDD    C, X4, X4;        \
-	VPADDD    D, X4, X4;        \
-	VPADDD    D, X4, X4;        \
-	VPADDD    F, X4, X4;        \
-	VPADDD    G, X4, X4;        \
-	VPADDD    K, X4, X4;        \
-	VPADDD    X13, X4, X4;      \
-	VPSRAD    $3, X4, X4;       \
-	VMOVDQU32 X4, K5, DST
+	VMOVDQU   A, V4;            \
+	VPADDD    B, V4, V4;        \
+	VPADDD    C, V4, V4;        \
+	VPADDD    D, V4, V4;        \
+	VPADDD    D, V4, V4;        \
+	VPADDD    F, V4, V4;        \
+	VPADDD    G, V4, V4;        \
+	VPADDD    K, V4, V4;        \
+	VPADDD    V13, V4, V4;      \
+	VPSRAD    $3, V4, V4;       \
+	VMOVDQU32 V4, K5, DST
 
 #define WIDE6K(A, B, C, D, F, DST)  \
-	VMOVDQU   A, X4;            \
-	VPADDD    B, X4, X4;        \
-	VPADDD    B, X4, X4;        \
-	VPADDD    C, X4, X4;        \
-	VPADDD    C, X4, X4;        \
-	VPADDD    D, X4, X4;        \
-	VPADDD    D, X4, X4;        \
-	VPADDD    F, X4, X4;        \
-	VPADDD    X13, X4, X4;      \
-	VPSRAD    $3, X4, X4;       \
-	VMOVDQU32 X4, K5, DST
+	VMOVDQU   A, V4;            \
+	VPADDD    B, V4, V4;        \
+	VPADDD    B, V4, V4;        \
+	VPADDD    C, V4, V4;        \
+	VPADDD    C, V4, V4;        \
+	VPADDD    D, V4, V4;        \
+	VPADDD    D, V4, V4;        \
+	VPADDD    F, V4, V4;        \
+	VPADDD    V13, V4, V4;      \
+	VPSRAD    $3, V4, V4;       \
+	VMOVDQU32 V4, K5, DST
 
 #define TRANSPOSE4(A, B, C, D, T0, T1, T2, T3) \
 	VPUNPCKLDQ  B, A, T0;  \
@@ -155,359 +178,499 @@ GLOBL lpfWordInv<>(SB), RODATA|NOPTR, $16
 // LPFBODY masks the lanes and layers the filters, working in 32-bit lanes
 // throughout, which is why both bit depths share it.
 #define LPFBODY \
-	VMOVDQU      SP1, X0; \
-	VMOVDQU      SP0, X1; \
-	VMOVDQU      SQ0, X2; \
-	VMOVDQU      SQ1, X3; \
-	VPBROADCASTD I, X8; \
-	VPBROADCASTD H, X10; \
-	VPSUBD       X1, X0, X4; \
-	VPABSD       X4, X4; \
-	VPCMPGTD     X8, X4, X15; \
-	VPCMPGTD     X10, X4, X14; \
-	VPSUBD       X2, X3, X4; \
-	VPABSD       X4, X4; \
-	VPCMPGTD     X8, X4, X5; \
-	VPOR         X5, X15, X15; \
-	VPCMPGTD     X10, X4, X5; \
-	VPOR         X5, X14, X14; \
-	VMOVDQU      X14, MHEV; \
-	VPSUBD       X2, X1, X4; \
-	VPABSD       X4, X4; \
-	VPADDD       X4, X4, X4; \
-	VPSUBD       X3, X0, X5; \
-	VPABSD       X5, X5; \
-	VPSRLD       $1, X5, X5; \
-	VPADDD       X5, X4, X4; \
-	VPBROADCASTD E, X9; \
-	VPCMPGTD     X9, X4, X5; \
-	VPOR         X5, X15, X15; \
+	VMOVDQU      SP1, V0; \
+	VMOVDQU      SP0, V1; \
+	VMOVDQU      SQ0, V2; \
+	VMOVDQU      SQ1, V3; \
+	VPBROADCASTD I, V8; \
+	VPBROADCASTD H, V10; \
+	VPSUBD       V1, V0, V4; \
+	VPABSD       V4, V4; \
+	VPCMPGTD     V8, V4, V15; \
+	VPCMPGTD     V10, V4, V14; \
+	VPSUBD       V2, V3, V4; \
+	VPABSD       V4, V4; \
+	VPCMPGTD     V8, V4, V5; \
+	VPOR         V5, V15, V15; \
+	VPCMPGTD     V10, V4, V5; \
+	VPOR         V5, V14, V14; \
+	VMOVDQU      V14, MHEV; \
+	VPSUBD       V2, V1, V4; \
+	VPABSD       V4, V4; \
+	VPADDD       V4, V4, V4; \
+	VPSUBD       V3, V0, V5; \
+	VPABSD       V5, V5; \
+	VPSRLD       $1, V5, V5; \
+	VPADDD       V5, V4, V4; \
+	VPBROADCASTD E, V9; \
+	VPCMPGTD     V9, V4, V5; \
+	VPOR         V5, V15, V15; \
 	MOVL WD, AX; \
 	CMPL AX, $4; \
 	JLE  fmdone; \
-	ACCGT(X0, SP2, X8, X5, X15); \
-	ACCGT(X3, SQ2, X8, X5, X15); \
+	ACCGT(V0, SP2, V8, V5, V15); \
+	ACCGT(V3, SQ2, V8, V5, V15); \
 	CMPL AX, $6; \
 	JLE  fmdone; \
-	VMOVDQU SP3, X6; \
-	ACCGT(X6, SP2, X8, X5, X15); \
-	VMOVDQU SQ3, X6; \
-	ACCGT(X6, SQ2, X8, X5, X15); \
+	VMOVDQU SP3, V6; \
+	ACCGT(V6, SP2, V8, V5, V15); \
+	VMOVDQU SQ3, V6; \
+	ACCGT(V6, SQ2, V8, V5, V15); \
 	fmdone:; \
-	VPMOVMSKB X15, AX; \
-	CMPL      AX, $0xffff; \
+	VPMOVMSKB V15, AX; \
+	CMPL      AX, MSKALL; \
 	JEQ       scatter; \
-	VMOVDQU      MHEV, X14; \
-	VPBROADCASTD NEGLIM, X8; \
-	VPBROADCASTD LIM1, X9; \
-	VPSUBD       X3, X0, X4; \
-	CLIPD(X4, X8, X9); \
-	VPAND        X14, X4, X4; \
-	VPSUBD       X1, X2, X6; \
-	VPADDD       X6, X6, X7; \
-	VPADDD       X6, X7, X7; \
-	VPADDD       X7, X4, X4; \
-	CLIPD(X4, X8, X9); \
-	VPBROADCASTD C4, X10; \
-	VPADDD       X10, X4, X6; \
-	VPMINSD      X9, X6, X6; \
-	VPSRAD       $3, X6, X6; \
-	VPBROADCASTD C3, X10; \
-	VPADDD       X10, X4, X7; \
-	VPMINSD      X9, X7, X7; \
-	VPSRAD       $3, X7, X7; \
-	VPXOR        X8, X8, X8; \
-	VPBROADCASTD PIXMAX, X9; \
-	VPADDD       X7, X1, X10; \
-	CLIPD(X10, X8, X9); \
-	VPSUBD       X6, X2, X11; \
-	CLIPD(X11, X8, X9); \
-	VPBROADCASTD C1, X12; \
-	VPADDD       X12, X6, X12; \
-	VPSRAD       $1, X12, X12; \
-	VPADDD       X12, X0, X4; \
-	CLIPD(X4, X8, X9); \
-	VPBLENDVB    X14, X0, X4, X4; \
-	VPSUBD       X12, X3, X5; \
-	CLIPD(X5, X8, X9); \
-	VPBLENDVB    X14, X3, X5, X5; \
-	VPBLENDVB    X15, X0, X4, X4; \
-	VMOVDQU      X4, OP1; \
-	VPBLENDVB    X15, X1, X10, X10; \
-	VMOVDQU      X10, OP0; \
-	VPBLENDVB    X15, X2, X11, X11; \
-	VMOVDQU      X11, OQ0; \
-	VPBLENDVB    X15, X3, X5, X5; \
-	VMOVDQU      X5, OQ1; \
+	VMOVDQU      MHEV, V14; \
+	VPBROADCASTD NEGLIM, V8; \
+	VPBROADCASTD LIM1, V9; \
+	VPSUBD       V3, V0, V4; \
+	CLIPD(V4, V8, V9); \
+	VPAND        V14, V4, V4; \
+	VPSUBD       V1, V2, V6; \
+	VPADDD       V6, V6, V7; \
+	VPADDD       V6, V7, V7; \
+	VPADDD       V7, V4, V4; \
+	CLIPD(V4, V8, V9); \
+	VPBROADCASTD C4, V10; \
+	VPADDD       V10, V4, V6; \
+	VPMINSD      V9, V6, V6; \
+	VPSRAD       $3, V6, V6; \
+	VPBROADCASTD C3, V10; \
+	VPADDD       V10, V4, V7; \
+	VPMINSD      V9, V7, V7; \
+	VPSRAD       $3, V7, V7; \
+	VPXOR        V8, V8, V8; \
+	VPBROADCASTD PIXMAX, V9; \
+	VPADDD       V7, V1, V10; \
+	CLIPD(V10, V8, V9); \
+	VPSUBD       V6, V2, V11; \
+	CLIPD(V11, V8, V9); \
+	VPBROADCASTD C1, V12; \
+	VPADDD       V12, V6, V12; \
+	VPSRAD       $1, V12, V12; \
+	VPADDD       V12, V0, V4; \
+	CLIPD(V4, V8, V9); \
+	VPBLENDVB    V14, V0, V4, V4; \
+	VPSUBD       V12, V3, V5; \
+	CLIPD(V5, V8, V9); \
+	VPBLENDVB    V14, V3, V5, V5; \
+	VPBLENDVB    V15, V0, V4, V4; \
+	VMOVDQU      V4, OP1; \
+	VPBLENDVB    V15, V1, V10, V10; \
+	VMOVDQU      V10, OP0; \
+	VPBLENDVB    V15, V2, V11, V11; \
+	VMOVDQU      V11, OQ0; \
+	VPBLENDVB    V15, V3, V5, V5; \
+	VMOVDQU      V5, OQ1; \
 	MOVL WD, AX; \
 	CMPL AX, $4; \
 	JLE  scatter; \
-	VPBROADCASTD FTHR, X8; \
-	VMOVDQU      X15, X14; \
-	ACCGT(X1, SP2, X8, X5, X14); \
-	ACCGT(X0, X1, X8, X5, X14); \
-	ACCGT(X3, X2, X8, X5, X14); \
-	ACCGT(X2, SQ2, X8, X5, X14); \
+	VPBROADCASTD FTHR, V8; \
+	VMOVDQU      V15, V14; \
+	ACCGT(V1, SP2, V8, V5, V14); \
+	ACCGT(V0, V1, V8, V5, V14); \
+	ACCGT(V3, V2, V8, V5, V14); \
+	ACCGT(V2, SQ2, V8, V5, V14); \
 	CMPL         AX, $8; \
 	JL           flatindone; \
-	ACCGT(X1, SP3, X8, X5, X14); \
-	ACCGT(X2, SQ3, X8, X5, X14); \
+	ACCGT(V1, SP3, V8, V5, V14); \
+	ACCGT(V2, SQ3, V8, V5, V14); \
 	flatindone:; \
-	VMOVDQU   X14, MFLAT; \
-	VPMOVMSKB X14, DX; \
-	CMPL      DX, $0xffff; \
+	VMOVDQU   V14, MFLAT; \
+	VPMOVMSKB V14, DX; \
+	CMPL      DX, MSKALL; \
 	JEQ       scatter; \
-	VPBROADCASTD C4, X13; \
+	VPBROADCASTD C4, V13; \
 	CMPL         AX, $6; \
 	JG           eight; \
-	WIDE6(SP2, SP2, X0, X1, X2, OP1); \
-	WIDE6(SP2, X0, X1, X2, X3, OP0); \
-	WIDE6(X0, X1, X2, X3, SQ2, OQ0); \
-	WIDE6(X1, X2, X3, SQ2, SQ2, OQ1); \
+	WIDE6(SP2, SP2, V0, V1, V2, OP1); \
+	WIDE6(SP2, V0, V1, V2, V3, OP0); \
+	WIDE6(V0, V1, V2, V3, SQ2, OQ0); \
+	WIDE6(V1, V2, V3, SQ2, SQ2, OQ1); \
 	JMP          scatter; \
 	eight:; \
-	WIDE8(SP3, SP3, SP3, SP2, X0, X1, X2, OP2); \
-	WIDE8(SP3, SP3, SP2, X0, X1, X2, X3, OP1); \
-	WIDE8(SP3, SP2, X0, X1, X2, X3, SQ2, OP0); \
-	WIDE8(SP2, X0, X1, X2, X3, SQ2, SQ3, OQ0); \
-	WIDE8(X0, X1, X2, X3, SQ2, SQ3, SQ3, OQ1); \
-	WIDE8(X1, X2, X3, SQ2, SQ3, SQ3, SQ3, OQ2); \
+	WIDE8(SP3, SP3, SP3, SP2, V0, V1, V2, OP2); \
+	WIDE8(SP3, SP3, SP2, V0, V1, V2, V3, OP1); \
+	WIDE8(SP3, SP2, V0, V1, V2, V3, SQ2, OP0); \
+	WIDE8(SP2, V0, V1, V2, V3, SQ2, SQ3, OQ0); \
+	WIDE8(V0, V1, V2, V3, SQ2, SQ3, SQ3, OQ1); \
+	WIDE8(V1, V2, V3, SQ2, SQ3, SQ3, SQ3, OQ2); \
 	CMPL AX, $16; \
 	JL   scatter; \
-	VPBROADCASTD FTHR, X8; \
-	ACCGT(X1, SP6, X8, X5, X14); \
-	ACCGT(X1, SP5, X8, X5, X14); \
-	ACCGT(X1, SP4, X8, X5, X14); \
-	ACCGT(X2, SQ4, X8, X5, X14); \
-	ACCGT(X2, SQ5, X8, X5, X14); \
-	ACCGT(X2, SQ6, X8, X5, X14); \
-	VPMOVMSKB    X14, DX; \
+	VPBROADCASTD FTHR, V8; \
+	ACCGT(V1, SP6, V8, V5, V14); \
+	ACCGT(V1, SP5, V8, V5, V14); \
+	ACCGT(V1, SP4, V8, V5, V14); \
+	ACCGT(V2, SQ4, V8, V5, V14); \
+	ACCGT(V2, SQ5, V8, V5, V14); \
+	ACCGT(V2, SQ6, V8, V5, V14); \
+	VPMOVMSKB    V14, DX; \
 	CMPL         DX, $0xffff; \
 	JEQ          scatter; \
-	VMOVDQU SP6, X0; \
-	VMOVDQU X0, -208(BX); \
-	VMOVDQU X0, -192(BX); \
-	VMOVDQU X0, -176(BX); \
-	VMOVDQU X0, -160(BX); \
-	VMOVDQU X0, -144(BX); \
-	VMOVDQU X0, -128(BX); \
-	VMOVDQU SQ6, X0; \
-	VMOVDQU X0, 112(BX); \
-	VMOVDQU X0, 128(BX); \
-	VMOVDQU X0, 144(BX); \
-	VMOVDQU X0, 160(BX); \
-	VMOVDQU X0, 176(BX); \
-	VMOVDQU X0, 192(BX); \
-	LEAQ         -192(BX), CX; \
-	VMOVDQU      (CX), X4; \
-	VPADDD       16(CX), X4, X4; \
-	VPADDD       32(CX), X4, X4; \
-	VPADDD       48(CX), X4, X4; \
-	VPADDD       64(CX), X4, X4; \
-	VPADDD       80(CX), X4, X4; \
-	VPADDD       96(CX), X4, X4; \
-	VPADDD       112(CX), X4, X4; \
-	VPADDD       128(CX), X4, X4; \
-	VPADDD       144(CX), X4, X4; \
-	VPADDD       160(CX), X4, X4; \
-	VPADDD       176(CX), X4, X4; \
-	VPADDD       192(CX), X4, X4; \
-	VPBROADCASTD C4, X13; \
-	VPADDD       X13, X13, X13; \
-	LEAQ         -96(BX), CX; \
-	LEAQ         224(BX), DX; \
+	VMOVDQU SP6, V0; \
+	VMOVDQU V0, -13*LW(BX); \
+	VMOVDQU V0, -12*LW(BX); \
+	VMOVDQU V0, -11*LW(BX); \
+	VMOVDQU V0, -10*LW(BX); \
+	VMOVDQU V0, -9*LW(BX); \
+	VMOVDQU V0, -8*LW(BX); \
+	VMOVDQU SQ6, V0; \
+	VMOVDQU V0, 7*LW(BX); \
+	VMOVDQU V0, 8*LW(BX); \
+	VMOVDQU V0, 9*LW(BX); \
+	VMOVDQU V0, 10*LW(BX); \
+	VMOVDQU V0, 11*LW(BX); \
+	VMOVDQU V0, 12*LW(BX); \
+	LEAQ         -12*LW(BX), CX; \
+	VMOVDQU      (CX), V4; \
+	VPADDD       1*LW(CX), V4, V4; \
+	VPADDD       2*LW(CX), V4, V4; \
+	VPADDD       3*LW(CX), V4, V4; \
+	VPADDD       4*LW(CX), V4, V4; \
+	VPADDD       5*LW(CX), V4, V4; \
+	VPADDD       6*LW(CX), V4, V4; \
+	VPADDD       7*LW(CX), V4, V4; \
+	VPADDD       8*LW(CX), V4, V4; \
+	VPADDD       9*LW(CX), V4, V4; \
+	VPADDD       10*LW(CX), V4, V4; \
+	VPADDD       11*LW(CX), V4, V4; \
+	VPADDD       12*LW(CX), V4, V4; \
+	VPBROADCASTD C4, V13; \
+	VPADDD       V13, V13, V13; \
+	LEAQ         -6*LW(BX), CX; \
+	LEAQ         14*LW(BX), DX; \
 	MOVQ         $12, R14; \
 	fourteen:; \
-	VMOVDQU   -16(CX), X5; \
-	VPADDD    (CX), X5, X5; \
-	VPADDD    16(CX), X5, X5; \
-	VPADDD    X4, X5, X5; \
-	VPADDD    X13, X5, X5; \
-	VPSRAD    $4, X5, X5; \
-	VPBLENDVB X14, (DX), X5, X5; \
-	VMOVDQU   X5, (DX); \
-	VPADDD    112(CX), X4, X4; \
-	VPSUBD    -96(CX), X4, X4; \
-	ADDQ      $16, CX; \
-	ADDQ      $16, DX; \
+	VMOVDQU   -1*LW(CX), V5; \
+	VPADDD    (CX), V5, V5; \
+	VPADDD    1*LW(CX), V5, V5; \
+	VPADDD    V4, V5, V5; \
+	VPADDD    V13, V5, V5; \
+	VPSRAD    $4, V5, V5; \
+	VPBLENDVB V14, (DX), V5, V5; \
+	VMOVDQU   V5, (DX); \
+	VPADDD    7*LW(CX), V4, V4; \
+	VPSUBD    -6*LW(CX), V4, V4; \
+	ADDQ      $LW, CX; \
+	ADDQ      $LW, DX; \
 	DECQ      R14; \
 	JNZ       fourteen;
 
 // LPFBODY512 is LPFBODY with the lane masks in K registers, which turns the
 // blends into masked stores and keeps the two masks out of memory.
 #define LPFBODY512 \
-	VMOVDQU      SP1, X0; \
-	VMOVDQU      SP0, X1; \
-	VMOVDQU      SQ0, X2; \
-	VMOVDQU      SQ1, X3; \
-	VPBROADCASTD I, X8; \
-	VPBROADCASTD H, X10; \
-	VPSUBD       X1, X0, X4; \
-	VPABSD       X4, X4; \
-	VPCMPGTD     X8, X4, K1; \
-	VPCMPGTD     X10, X4, K2; \
-	VPSUBD       X2, X3, X4; \
-	VPABSD       X4, X4; \
-	VPCMPGTD     X8, X4, K4; \
+	VMOVDQU      SP1, V0; \
+	VMOVDQU      SP0, V1; \
+	VMOVDQU      SQ0, V2; \
+	VMOVDQU      SQ1, V3; \
+	VPBROADCASTD I, V8; \
+	VPBROADCASTD H, V10; \
+	VPSUBD       V1, V0, V4; \
+	VPABSD       V4, V4; \
+	VPCMPGTD     V8, V4, K1; \
+	VPCMPGTD     V10, V4, K2; \
+	VPSUBD       V2, V3, V4; \
+	VPABSD       V4, V4; \
+	VPCMPGTD     V8, V4, K4; \
 	KORW         K4, K1, K1; \
-	VPCMPGTD     X10, X4, K4; \
+	VPCMPGTD     V10, V4, K4; \
 	KORW         K4, K2, K2; \
-	VPSUBD       X2, X1, X4; \
-	VPABSD       X4, X4; \
-	VPADDD       X4, X4, X4; \
-	VPSUBD       X3, X0, X5; \
-	VPABSD       X5, X5; \
-	VPSRLD       $1, X5, X5; \
-	VPADDD       X5, X4, X4; \
-	VPBROADCASTD E, X9; \
-	VPCMPGTD     X9, X4, K4; \
+	VPSUBD       V2, V1, V4; \
+	VPABSD       V4, V4; \
+	VPADDD       V4, V4, V4; \
+	VPSUBD       V3, V0, V5; \
+	VPABSD       V5, V5; \
+	VPSRLD       $1, V5, V5; \
+	VPADDD       V5, V4, V4; \
+	VPBROADCASTD E, V9; \
+	VPCMPGTD     V9, V4, K4; \
 	KORW         K4, K1, K1; \
 	MOVL WD, AX; \
 	CMPL AX, $4; \
 	JLE  fmdone; \
-	ACCGTK(X0, SP2, X8, X5, K4, K1); \
-	ACCGTK(X3, SQ2, X8, X5, K4, K1); \
+	ACCGTK(V0, SP2, V8, V5, K4, K1); \
+	ACCGTK(V3, SQ2, V8, V5, K4, K1); \
 	CMPL AX, $6; \
 	JLE  fmdone; \
-	VMOVDQU SP3, X6; \
-	ACCGTK(X6, SP2, X8, X5, K4, K1); \
-	VMOVDQU SQ3, X6; \
-	ACCGTK(X6, SQ2, X8, X5, K4, K1); \
+	VMOVDQU SP3, V6; \
+	ACCGTK(V6, SP2, V8, V5, K4, K1); \
+	VMOVDQU SQ3, V6; \
+	ACCGTK(V6, SQ2, V8, V5, K4, K1); \
 	fmdone:; \
 	KMOVW K1, AX; \
-	CMPL  AX, $0x0f; \
+	CMPL  AX, KALL; \
 	JEQ   scatter; \
-	VPBROADCASTD NEGLIM, X8; \
-	VPBROADCASTD LIM1, X9; \
-	VPSUBD       X3, X0, X4; \
-	CLIPD(X4, X8, X9); \
-	VMOVDQU32.Z  X4, K2, X4; \
-	VPSUBD       X1, X2, X6; \
-	VPADDD       X6, X6, X7; \
-	VPADDD       X6, X7, X7; \
-	VPADDD       X7, X4, X4; \
-	CLIPD(X4, X8, X9); \
-	VPBROADCASTD C4, X10; \
-	VPADDD       X10, X4, X6; \
-	VPMINSD      X9, X6, X6; \
-	VPSRAD       $3, X6, X6; \
-	VPBROADCASTD C3, X10; \
-	VPADDD       X10, X4, X7; \
-	VPMINSD      X9, X7, X7; \
-	VPSRAD       $3, X7, X7; \
-	VPXOR        X8, X8, X8; \
-	VPBROADCASTD PIXMAX, X9; \
-	VPADDD       X7, X1, X10; \
-	CLIPD(X10, X8, X9); \
-	VPSUBD       X6, X2, X11; \
-	CLIPD(X11, X8, X9); \
-	VPBROADCASTD C1, X12; \
-	VPADDD       X12, X6, X12; \
-	VPSRAD       $1, X12, X12; \
-	VPADDD       X12, X0, X4; \
-	CLIPD(X4, X8, X9); \
-	VPBLENDMD    X0, X4, K2, X4; \
-	VPSUBD       X12, X3, X5; \
-	CLIPD(X5, X8, X9); \
-	VPBLENDMD    X3, X5, K2, X5; \
+	VPBROADCASTD NEGLIM, V8; \
+	VPBROADCASTD LIM1, V9; \
+	VPSUBD       V3, V0, V4; \
+	CLIPD(V4, V8, V9); \
+	VMOVDQU32.Z  V4, K2, V4; \
+	VPSUBD       V1, V2, V6; \
+	VPADDD       V6, V6, V7; \
+	VPADDD       V6, V7, V7; \
+	VPADDD       V7, V4, V4; \
+	CLIPD(V4, V8, V9); \
+	VPBROADCASTD C4, V10; \
+	VPADDD       V10, V4, V6; \
+	VPMINSD      V9, V6, V6; \
+	VPSRAD       $3, V6, V6; \
+	VPBROADCASTD C3, V10; \
+	VPADDD       V10, V4, V7; \
+	VPMINSD      V9, V7, V7; \
+	VPSRAD       $3, V7, V7; \
+	VPXOR        V8, V8, V8; \
+	VPBROADCASTD PIXMAX, V9; \
+	VPADDD       V7, V1, V10; \
+	CLIPD(V10, V8, V9); \
+	VPSUBD       V6, V2, V11; \
+	CLIPD(V11, V8, V9); \
+	VPBROADCASTD C1, V12; \
+	VPADDD       V12, V6, V12; \
+	VPSRAD       $1, V12, V12; \
+	VPADDD       V12, V0, V4; \
+	CLIPD(V4, V8, V9); \
+	VPBLENDMD    V0, V4, K2, V4; \
+	VPSUBD       V12, V3, V5; \
+	CLIPD(V5, V8, V9); \
+	VPBLENDMD    V3, V5, K2, V5; \
 	KNOTW        K1, K5; \
-	VMOVDQU32    X4, K5, OP1; \
-	VMOVDQU32    X10, K5, OP0; \
-	VMOVDQU32    X11, K5, OQ0; \
-	VMOVDQU32    X5, K5, OQ1; \
+	VMOVDQU32    V4, K5, OP1; \
+	VMOVDQU32    V10, K5, OP0; \
+	VMOVDQU32    V11, K5, OQ0; \
+	VMOVDQU32    V5, K5, OQ1; \
 	MOVL WD, AX; \
 	CMPL AX, $4; \
 	JLE  scatter; \
-	VPBROADCASTD FTHR, X8; \
+	VPBROADCASTD FTHR, V8; \
 	KMOVW        K1, K3; \
-	ACCGTK(X1, SP2, X8, X5, K4, K3); \
-	ACCGTK(X0, X1, X8, X5, K4, K3); \
-	ACCGTK(X3, X2, X8, X5, K4, K3); \
-	ACCGTK(X2, SQ2, X8, X5, K4, K3); \
+	ACCGTK(V1, SP2, V8, V5, K4, K3); \
+	ACCGTK(V0, V1, V8, V5, K4, K3); \
+	ACCGTK(V3, V2, V8, V5, K4, K3); \
+	ACCGTK(V2, SQ2, V8, V5, K4, K3); \
 	CMPL         AX, $8; \
 	JL           flatindone; \
-	ACCGTK(X1, SP3, X8, X5, K4, K3); \
-	ACCGTK(X2, SQ3, X8, X5, K4, K3); \
+	ACCGTK(V1, SP3, V8, V5, K4, K3); \
+	ACCGTK(V2, SQ3, V8, V5, K4, K3); \
 	flatindone:; \
 	KMOVW K3, DX; \
-	CMPL  DX, $0x0f; \
+	CMPL  DX, KALL; \
 	JEQ   scatter; \
 	KNOTW        K3, K5; \
-	VPBROADCASTD C4, X13; \
+	VPBROADCASTD C4, V13; \
 	CMPL         AX, $6; \
 	JG           eight; \
-	WIDE6K(SP2, SP2, X0, X1, X2, OP1); \
-	WIDE6K(SP2, X0, X1, X2, X3, OP0); \
-	WIDE6K(X0, X1, X2, X3, SQ2, OQ0); \
-	WIDE6K(X1, X2, X3, SQ2, SQ2, OQ1); \
+	WIDE6K(SP2, SP2, V0, V1, V2, OP1); \
+	WIDE6K(SP2, V0, V1, V2, V3, OP0); \
+	WIDE6K(V0, V1, V2, V3, SQ2, OQ0); \
+	WIDE6K(V1, V2, V3, SQ2, SQ2, OQ1); \
 	JMP          scatter; \
 	eight:; \
-	WIDE8K(SP3, SP3, SP3, SP2, X0, X1, X2, OP2); \
-	WIDE8K(SP3, SP3, SP2, X0, X1, X2, X3, OP1); \
-	WIDE8K(SP3, SP2, X0, X1, X2, X3, SQ2, OP0); \
-	WIDE8K(SP2, X0, X1, X2, X3, SQ2, SQ3, OQ0); \
-	WIDE8K(X0, X1, X2, X3, SQ2, SQ3, SQ3, OQ1); \
-	WIDE8K(X1, X2, X3, SQ2, SQ3, SQ3, SQ3, OQ2); \
+	WIDE8K(SP3, SP3, SP3, SP2, V0, V1, V2, OP2); \
+	WIDE8K(SP3, SP3, SP2, V0, V1, V2, V3, OP1); \
+	WIDE8K(SP3, SP2, V0, V1, V2, V3, SQ2, OP0); \
+	WIDE8K(SP2, V0, V1, V2, V3, SQ2, SQ3, OQ0); \
+	WIDE8K(V0, V1, V2, V3, SQ2, SQ3, SQ3, OQ1); \
+	WIDE8K(V1, V2, V3, SQ2, SQ3, SQ3, SQ3, OQ2); \
 	CMPL AX, $16; \
 	JL   scatter; \
-	VPBROADCASTD FTHR, X8; \
-	ACCGTK(X1, SP6, X8, X5, K4, K3); \
-	ACCGTK(X1, SP5, X8, X5, K4, K3); \
-	ACCGTK(X1, SP4, X8, X5, K4, K3); \
-	ACCGTK(X2, SQ4, X8, X5, K4, K3); \
-	ACCGTK(X2, SQ5, X8, X5, K4, K3); \
-	ACCGTK(X2, SQ6, X8, X5, K4, K3); \
+	VPBROADCASTD FTHR, V8; \
+	ACCGTK(V1, SP6, V8, V5, K4, K3); \
+	ACCGTK(V1, SP5, V8, V5, K4, K3); \
+	ACCGTK(V1, SP4, V8, V5, K4, K3); \
+	ACCGTK(V2, SQ4, V8, V5, K4, K3); \
+	ACCGTK(V2, SQ5, V8, V5, K4, K3); \
+	ACCGTK(V2, SQ6, V8, V5, K4, K3); \
 	KMOVW        K3, DX; \
-	CMPL         DX, $0x0f; \
+	CMPL         DX, KALL; \
 	JEQ          scatter; \
 	KNOTW   K3, K5; \
-	VMOVDQU SP6, X0; \
-	VMOVDQU X0, -208(BX); \
-	VMOVDQU X0, -192(BX); \
-	VMOVDQU X0, -176(BX); \
-	VMOVDQU X0, -160(BX); \
-	VMOVDQU X0, -144(BX); \
-	VMOVDQU X0, -128(BX); \
-	VMOVDQU SQ6, X0; \
-	VMOVDQU X0, 112(BX); \
-	VMOVDQU X0, 128(BX); \
-	VMOVDQU X0, 144(BX); \
-	VMOVDQU X0, 160(BX); \
-	VMOVDQU X0, 176(BX); \
-	VMOVDQU X0, 192(BX); \
-	LEAQ         -192(BX), CX; \
-	VMOVDQU      (CX), X4; \
-	VPADDD       16(CX), X4, X4; \
-	VPADDD       32(CX), X4, X4; \
-	VPADDD       48(CX), X4, X4; \
-	VPADDD       64(CX), X4, X4; \
-	VPADDD       80(CX), X4, X4; \
-	VPADDD       96(CX), X4, X4; \
-	VPADDD       112(CX), X4, X4; \
-	VPADDD       128(CX), X4, X4; \
-	VPADDD       144(CX), X4, X4; \
-	VPADDD       160(CX), X4, X4; \
-	VPADDD       176(CX), X4, X4; \
-	VPADDD       192(CX), X4, X4; \
-	VPBROADCASTD C4, X13; \
-	VPADDD       X13, X13, X13; \
-	LEAQ         -96(BX), CX; \
-	LEAQ         224(BX), DX; \
+	VMOVDQU SP6, V0; \
+	VMOVDQU V0, -13*LW(BX); \
+	VMOVDQU V0, -12*LW(BX); \
+	VMOVDQU V0, -11*LW(BX); \
+	VMOVDQU V0, -10*LW(BX); \
+	VMOVDQU V0, -9*LW(BX); \
+	VMOVDQU V0, -8*LW(BX); \
+	VMOVDQU SQ6, V0; \
+	VMOVDQU V0, 7*LW(BX); \
+	VMOVDQU V0, 8*LW(BX); \
+	VMOVDQU V0, 9*LW(BX); \
+	VMOVDQU V0, 10*LW(BX); \
+	VMOVDQU V0, 11*LW(BX); \
+	VMOVDQU V0, 12*LW(BX); \
+	LEAQ         -12*LW(BX), CX; \
+	VMOVDQU      (CX), V4; \
+	VPADDD       1*LW(CX), V4, V4; \
+	VPADDD       2*LW(CX), V4, V4; \
+	VPADDD       3*LW(CX), V4, V4; \
+	VPADDD       4*LW(CX), V4, V4; \
+	VPADDD       5*LW(CX), V4, V4; \
+	VPADDD       6*LW(CX), V4, V4; \
+	VPADDD       7*LW(CX), V4, V4; \
+	VPADDD       8*LW(CX), V4, V4; \
+	VPADDD       9*LW(CX), V4, V4; \
+	VPADDD       10*LW(CX), V4, V4; \
+	VPADDD       11*LW(CX), V4, V4; \
+	VPADDD       12*LW(CX), V4, V4; \
+	VPBROADCASTD C4, V13; \
+	VPADDD       V13, V13, V13; \
+	LEAQ         -6*LW(BX), CX; \
+	LEAQ         14*LW(BX), DX; \
 	MOVQ         $12, R14; \
 	fourteen:; \
-	VMOVDQU   -16(CX), X5; \
-	VPADDD    (CX), X5, X5; \
-	VPADDD    16(CX), X5, X5; \
-	VPADDD    X4, X5, X5; \
-	VPADDD    X13, X5, X5; \
-	VPSRAD    $4, X5, X5; \
-	VMOVDQU32 X5, K5, (DX); \
-	VPADDD    112(CX), X4, X4; \
-	VPSUBD    -96(CX), X4, X4; \
-	ADDQ      $16, CX; \
-	ADDQ      $16, DX; \
+	VMOVDQU   -1*LW(CX), V5; \
+	VPADDD    (CX), V5, V5; \
+	VPADDD    1*LW(CX), V5, V5; \
+	VPADDD    V4, V5, V5; \
+	VPADDD    V13, V5, V5; \
+	VPSRAD    $4, V5, V5; \
+	VMOVDQU32 V5, K5, (DX); \
+	VPADDD    7*LW(CX), V4, V4; \
+	VPSUBD    -6*LW(CX), V4, V4; \
+	ADDQ      $LW, CX; \
+	ADDQ      $LW, DX; \
 	DECQ      R14; \
 	JNZ       fourteen;
+
+// LPF8W filters eight contiguous lines at a time. Only a horizontal edge
+// reaches it, so the lines need no transpose and the taps are the only thing
+// that strides.
+#define LPF8W(FILTER) \
+	MOVQ dst+0(FP), SI;       \
+	MOVQ strideb+16(FP), R9;  \
+	MOVQ p+24(FP), DI;        \
+	LEAQ 13*LW(SP), BX;       \
+	MOVL WD, AX;              \
+	MOVQ $-2, R12;            \
+	MOVQ $4, R13;             \
+	CMPL AX, $4;              \
+	JLE  spanset;             \
+	MOVQ $-3, R12;            \
+	MOVQ $6, R13;             \
+	CMPL AX, $6;              \
+	JLE  spanset;             \
+	MOVQ $-4, R12;            \
+	MOVQ $8, R13;             \
+	CMPL AX, $16;             \
+	JLT  spanset;             \
+	MOVQ $-7, R12;            \
+	MOVQ $14, R13;            \
+	spanset:;                 \
+	MOVQ  R12, AX;            \
+	IMULQ R9, AX;             \
+	LEAQ  (SI)(AX*1), CX;     \
+	MOVQ  R12, AX;            \
+	IMULQ $LW, AX;            \
+	LEAQ  (BX)(AX*1), DX;     \
+	MOVQ  R13, R14;           \
+	widenloop:;               \
+	VPMOVZXBD (CX), V0;       \
+	VMOVDQU   V0, (DX);       \
+	VMOVDQU   V0, 20*LW(DX);  \
+	ADDQ      R9, CX;         \
+	ADDQ      $LW, DX;        \
+	DECQ      R14;            \
+	JNZ       widenloop;      \
+	FILTER;                   \
+	scatter:;                 \
+	MOVL WD, AX;              \
+	MOVQ $-2, R12;            \
+	MOVQ $4, R13;             \
+	CMPL AX, $6;              \
+	JLE  scatterset;          \
+	MOVQ $-3, R12;            \
+	MOVQ $6, R13;             \
+	CMPL AX, $16;             \
+	JLT  scatterset;          \
+	MOVQ $-6, R12;            \
+	MOVQ $12, R13;            \
+	scatterset:;              \
+	MOVQ  R12, AX;            \
+	IMULQ R9, AX;             \
+	LEAQ  (SI)(AX*1), CX;     \
+	packloop:;                \
+	MOVQ      R12, AX;        \
+	IMULQ     $LW, AX;        \
+	LEAQ      (BX)(AX*1), DX; \
+	VMOVDQU   20*LW(DX), V0;  \
+	VPACKUSDW V0, V0, V0;     \
+	VPERMQ    $0x08, V0, V0;  \
+	VPACKUSWB X0, X0, X0;     \
+	VMOVQ     X0, (CX);       \
+	ADDQ      R9, CX;         \
+	INCQ      R12;            \
+	DECQ      R13;            \
+	JNZ       packloop;       \
+	VZEROUPPER
+
+// LPF16W is LPF8W at sixteen bits, where the samples need no widening on the
+// way in and the pack has to clip explicitly on the way out.
+#define LPF16W(FILTER) \
+	MOVQ dst+0(FP), SI;       \
+	MOVQ strideb+16(FP), R9;  \
+	MOVQ p+24(FP), DI;        \
+	LEAQ 13*LW(SP), BX;       \
+	MOVL WD, AX;              \
+	MOVQ $-2, R12;            \
+	MOVQ $4, R13;             \
+	CMPL AX, $4;              \
+	JLE  spanset;             \
+	MOVQ $-3, R12;            \
+	MOVQ $6, R13;             \
+	CMPL AX, $6;              \
+	JLE  spanset;             \
+	MOVQ $-4, R12;            \
+	MOVQ $8, R13;             \
+	CMPL AX, $16;             \
+	JLT  spanset;             \
+	MOVQ $-7, R12;            \
+	MOVQ $14, R13;            \
+	spanset:;                 \
+	MOVQ  R12, AX;            \
+	IMULQ R9, AX;             \
+	LEAQ  (SI)(AX*2), CX;     \
+	MOVQ  R12, AX;            \
+	IMULQ $LW, AX;            \
+	LEAQ  (BX)(AX*1), DX;     \
+	MOVQ  R13, R14;           \
+	widenloop:;               \
+	VPMOVZXWD (CX), V0;       \
+	VMOVDQU   V0, (DX);       \
+	VMOVDQU   V0, 20*LW(DX);  \
+	LEAQ      (CX)(R9*2), CX; \
+	ADDQ      $LW, DX;        \
+	DECQ      R14;            \
+	JNZ       widenloop;      \
+	FILTER;                   \
+	scatter:;                 \
+	MOVL WD, AX;              \
+	MOVQ $-2, R12;            \
+	MOVQ $4, R13;             \
+	CMPL AX, $6;              \
+	JLE  scatterset;          \
+	MOVQ $-3, R12;            \
+	MOVQ $6, R13;             \
+	CMPL AX, $16;             \
+	JLT  scatterset;          \
+	MOVQ $-6, R12;            \
+	MOVQ $12, R13;            \
+	scatterset:;              \
+	MOVQ  R12, AX;            \
+	IMULQ R9, AX;             \
+	LEAQ  (SI)(AX*2), CX;     \
+	packloop:;                \
+	MOVQ      R12, AX;        \
+	IMULQ     $LW, AX;        \
+	LEAQ      (BX)(AX*1), DX; \
+	VMOVDQU   20*LW(DX), V0;  \
+	VPACKUSDW V0, V0, V0;     \
+	VPERMQ    $0x08, V0, V0;  \
+	VMOVDQU   X0, (CX);       \
+	LEAQ      (CX)(R9*2), CX; \
+	INCQ      R12;            \
+	DECQ      R13;            \
+	JNZ       packloop;       \
+	VZEROUPPER
 
 // LPF8 and LPF16 gather the four lines, run FILTER over them and scatter the
 // result back, so the two filter bodies share all of the plumbing.
@@ -602,7 +765,7 @@ widenloop:; \
 	VMOVDQU   X0, (DX); \
 	VMOVDQU   X0, 320(DX); \
 	ADDQ      $4, CX; \
-	ADDQ      $16, DX; \
+	ADDQ      $LW, DX; \
 	DECQ      R14; \
 	JNZ       widenloop; \
 	FILTER; \
@@ -786,7 +949,7 @@ widenloop:; \
 	VMOVDQU   X0, (DX); \
 	VMOVDQU   X0, 320(DX); \
 	ADDQ      $8, CX; \
-	ADDQ      $16, DX; \
+	ADDQ      $LW, DX; \
 	DECQ      R14; \
 	JNZ       widenloop; \
 	FILTER; \
@@ -898,4 +1061,64 @@ TEXT ·lpf16AVX2(SB), 0, $832-32
 // func lpf16AVX512(dst *uint16, stridea, strideb int, p *lpfParams)
 TEXT ·lpf16AVX512(SB), 0, $832-32
 	LPF16(LPFBODY512)
+	RET
+
+// The eight line kernels reuse every macro above at twice the lane width.
+#undef LW
+#define LW 32
+#undef V0
+#define V0 Y0
+#undef V1
+#define V1 Y1
+#undef V2
+#define V2 Y2
+#undef V3
+#define V3 Y3
+#undef V4
+#define V4 Y4
+#undef V5
+#define V5 Y5
+#undef V6
+#define V6 Y6
+#undef V7
+#define V7 Y7
+#undef V8
+#define V8 Y8
+#undef V9
+#define V9 Y9
+#undef V10
+#define V10 Y10
+#undef V11
+#define V11 Y11
+#undef V12
+#define V12 Y12
+#undef V13
+#define V13 Y13
+#undef V14
+#define V14 Y14
+#undef V15
+#define V15 Y15
+#undef MSKALL
+#define MSKALL $0xffffffff
+#undef KALL
+#define KALL   $0xff
+
+// func lpf8WAVX2(dst *uint8, stridea, strideb int, p *lpfParams)
+TEXT ·lpf8WAVX2(SB), 0, $1408-32
+	LPF8W(LPFBODY)
+	RET
+
+// func lpf8WAVX512(dst *uint8, stridea, strideb int, p *lpfParams)
+TEXT ·lpf8WAVX512(SB), 0, $1408-32
+	LPF8W(LPFBODY512)
+	RET
+
+// func lpf16WAVX2(dst *uint16, stridea, strideb int, p *lpfParams)
+TEXT ·lpf16WAVX2(SB), 0, $1408-32
+	LPF16W(LPFBODY)
+	RET
+
+// func lpf16WAVX512(dst *uint16, stridea, strideb int, p *lpfParams)
+TEXT ·lpf16WAVX512(SB), 0, $1408-32
+	LPF16W(LPFBODY512)
 	RET

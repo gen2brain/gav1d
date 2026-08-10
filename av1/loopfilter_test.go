@@ -146,7 +146,11 @@ func TestLoopFilter(t *testing.T) {
 	t.Logf("%d cases", cases)
 }
 
-func runLFEdge[P pixel](d *dspContext[P], iter, wd, stridea, strideb int,
+// lfLineCounts are the run lengths the drivers produce, all of them multiples
+// of four and rotated through the cases so every width meets every count.
+var lfLineCounts = []int{4, 8, 12, 16, 24, 48}
+
+func runLFEdge[P pixel](d *dspContext[P], iter, wd, stridea, strideb, lines int,
 	bitdepthMax int32, e, i, h int32,
 ) []P {
 	min8 := bitdepthFromMax(bitdepthMax) - 8
@@ -168,12 +172,12 @@ func runLFEdge[P pixel](d *dspContext[P], iter, wd, stridea, strideb int,
 		}
 	}
 
-	// One call filters four lines; walking the edge gives a single mutation
-	// far more chances to change a rounded output.
+	// Walking a long edge gives a single mutation far more chances to change a
+	// rounded output, and the line count decides how much of it each call takes.
 	off := lfPad*lfStride + lfPad
-	for range 12 {
-		d.loopFilter(buf, off, e, i, h, stridea, strideb, wd, bitdepthMax)
-		off += 4 * stridea
+	for n := 48; n > 0; n -= lines {
+		d.loopFilter(buf, off, e, i, h, stridea, strideb, wd, lines, bitdepthMax)
+		off += lines * stridea
 	}
 
 	return buf
@@ -210,17 +214,18 @@ func lfAsmDepth[P pixel](t *testing.T, bitdepthMax int32) int {
 				for _, e := range []int32{0, 3, 20, 100} {
 					for _, i := range []int32{0, 1, 6, 40} {
 						for _, h := range []int32{0, 2, 30} {
-							want := runLFEdge(ref, iter, wd, dir[0], dir[1],
+							lines := lfLineCounts[cases%len(lfLineCounts)]
+							want := runLFEdge(ref, iter, wd, dir[0], dir[1], lines,
 								bitdepthMax, e, i, h)
-							have := runLFEdge(got, iter, wd, dir[0], dir[1],
+							have := runLFEdge(got, iter, wd, dir[0], dir[1], lines,
 								bitdepthMax, e, i, h)
 							for k := range want {
 								if have[k] == want[k] {
 									continue
 								}
-								t.Fatalf("bpc=%d wd=%d stridea=%d e=%d i=%d h=%d iter=%d: "+
+								t.Fatalf("bpc=%d wd=%d stridea=%d lines=%d e=%d i=%d h=%d iter=%d: "+
 									"buf[%d] = %d, want %d",
-									bitdepthFromMax(bitdepthMax), wd, dir[0], e, i, h,
+									bitdepthFromMax(bitdepthMax), wd, dir[0], lines, e, i, h,
 									iter, k, have[k], want[k])
 							}
 							cases++
