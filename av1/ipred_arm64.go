@@ -1,0 +1,86 @@
+//go:build arm64 && !noasm
+
+package av1
+
+//go:noescape
+func smoothV8NEON(dst *uint8, stride int, tl *uint8, weights *uint8, w, h int)
+
+//go:noescape
+func smoothH8NEON(dst *uint8, stride int, tl *uint8, weights *uint8, w, h int)
+
+//go:noescape
+func smooth8NEON(dst *uint8, stride int, tl *uint8, vw, hw *uint8, w, h int)
+
+//go:noescape
+func paeth8NEON(dst *uint8, stride int, tl *uint8, w, h int)
+
+//go:noescape
+func splatDc8NEON(dst *uint8, stride, w, h int, dc uint8)
+
+//go:noescape
+func vpred8NEON(dst *uint8, stride int, tl *uint8, w, h int)
+
+//go:noescape
+func hpred8NEON(dst *uint8, stride int, tl *uint8, w, h int)
+
+func ipredSmoothV8NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
+	width, height, a, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	smoothV8NEON(&dst[dstOff], stride, &tl[tlOff], &smWeights[height], width, height)
+}
+
+func ipredSmoothH8NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
+	width, height, a, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	smoothH8NEON(&dst[dstOff], stride, &tl[tlOff], &smWeights[width], width, height)
+}
+
+func ipredSmooth8NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
+	width, height, a, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	smooth8NEON(&dst[dstOff], stride, &tl[tlOff], &smWeights[height],
+		&smWeights[width], width, height)
+}
+
+func ipredPaeth8NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
+	width, height, a, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	paeth8NEON(&dst[dstOff], stride, &tl[tlOff], width, height)
+}
+
+func ipredV8NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
+	width, height, a, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	vpred8NEON(&dst[dstOff], stride, &tl[tlOff], width, height)
+}
+
+func ipredH8NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
+	width, height, a, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	hpred8NEON(&dst[dstOff], stride, &tl[tlOff], width, height)
+}
+
+func ipredDc8NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
+	width, height, a, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	splatDc8NEON(&dst[dstOff], stride, width, height,
+		uint8(dcGen(tl, tlOff, width, height, bitdepthMax)))
+}
+
+func ipredDcTop8NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
+	width, height, a, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	splatDc8NEON(&dst[dstOff], stride, width, height, uint8(dcGenTop(tl, tlOff, width)))
+}
+
+func ipredDcLeft8NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
+	width, height, a, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	splatDc8NEON(&dst[dstOff], stride, width, height, uint8(dcGenLeft(tl, tlOff, height)))
+}
+
+func ipredDc1288NEON(dst []uint8, dstOff, stride int, tl []uint8, tlOff,
+	width, height, a, maxWidth, maxHeight int, bitdepthMax int32,
+) {
+	splatDc8NEON(&dst[dstOff], stride, width, height, uint8((bitdepthMax+1)>>1))
+}

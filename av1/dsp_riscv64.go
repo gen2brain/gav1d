@@ -34,5 +34,15 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.cdefDir = cdefFindDir8RVV
 		d8.cdefCopy = cdefCopy8RVVRows
 		d8.loopFilter = loopFilter8RVV
+		d8.ipred[smoothPred] = ipredSmooth8RVV
+		d8.ipred[smoothVPred] = ipredSmoothV8RVV
+		d8.ipred[smoothHPred] = ipredSmoothH8RVV
+		d8.ipred[paethPred] = ipredPaeth8RVV
+		d8.ipred[vertPred] = ipredV8RVV
+		d8.ipred[horPred] = ipredH8RVV
+		d8.ipred[dcPred] = ipredDc8RVV
+		d8.ipred[topDcPred] = ipredDcTop8RVV
+		d8.ipred[leftDcPred] = ipredDcLeft8RVV
+		d8.ipred[dc128Pred] = ipredDc1288RVV
 	}
 }
