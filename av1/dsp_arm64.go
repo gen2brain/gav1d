@@ -19,6 +19,18 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d16.fgApplyRow = fgApplyRow16NEONRow
 		d16.fguvApplyRow = fguvApplyRow16NEONRow
 		d16.cdefCopy = cdefCopy16NEONRows
+		d16.ipred[smoothPred] = ipredSmooth16NEON
+		d16.ipred[smoothVPred] = ipredSmoothV16NEON
+		d16.ipred[smoothHPred] = ipredSmoothH16NEON
+		d16.ipred[paethPred] = ipredPaeth16NEON
+		d16.ipred[vertPred] = ipredV16NEON
+		d16.ipred[horPred] = ipredH16NEON
+		d16.ipred[dcPred] = ipredDc16NEON
+		d16.ipred[topDcPred] = ipredDcTop16NEON
+		d16.ipred[leftDcPred] = ipredDcLeft16NEON
+		d16.ipred[dc128Pred] = ipredDc12816NEON
+		d16.ipred[filterPred] = ipredFilter16NEON
+		d16.ipred[z1Pred] = ipredZ116NEON
 	}
 
 	if d8, ok := any(d).(*dspContext[uint8]); ok {

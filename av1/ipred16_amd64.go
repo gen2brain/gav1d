@@ -152,3 +152,5 @@ func ipredZ116AVX2(dst []uint16, dstOff, stride int, tlIn []uint16, tlInOff,
 			top[topOff+maxBaseX])
 	}
 }
+
+const ipredHas16Deep = true

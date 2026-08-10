@@ -242,7 +242,10 @@ func TestIpredAsm(t *testing.T) {
 	m8 := []int{smoothPred, smoothVPred, smoothHPred, paethPred, vertPred,
 		horPred, dcPred, topDcPred, leftDcPred, dc128Pred, filterPred, z1Pred}
 	m16 := []int{smoothPred, smoothVPred, smoothHPred, paethPred, vertPred,
-		horPred, dcPred, topDcPred, leftDcPred, dc128Pred, filterPred, z1Pred}
+		horPred, dcPred, topDcPred, leftDcPred, dc128Pred}
+	if ipredHas16Deep {
+		m16 = append(m16, filterPred, z1Pred)
+	}
 
 	cases := runIpredAsm[uint8](t, m8, 255)
 	cases += runIpredAsm[uint16](t, m16, 1023)
