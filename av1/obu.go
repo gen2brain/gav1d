@@ -1631,8 +1631,8 @@ func (d *Decoder) showExistingFrame() error {
 	return nil
 }
 
-// ParseSequenceHeader parses a sequence header OBU from a raw AV1 bitstream.
-func ParseSequenceHeader(data []byte) error {
+// parseSequenceHeader parses a sequence header OBU from a raw AV1 bitstream.
+func parseSequenceHeader(data []byte) error {
 	if len(data) == 0 {
 		return errInvalid
 	}

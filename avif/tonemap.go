@@ -549,16 +549,16 @@ func sampleGain(read pixelReader, gw, gh, w, h, x, y int) [4]float64 {
 // is interpolated.
 func ApplyGainMap(base image.Image, baseColor ColorInfo, g *GainMap, headroom float64, out ColorInfo) (image.Image, error) {
 	if base == nil || g == nil || g.Image == nil {
-		return nil, errInvalid
+		return nil, ErrInvalid
 	}
 	if headroom < 0 || math.IsNaN(headroom) {
-		return nil, errInvalid
+		return nil, ErrInvalid
 	}
 
 	b := base.Bounds()
 	w, h := b.Dx(), b.Dy()
 	if w <= 0 || h <= 0 {
-		return nil, errInvalid
+		return nil, ErrInvalid
 	}
 
 	weight := g.weight(headroom)

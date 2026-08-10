@@ -287,7 +287,7 @@ func TestConformance(t *testing.T) {
 					return
 				}
 				got, err := Decode(bytes.NewReader(data), Options{AutoRotate: true})
-				if errors.Is(err, errUnsupported) {
+				if errors.Is(err, ErrUnsupported) {
 					skipped++
 
 					return
@@ -859,8 +859,8 @@ func TestEssentialProperty(t *testing.T) {
 		if !setEssential(b, idx) {
 			t.Fatalf("%s: no association to property %d", name, idx)
 		}
-		if _, err := Decode(bytes.NewReader(b)); !errors.Is(err, errUnsupported) {
-			t.Fatalf("%s: unknown essential property = %v, want errUnsupported", name, err)
+		if _, err := Decode(bytes.NewReader(b)); !errors.Is(err, ErrUnsupported) {
+			t.Fatalf("%s: unknown essential property = %v, want ErrUnsupported", name, err)
 		}
 	}
 }
@@ -1619,5 +1619,101 @@ func TestApplyGainMapScale(t *testing.T) {
 		if got.Pix[x*4] != want {
 			t.Fatalf("column %d = %d, want %d (%v stops)", x, got.Pix[x*4], want, stops)
 		}
+	}
+}
+
+// TestGainMapFile reads the gain maps of real files, which is the one path
+// TestParseToneMap and the ApplyGainMap tests do not reach: decoding the gain
+// map image itself, including from a grid, and the alternate rendition's color
+// property. Set AVIF_CONFORMANCE_DIR to run it.
+func TestGainMapFile(t *testing.T) {
+	env := os.Getenv("AVIF_CONFORMANCE_DIR")
+	if env == "" {
+		t.Skip("set AVIF_CONFORMANCE_DIR")
+	}
+
+	cases := []struct {
+		name            string
+		base, gain      image.Point
+		baseHR, altHR   Rational
+		useBase         bool
+		gamma, min, max Rational
+	}{{
+		name: "seine_sdr_gainmap_srgb.avif",
+		base: image.Pt(400, 300), gain: image.Pt(400, 300),
+		baseHR: Rational{0, 1}, altHR: Rational{13, 10}, useBase: true,
+		gamma: Rational{119223, 125000},
+		min:   Rational{-256907, 1000000}, max: Rational{1277177, 1000000},
+	}, {
+		// The base is a grid and the gain map is a 2x2 grid of its own.
+		name: "color_grid_gainmap_different_grid.avif",
+		base: image.Pt(512, 600), gain: image.Pt(128, 160),
+		baseHR: Rational{6, 2}, altHR: Rational{0, 1}, useBase: true,
+		gamma: Rational{1, 1}, min: Rational{-1, 1}, max: Rational{11, 1},
+	}, {
+		// An HDR base whose alternate is the SDR rendition, so the gain runs
+		// the other way and the metadata does not use the base color space.
+		name: "seine_hdr_gainmap_srgb.avif",
+		base: image.Pt(400, 300), gain: image.Pt(400, 300),
+		baseHR: Rational{13, 10}, altHR: Rational{0, 1}, useBase: false,
+		gamma: Rational{119223, 125000},
+		min:   Rational{-256907, 1000000}, max: Rational{1277177, 1000000},
+	}}
+
+	for _, c := range cases {
+		var data []byte
+		for _, dir := range strings.Split(env, ":") {
+			if b, err := os.ReadFile(filepath.Join(dir, c.name)); err == nil {
+				data = b
+
+				break
+			}
+		}
+		if data == nil {
+			continue
+		}
+
+		img, g, err := DecodeGainMap(bytes.NewReader(data))
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if g == nil {
+			t.Fatalf("%s: no gain map", c.name)
+		}
+		if got := img.Bounds().Size(); got != c.base {
+			t.Fatalf("%s: base %v, want %v", c.name, got, c.base)
+		}
+		if got := g.Image.Bounds().Size(); got != c.gain {
+			t.Fatalf("%s: gain map %v, want %v", c.name, got, c.gain)
+		}
+		if g.BaseHDRHeadroom != c.baseHR || g.AlternateHDRHeadroom != c.altHR {
+			t.Fatalf("%s: headrooms %v %v, want %v %v", c.name,
+				g.BaseHDRHeadroom, g.AlternateHDRHeadroom, c.baseHR, c.altHR)
+		}
+		if g.UseBaseColorSpace != c.useBase {
+			t.Fatalf("%s: use_base_colour_space = %v", c.name, g.UseBaseColorSpace)
+		}
+		if g.Gamma[0] != c.gamma || g.Min[0] != c.min || g.Max[0] != c.max {
+			t.Fatalf("%s: gamma %v min %v max %v", c.name, g.Gamma[0], g.Min[0], g.Max[0])
+		}
+		if g.Alt.Primaries != priBT709 {
+			t.Fatalf("%s: alternate primaries = %d", c.name, g.Alt.Primaries)
+		}
+	}
+
+	// A file with no tone mapped item gives a usable base and no gain map.
+	data, err := os.ReadFile(filepath.Join("testdata", "yuv420-8.avif"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, g, err := DecodeGainMap(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g != nil {
+		t.Fatal("file without a tmap item reported a gain map")
+	}
+	if img == nil {
+		t.Fatal("file without a tmap item lost its base image")
 	}
 }

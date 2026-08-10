@@ -183,7 +183,7 @@ func (f *file) gainMap(o Options) (*GainMap, error) {
 		return nil, err
 	}
 	if w > pic.Width || h > pic.Height {
-		return nil, errInvalid
+		return nil, ErrInvalid
 	}
 	pic.Width, pic.Height = w, h
 

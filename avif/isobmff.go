@@ -2,7 +2,9 @@ package avif
 
 import "errors"
 
-var errInvalid = errors.New("avif: invalid file")
+// ErrInvalid is returned when a file is not an AVIF, or is malformed past
+// the point where anything can be decoded from it.
+var ErrInvalid = errors.New("avif: invalid file")
 
 type reader struct {
 	b   []byte
@@ -109,7 +111,7 @@ func eachBox(b []byte, fn func(typ string, payload []byte) error) error {
 			size = uint64(len(b) - start)
 		}
 		if r.err || size < uint64(hdr) || size > uint64(len(b)-start) {
-			return errInvalid
+			return ErrInvalid
 		}
 
 		payload := b[start+hdr : start+int(size)]
@@ -125,7 +127,7 @@ func eachBox(b []byte, fn func(typ string, payload []byte) error) error {
 	}
 
 	if r.err {
-		return errInvalid
+		return ErrInvalid
 	}
 
 	return nil
@@ -208,7 +210,7 @@ func parseMeta(payload []byte) (*metaBox, error) {
 	r := &reader{b: payload}
 	r.fullBox()
 	if r.err {
-		return nil, errInvalid
+		return nil, ErrInvalid
 	}
 
 	m := &metaBox{items: map[uint32]*item{}}
@@ -224,7 +226,7 @@ func parseMeta(payload []byte) (*metaBox, error) {
 				m.primary = rr.u32()
 			}
 			if rr.err {
-				return errInvalid
+				return ErrInvalid
 			}
 
 		case "iloc":
@@ -310,7 +312,7 @@ func (m *metaBox) parseIloc(b []byte) error {
 	}
 	for _, n := range []int{offSize, lenSize, baseSize, idxSize} {
 		if n != 0 && n != 4 && n != 8 {
-			return errInvalid
+			return ErrInvalid
 		}
 	}
 
@@ -340,12 +342,12 @@ func (m *metaBox) parseIloc(b []byte) error {
 			off := r.uint(offSize)
 			l := r.uint(lenSize)
 			if r.err {
-				return errInvalid
+				return ErrInvalid
 			}
 			it.extents = append(it.extents, extent{off: off, len: l})
 		}
 		if r.err {
-			return errInvalid
+			return ErrInvalid
 		}
 	}
 
@@ -361,7 +363,7 @@ func (m *metaBox) parseIinf(b []byte) error {
 		r.u32()
 	}
 	if r.err {
-		return errInvalid
+		return ErrInvalid
 	}
 
 	return eachBox(b[r.i:], func(typ string, b []byte) error {
@@ -383,7 +385,7 @@ func (m *metaBox) parseIinf(b []byte) error {
 		rr.skip(2)
 		itemType := rr.str4()
 		if rr.err {
-			return errInvalid
+			return ErrInvalid
 		}
 
 		it := m.item(id)
@@ -404,7 +406,7 @@ func (m *metaBox) parseIref(b []byte) error {
 	r := &reader{b: b}
 	v, _ := r.fullBox()
 	if r.err {
-		return errInvalid
+		return ErrInvalid
 	}
 
 	return eachBox(b[r.i:], func(typ string, b []byte) error {
@@ -426,7 +428,7 @@ func (m *metaBox) parseIref(b []byte) error {
 			ref.to = append(ref.to, to)
 		}
 		if rr.err {
-			return errInvalid
+			return ErrInvalid
 		}
 		m.refs = append(m.refs, ref)
 
@@ -448,7 +450,7 @@ func (m *metaBox) parseIpco(b []byte) error {
 		case "av1C":
 			marker := r.u8()
 			if marker>>7 != 1 || marker&0x7f != 1 {
-				return errInvalid
+				return ErrInvalid
 			}
 			v := r.u8()
 			p.av1C.profile = v >> 5
@@ -504,7 +506,7 @@ func (m *metaBox) parseIpco(b []byte) error {
 		}
 
 		if r.err {
-			return errInvalid
+			return ErrInvalid
 		}
 		m.props = append(m.props, p)
 
@@ -517,7 +519,7 @@ func (m *metaBox) parseIpma(b []byte) error {
 	v, flags := r.fullBox()
 	count := int(r.u32())
 	if r.err {
-		return errInvalid
+		return ErrInvalid
 	}
 
 	for range count {
@@ -541,7 +543,7 @@ func (m *metaBox) parseIpma(b []byte) error {
 				idx, essential = int(v&0x7f), v&0x80 != 0
 			}
 			if r.err {
-				return errInvalid
+				return ErrInvalid
 			}
 			if idx == 0 {
 				continue
@@ -549,7 +551,7 @@ func (m *metaBox) parseIpma(b []byte) error {
 			it.props = append(it.props, itemProp{idx: idx - 1, essential: essential})
 		}
 		if r.err {
-			return errInvalid
+			return ErrInvalid
 		}
 	}
 
@@ -562,7 +564,7 @@ func (m *metaBox) data(it *item, file []byte) ([]byte, error) {
 	if it.method == 1 {
 		src = m.idat
 	} else if it.method != 0 {
-		return nil, errInvalid
+		return nil, ErrInvalid
 	}
 
 	if len(it.extents) == 1 {
@@ -572,7 +574,7 @@ func (m *metaBox) data(it *item, file []byte) ([]byte, error) {
 			n = uint64(len(src)) - off
 		}
 		if off > uint64(len(src)) || n > uint64(len(src))-off {
-			return nil, errInvalid
+			return nil, ErrInvalid
 		}
 
 		return src[off : off+n], nil
@@ -585,12 +587,12 @@ func (m *metaBox) data(it *item, file []byte) ([]byte, error) {
 			n = uint64(len(src)) - off
 		}
 		if off > uint64(len(src)) || n > uint64(len(src))-off {
-			return nil, errInvalid
+			return nil, ErrInvalid
 		}
 		out = append(out, src[off:off+n]...)
 	}
 	if out == nil {
-		return nil, errInvalid
+		return nil, ErrInvalid
 	}
 
 	return out, nil

@@ -9,7 +9,10 @@ is imported for side effects.
 
 It handles 8, 10 and 12 bits, 4:2:0, 4:2:2, 4:4:4 and monochrome, alpha, film
 grain, tiled images stored as a grid, and the clap, irot and imir transforms.
-A file it cannot render returns an error rather than a wrong image.
+A file it cannot render returns an error rather than a wrong image:
+[ErrUnsupported] for one that is well formed but asks for something this
+package does not implement, [ErrInvalid] for one that is broken. A caller with
+another decoder to fall back on wants the first and not the second.
 
 # Options
 
@@ -143,7 +146,7 @@ func parse(data []byte) (*file, error) {
 		return nil, err
 	}
 	if !brandOK || f.meta == nil {
-		return nil, errInvalid
+		return nil, ErrInvalid
 	}
 
 	return f, nil
@@ -186,10 +189,10 @@ func (f *file) alphaFor(id uint32) *item {
 func (f *file) dimensions(it *item) (int, int, error) {
 	p := f.meta.prop(it, "ispe")
 	if p == nil {
-		return 0, 0, errInvalid
+		return 0, 0, ErrInvalid
 	}
 	if p.w == 0 || p.h == 0 || p.w > 1<<20 || p.h > 1<<20 {
-		return 0, 0, errInvalid
+		return 0, 0, ErrInvalid
 	}
 
 	return int(p.w), int(p.h), nil
@@ -198,7 +201,7 @@ func (f *file) dimensions(it *item) (int, int, error) {
 // decodeItem decodes a single av01 item to a picture.
 func (f *file) decodeItem(it *item) (*av1.Picture, error) {
 	if it.unsupported {
-		return nil, errUnsupported
+		return nil, ErrUnsupported
 	}
 
 	data, err := f.meta.data(it, f.data)
@@ -216,13 +219,13 @@ func (f *file) decodeItem(it *item) (*av1.Picture, error) {
 		return nil, err
 	}
 	if len(pics) == 0 {
-		return nil, errInvalid
+		return nil, ErrInvalid
 	}
 
 	// 0xffff selects every layer, which is the last picture decoded.
 	if p := f.meta.prop(it, "lsel"); p != nil && p.layer != 0xffff {
 		if int(p.layer) >= len(pics) {
-			return nil, errInvalid
+			return nil, ErrInvalid
 		}
 
 		return pics[p.layer], nil
@@ -249,7 +252,7 @@ func parseGrid(b []byte) (gridInfo, error) {
 		g.w, g.h = int(r.u16()), int(r.u16())
 	}
 	if r.err || g.w == 0 || g.h == 0 {
-		return g, errInvalid
+		return g, ErrInvalid
 	}
 
 	return g, nil
@@ -267,7 +270,7 @@ func (f *file) gridOf(it *item) (gridInfo, []uint32, error) {
 	}
 	tiles := f.meta.refsTo("dimg", it.id)
 	if len(tiles) != g.rows*g.cols {
-		return gridInfo{}, nil, errInvalid
+		return gridInfo{}, nil, ErrInvalid
 	}
 
 	return g, tiles, nil
@@ -275,7 +278,7 @@ func (f *file) gridOf(it *item) (gridInfo, []uint32, error) {
 
 func (f *file) decodeGrid(it *item) (*av1.Picture, error) {
 	if it.unsupported {
-		return nil, errUnsupported
+		return nil, ErrUnsupported
 	}
 
 	g, tiles, err := f.gridOf(it)
@@ -292,7 +295,7 @@ func (f *file) decodeTiles(g gridInfo, tiles []uint32) (*av1.Picture, error) {
 	for i, id := range tiles {
 		t := f.meta.items[id]
 		if t == nil || t.typ != "av01" {
-			return nil, errInvalid
+			return nil, ErrInvalid
 		}
 		if pics[i], err = f.decodeItem(t); err != nil {
 			return nil, err
@@ -304,11 +307,11 @@ func (f *file) decodeTiles(g gridInfo, tiles []uint32) (*av1.Picture, error) {
 	for _, p := range pics {
 		if p.Width != tw || p.Height != th || p.Layout != first.Layout ||
 			p.BitDepth != first.BitDepth {
-			return nil, errInvalid
+			return nil, ErrInvalid
 		}
 	}
 	if tw*g.cols < g.w || th*g.rows < g.h {
-		return nil, errInvalid
+		return nil, ErrInvalid
 	}
 
 	return stitch(pics, g, tw, th), nil
@@ -407,7 +410,7 @@ func (f *file) gridAlpha(it *item) (*av1.Picture, error) {
 func (f *file) decodePrimary() (*av1.Picture, *av1.Picture, error) {
 	it := f.primary()
 	if it == nil {
-		return nil, nil, errInvalid
+		return nil, nil, ErrInvalid
 	}
 
 	var pic *av1.Picture
@@ -426,7 +429,7 @@ func (f *file) decodePrimary() (*av1.Picture, *av1.Picture, error) {
 		return nil, nil, err
 	}
 	if w > pic.Width || h > pic.Height {
-		return nil, nil, errInvalid
+		return nil, nil, ErrInvalid
 	}
 	pic.Width, pic.Height = w, h
 
@@ -448,7 +451,7 @@ func (f *file) decodePrimary() (*av1.Picture, *av1.Picture, error) {
 	}
 	if alpha != nil {
 		if alpha.Width < w || alpha.Height < h {
-			return nil, nil, errInvalid
+			return nil, nil, ErrInvalid
 		}
 		alpha.Width, alpha.Height = w, h
 	}
@@ -581,7 +584,7 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 	}
 	it := f.primary()
 	if it == nil {
-		return image.Config{}, errInvalid
+		return image.Config{}, ErrInvalid
 	}
 	w, h, err := f.dimensions(it)
 	if err != nil {

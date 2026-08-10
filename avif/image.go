@@ -8,7 +8,11 @@ import (
 	"github.com/gen2brain/gav1d/av1"
 )
 
-var errUnsupported = errors.New("avif: unsupported image")
+// ErrUnsupported is returned for a file this package cannot render but which
+// is otherwise well formed: an essential property it does not implement, or a
+// sample format it has no conversion for. A caller that has another decoder
+// to fall back on should test for this one rather than [ErrInvalid].
+var ErrUnsupported = errors.New("avif: unsupported image")
 
 func colorModelFor(f *file, it *item) color.Model {
 	if p := f.meta.prop(it, "av1C"); p != nil && p.av1C.highBitdepth {
@@ -101,13 +105,13 @@ func toImage(f *file, it *item, pic, alpha *av1.Picture, ycbcr bool) (image.Imag
 
 	cs := newColorState(pic, f.colorInfo(it, pic), outDepth)
 	if cs.unsupportedSpace {
-		return nil, errUnsupported
+		return nil, ErrUnsupported
 	}
 
 	var as *colorState
 	if alpha != nil {
 		if alpha.Layout != av1.LayoutI400 {
-			return nil, errUnsupported
+			return nil, ErrUnsupported
 		}
 		as = alphaState(alpha, outDepth, alpha.FullRange)
 	}

@@ -152,13 +152,13 @@ func (f *file) applyTransforms(img image.Image, it *item) (image.Image, error) {
 
 	r, ok := toRaw(img)
 	if !ok {
-		return nil, errUnsupported
+		return nil, ErrUnsupported
 	}
 
 	if clap != nil {
 		x, y, w, h, ok := cropRect(&clap.clap, r.w, r.h)
 		if !ok {
-			return nil, errInvalid
+			return nil, ErrInvalid
 		}
 		if x != 0 || y != 0 || w != r.w || h != r.h {
 			r = r.crop(x, y, w, h)

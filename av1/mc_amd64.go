@@ -12,10 +12,6 @@ func put8tapVAVX2(dst *uint8, dstStride int, src *uint8, srcStride int, f *[8]in
 func put8tapHVAVX2(dst *uint8, dstStride int, src *uint8, srcStride int, mid *int16,
 	fh *[8]int8, fv *[8]int16, w, h int)
 
-// mcMidCols is the strip the two-dimensional filter works in, kept narrow so
-// the scratch is cheap to clear and stays in L1 between the two passes.
-const mcMidCols = 16
-
 //go:noescape
 func put8tapH4AVX2(dst *uint8, dstStride int, src *uint8, srcStride int, f *[8]int8, w, h int)
 

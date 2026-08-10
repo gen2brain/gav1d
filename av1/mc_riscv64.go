@@ -12,11 +12,6 @@ func put8tapVRVV(dst *uint8, dstStride int, src *uint8, srcStride int, f *[8]int
 func put8tapHVRVV(dst *uint8, dstStride int, src *uint8, srcStride int, mid *int16,
 	fh, fv *[8]int8, w, h int)
 
-// mcMidCols bounds the strip the two-dimensional filter works in. The kernel
-// takes the smaller of this and the hardware vector length, so the scratch is
-// cheap to clear and one vector covers a strip.
-const mcMidCols = 16
-
 //go:noescape
 func prep8tapHRVV(dst *int16, src *uint8, srcStride int, f *[8]int8, w, h int)
 

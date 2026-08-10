@@ -100,7 +100,7 @@ func parseTrak(b []byte) (track, error) {
 				}
 			}
 			if r.err {
-				return errInvalid
+				return ErrInvalid
 			}
 
 		case "edts":
@@ -125,7 +125,7 @@ func parseTrak(b []byte) (track, error) {
 					t.segmentDur = uint64(r.u32())
 				}
 				if r.err {
-					return errInvalid
+					return ErrInvalid
 				}
 
 				return nil
@@ -157,7 +157,7 @@ func parseTrak(b []byte) (track, error) {
 					}
 					t.timescale = r.u32()
 					if r.err {
-						return errInvalid
+						return ErrInvalid
 					}
 
 				case "hdlr":
@@ -206,7 +206,7 @@ func (t *track) parseStbl(b []byte) error {
 				count := r.u32()
 				delta := r.u32()
 				if r.err || count > 1<<24 {
-					return errInvalid
+					return ErrInvalid
 				}
 				for range int(count) {
 					t.deltas = append(t.deltas, delta)
@@ -218,7 +218,7 @@ func (t *track) parseStbl(b []byte) error {
 			uniform := r.u32()
 			n := int(r.u32())
 			if r.err || n < 0 || n > 1<<24 {
-				return errInvalid
+				return ErrInvalid
 			}
 			sizes = make([]uint32, n)
 			for i := range n {
@@ -257,7 +257,7 @@ func (t *track) parseStbl(b []byte) error {
 				per := r.u32()
 				r.u32()
 				if r.err {
-					return errInvalid
+					return ErrInvalid
 				}
 				runs = append(runs, chunkRun{first, per})
 			}
@@ -266,7 +266,7 @@ func (t *track) parseStbl(b []byte) error {
 			r.fullBox()
 			n := int(r.u32())
 			if r.err || n < 0 || n > 1<<24 {
-				return errInvalid
+				return ErrInvalid
 			}
 			offsets = make([]uint64, n)
 			for i := range n {
@@ -279,7 +279,7 @@ func (t *track) parseStbl(b []byte) error {
 		}
 
 		if r.err {
-			return errInvalid
+			return ErrInvalid
 		}
 
 		return nil
@@ -417,12 +417,12 @@ func (f *file) decodeTrack(t *track) ([]*av1.Picture, error) {
 	// A sample needs at least one byte, so a table claiming more samples than
 	// the file has bytes is describing data that cannot exist.
 	if len(t.samples) > len(f.data) {
-		return nil, errInvalid
+		return nil, ErrInvalid
 	}
 
 	for _, s := range t.samples {
 		if s.len == 0 || s.off > uint64(len(f.data)) || s.len > uint64(len(f.data))-s.off {
-			return nil, errInvalid
+			return nil, ErrInvalid
 		}
 		pics, err := d.DecodeOBUs(f.data[s.off : s.off+s.len])
 		if err != nil {
