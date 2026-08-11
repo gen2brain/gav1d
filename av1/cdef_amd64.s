@@ -779,3 +779,201 @@ z8main:
 
 	VZEROUPPER
 	RET
+
+// The sixteen bit neighbourhood of a four by four block is 64 words, so it
+// takes two registers and every tap is a VPERMI2W across the pair. VPSRLVW
+// shifts words directly, so nothing here needs GFNI.
+DATA cdefPerm16<>+0(SB)/8, $0x1300131812101202
+DATA cdefPerm16<>+8(SB)/8, $0x1502151a14011419
+DATA cdefPerm16<>+16(SB)/8, $0x1b041b1c1a031a03
+DATA cdefPerm16<>+24(SB)/8, $0x1dff1d1e1cff1c1d
+DATA cdefPerm16<>+32(SB)/8, $0x2308231022112200
+DATA cdefPerm16<>+40(SB)/8, $0x250a251224092411
+DATA cdefPerm16<>+48(SB)/8, $0x2b0c2b142a0b2a01
+DATA cdefPerm16<>+56(SB)/8, $0x2dff2d162cff2c15
+GLOBL cdefPerm16<>(SB), RODATA|NOPTR, $64
+
+DATA cdefEndPerm4<>+0(SB)/8, $0x0e0d0a0906050201
+DATA cdefEndPerm4<>+8(SB)/8, $0x1e1d1a1916151211
+DATA cdefEndPerm4<>+16(SB)/8, $0x2e2d2a2926252221
+DATA cdefEndPerm4<>+24(SB)/8, $0x3e3d3a3936353231
+GLOBL cdefEndPerm4<>(SB), RODATA|NOPTR, $32
+
+DATA cdefEdgeMask16<>+0(SB)/8, $0xff00ff11ff88ff99
+DATA cdefEdgeMask16<>+8(SB)/8, $0x00ff11ff88ff99ff
+DATA cdefEdgeMask16<>+16(SB)/8, $0x0000111188889999
+GLOBL cdefEdgeMask16<>(SB), RODATA|NOPTR, $24
+
+DATA cdefPriTap16<>+0(SB)/8, $0x0030003000200040
+GLOBL cdefPriTap16<>(SB), RODATA|NOPTR, $8
+
+DATA cdefDirs16<>+0(SB)/8, $0x000f000800100008
+DATA cdefDirs16<>+8(SB)/8, $0xfffa0001fff2fff9
+DATA cdefDirs16<>+16(SB)/8, $0x000a000100020001
+DATA cdefDirs16<>+24(SB)/8, $0x0011000800120009
+DATA cdefDirs16<>+32(SB)/8, $0x000f000800100008
+DATA cdefDirs16<>+40(SB)/8, $0xfffa0001fff2fff9
+GLOBL cdefDirs16<>(SB), RODATA|NOPTR, $48
+
+DATA cdefSecTap16<>+0(SB)/8, $0x0010002000100020
+GLOBL cdefSecTap16<>(SB), RODATA|NOPTR, $8
+
+DATA cdefBias16<>+0(SB)/4, $268435568
+GLOBL cdefBias16<>(SB), RODATA|NOPTR, $4
+
+DATA cdefEdgeFill16<>+0(SB)/4, $0xc000c000
+GLOBL cdefEdgeFill16<>(SB), RODATA|NOPTR, $4
+
+#define CONSTRAIN16(P)              \
+	VPSUBW   Z3, P, Z10;        \
+	VPABSW   Z10, Z10;          \
+	VPCMPGTW P, Z3, K1;         \
+	VPSRLVW  Z14, Z10, Z11;     \
+	VPSUBUSW Z11, Z13, Z11;     \
+	VPMINSW  Z11, Z10, Z10;     \
+	VPSUBW   Z10, Z12, K1, Z10; \
+	VPDPWSSD Z15, Z10, Z0
+
+#define TAPPAIR16            \
+	VPADDW   Z9, Z5, Z8; \
+	VPERMI2W Z2, Z1, Z8; \
+	VPSUBW   Z9, Z5, Z9; \
+	VPERMI2W Z2, Z1, Z9; \
+	CONSTRAIN16(Z8);     \
+	CONSTRAIN16(Z9)
+
+#define CLIPTAPS16           \
+	VPMINUW Z8, Z6, Z6;  \
+	VPMAXSW Z8, Z7, Z7;  \
+	VPMINUW Z9, Z6, Z6;  \
+	VPMAXSW Z9, Z7, Z7
+
+#define SECPARAMS16                       \
+	VPBROADCASTW R13, Z13;            \
+	MOVLQSX      ZSECSHR, R13;        \
+	VPBROADCASTW R13, Z14;            \
+	VPBROADCASTD cdefSecTap16<>(SB), Z15; \
+	LEAQ         cdefDirs16<>(SB), R14
+
+// func cdef4x4_16AVX512(dst *uint16, stride int, left *uint16, top *uint16, bot *uint16, p *cdefZParams)
+TEXT ·cdef4x4_16AVX512(SB), NOSPLIT, $0-48
+	MOVQ dst+0(FP), DI
+	MOVQ stride+8(FP), DX
+	MOVQ left+16(FP), R8
+	MOVQ top+24(FP), R9
+	MOVQ bot+32(FP), R10
+	MOVQ p+40(FP), R11
+	SHLQ $1, DX
+
+	VMOVDQU      (DI), X3
+	VINSERTI32X4 $1, (DI)(DX*1), Y3, Y3
+	VMOVDQU      (R8), X2
+	LEAQ         (DI)(DX*2), BX
+	VINSERTI32X4 $2, (BX), Z3, Z3
+	VMOVDQU32    cdefPerm16<>(SB), Z5
+	VINSERTI32X4 $3, (BX)(DX*1), Z3, Z3
+	VPERMT2D     Z3, Z5, Z2
+	VINSERTI32X4 $0, -4(R9), Z2, Z1
+	VINSERTI32X4 $1, -4(R9)(DX*1), Z1, Z1
+	MOVLQSX      ZEDGE, AX
+	VPUNPCKLWD   Z3, Z3, Z3
+	VPSRLW       $8, Z5, Z5
+	VPBROADCASTD cdefBias16<>(SB), Z0
+	VPXORD       Z12, Z12, Z12
+	CMPQ         AX, $15
+	JNE          zw4maskedges
+	VINSERTI32X4 $2, -4(R10), Z2, Z2
+	VINSERTI32X4 $3, -4(R10)(DX*1), Z2, Z2
+
+zw4main:
+	MOVLQSX ZPRI, R13
+	TESTQ   R13, R13
+	JZ      zw4seconly
+	VPBROADCASTW R13, Z13
+	MOVLQSX      ZPRISHR, R13
+	VPBROADCASTW R13, Z14
+	MOVLQSX      ZPRITAP, R13
+	LEAQ         cdefPriTap16<>(SB), R14
+	VPBROADCASTD (R14)(R13*1), Z15
+	MOVLQSX      ZDIRPRI, R13
+	LEAQ         cdefDirs16<>(SB), R14
+	VPBROADCASTD (R14)(R13*1), Z9
+	TAPPAIR16
+	MOVLQSX ZSEC, R13
+	TESTQ   R13, R13
+	JZ      zw4endnoclip
+	VPMINUW Z8, Z3, Z6
+	VPMAXSW Z8, Z3, Z7
+	VPMINUW Z9, Z6, Z6
+	VPMAXSW Z9, Z7, Z7
+	SECPARAMS16
+	MOVLQSX      ZDIRSEC0, R13
+	VPBROADCASTD (R14)(R13*1), Z9
+	TAPPAIR16
+	CLIPTAPS16
+	MOVLQSX      ZDIRSEC1, R13
+	LEAQ         cdefDirs16<>(SB), R14
+	VPBROADCASTD (R14)(R13*1), Z9
+	TAPPAIR16
+	CLIPTAPS16
+	JMP     zw4endclip
+
+zw4seconly:
+	MOVLQSX ZSEC, R13
+	SECPARAMS16
+	MOVLQSX      ZDIRSEC0, R13
+	VPBROADCASTD (R14)(R13*1), Z9
+	TAPPAIR16
+	MOVLQSX      ZDIRSEC1, R13
+	LEAQ         cdefDirs16<>(SB), R14
+	VPBROADCASTD (R14)(R13*1), Z9
+	TAPPAIR16
+	JMP     zw4endnoclip
+
+zw4maskedges:
+	VPBROADCASTD cdefEdgeFill16<>(SB), Z6
+	LEAQ         cdefEdgeMask16<>(SB), R14
+	TESTQ        $8, AX
+	JZ           zw4nobottom
+	VINSERTI32X4 $2, -4(R10), Z2, Z2
+	VINSERTI32X4 $3, -4(R10)(DX*1), Z2, Z2
+	KMOVW        -8(R14)(AX*2), K1
+	JMP          zw4maskmain
+
+zw4nobottom:
+	KMOVW 8(R14)(AX*2), K1
+
+zw4maskmain:
+	ORQ       $4, AX
+	VMOVDQU32 Z6, K1, Z1
+	KMOVW     -8(R14)(AX*2), K1
+	VMOVDQU32 Z6, K1, Z2
+	JMP       zw4main
+
+zw4endclip:
+	VPSRLDQ $2, Z6, Z8
+	VPSHLDD $8, Z0, Z3, Z3
+	VPSRLDQ $2, Z7, Z9
+	VPADDD  Z3, Z0, Z0
+	VPMINUW Z8, Z6, Z6
+	VPSRLDQ $1, Z0, Z0
+	VPMAXSW Z9, Z7, Z7
+	VPMAXSW Z6, Z0, Z0
+	VPMINSW Z7, Z0, Z0
+	VPMOVDW Z0, Y0
+	JMP     zw4end
+
+zw4endnoclip:
+	VMOVDQU8 cdefEndPerm4<>(SB), Y1
+	VPSHLDD  $8, Z0, Z3, Z3
+	VPADDD   Z3, Z0, Z0
+	VPERMB   Z0, Z1, Z0
+
+zw4end:
+	VMOVQ         X0, (DI)
+	VPEXTRQ       $1, X0, (DI)(DX*1)
+	VEXTRACTI32X4 $1, Y0, X0
+	VMOVQ         X0, (BX)
+	VPEXTRQ       $1, X0, (BX)(DX*1)
+	VZEROUPPER
+	RET
