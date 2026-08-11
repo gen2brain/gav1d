@@ -152,3 +152,6 @@ func ipredZ18AVX2(dst []uint8, dstOff, stride int, tlIn []uint8, tlInOff,
 			top[topOff+maxBaseX])
 	}
 }
+
+//go:noescape
+func edgeFilter8AVX2(out *uint8, in *uint8, n int, k *[5]uint8)

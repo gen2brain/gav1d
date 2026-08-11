@@ -401,3 +401,44 @@ func TestIpred(t *testing.T) {
 
 	t.Logf("%d cases", cases)
 }
+
+func TestEdgeFilterAsm(t *testing.T) {
+	_ = dsp8()
+	if edgeFilter8Asm == nil {
+		t.Skip("no kernel")
+	}
+
+	cases := 0
+	for _, k := range filterEdgeKernel {
+		for n := 1; n <= 80; n++ {
+			in := make([]uint8, n+8)
+			for i := range in {
+				in[i] = uint8(rowSeed(n, 1, i))
+			}
+			got := make([]uint8, n+16)
+			want := make([]uint8, n+16)
+			for i := range got {
+				got[i] = uint8(rowSeed(n, 2, i))
+				want[i] = got[i]
+			}
+
+			filterEdgeRun(got, 4, in, 0, n, &k)
+			for i := range n {
+				s := 0
+				for j := range 5 {
+					s += int(in[i+j]) * int(k[j])
+				}
+				want[4+i] = uint8((s + 8) >> 4)
+			}
+
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("k=%v n=%d: [%d] = %d, want %d", k, n, i, got[i], want[i])
+				}
+			}
+			cases++
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}

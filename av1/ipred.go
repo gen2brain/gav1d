@@ -323,7 +323,32 @@ var filterEdgeKernel = [3][5]uint8{
 	{2, 4, 4, 4, 2},
 }
 
+var (
+	edgeFilter8Asm  func(out *uint8, in *uint8, n int, k *[5]uint8)
+	edgeFilter16Asm func(out *uint16, in *uint16, n int, k *[5]uint8)
+)
+
 func filterEdgeRun[P pixel](out []P, outOff int, in []P, inOff, n int, k *[5]uint8) {
+	var z P
+	if n16 := n &^ 15; n16 > 0 {
+		done := false
+		if unsafe.Sizeof(z) == 1 && edgeFilter8Asm != nil {
+			edgeFilter8Asm((*uint8)(unsafe.Pointer(&out[outOff])),
+				(*uint8)(unsafe.Pointer(&in[inOff])), n16, k)
+			done = true
+		} else if unsafe.Sizeof(z) == 2 && edgeFilter16Asm != nil {
+			edgeFilter16Asm((*uint16)(unsafe.Pointer(&out[outOff])),
+				(*uint16)(unsafe.Pointer(&in[inOff])), n16, k)
+			done = true
+		}
+		if done {
+			if n -= n16; n == 0 {
+				return
+			}
+			outOff, inOff = outOff+n16, inOff+n16
+		}
+	}
+
 	for i := range n {
 		s := int(in[inOff+i])*int(k[0]) + int(in[inOff+i+1])*int(k[1]) +
 			int(in[inOff+i+2])*int(k[2]) + int(in[inOff+i+3])*int(k[3]) +
