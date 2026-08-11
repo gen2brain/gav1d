@@ -18,7 +18,15 @@ func itxClipVec(tmp []int32, rnd int32, shift int, lo, hi int32) {
 	itxClipGo(tmp[len(tmp)&^7:], rnd, shift, lo, hi)
 }
 
+//go:noescape
+func itxAdd8AVX512(dst *uint8, stride int, tmp *int32, w, h, ts int, bitdepthMax int32)
+
 func itxAdd8Vec(dst []uint8, dstOff, stride int, tmp []int32, w, h, ts int, bitdepthMax int32) {
+	if hasAVX512 && w >= 16 {
+		itxAdd8AVX512(&dst[dstOff], stride, &tmp[0], w, h, ts, bitdepthMax)
+
+		return
+	}
 	itxAdd8AVX2(&dst[dstOff], stride, &tmp[0], w, h, ts, bitdepthMax)
 }
 

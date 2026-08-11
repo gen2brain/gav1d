@@ -666,3 +666,45 @@ rownext16:
 	JNZ  rowloop16
 	VZEROUPPER
 	RET
+
+// The residual rows are contiguous, so sixteen pixels widen in one load and
+// VPMOVUSDB packs them back in one store.
+#define ADDROWZ(PX)          \
+	VMOVDQU32 (SI), Z0;  \
+	VPADDD    Z5, Z0, Z0; \
+	VPSRAD    $4, Z0, Z0; \
+	VPADDD    PX, Z0, Z0; \
+	VPMAXSD   Z6, Z0, Z0; \
+	VPMINSD   Z7, Z0, Z0
+
+// func itxAdd8AVX512(dst *uint8, stride int, tmp *int32, w, h, ts int, bitdepthMax int32)
+TEXT ·itxAdd8AVX512(SB), NOSPLIT, $0-52
+	MOVQ         dst+0(FP), DI
+	MOVQ         stride+8(FP), DX
+	MOVQ         tmp+16(FP), SI
+	MOVQ         w+24(FP), BX
+	MOVQ         h+32(FP), CX
+	MOVL         bitdepthMax+48(FP), AX
+	VPBROADCASTD AX, Z7
+	VPXORD       Z6, Z6, Z6
+	MOVL         $8, AX
+	VPBROADCASTD AX, Z5
+
+rowsz:
+	XORQ R8, R8
+
+colsz:
+	VPMOVZXBD (DI)(R8*1), Z1
+	ADDROWZ(Z1)
+	VPMOVUSDB Z0, (DI)(R8*1)
+	ADDQ      $64, SI
+	ADDQ      $16, R8
+	CMPQ      R8, BX
+	JLT       colsz
+
+	ADDQ DX, DI
+	DECQ CX
+	JNZ  rowsz
+
+	VZEROUPPER
+	RET
