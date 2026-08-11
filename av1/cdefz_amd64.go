@@ -15,8 +15,8 @@ type cdefZParams struct {
 //go:noescape
 func cdef4x4AVX512(dst *uint8, stride int, left *uint8, top *uint8, bot *uint8, p *cdefZParams)
 
-func cdefZParamsFor(priStrength, secStrength, dir, damping, edges, bitdepthMin8 int) cdefZParams {
-	p := cdefZParams{
+func cdefZParamsFor(p *cdefZParams, priStrength, secStrength, dir, damping, edges, bitdepthMin8 int) {
+	*p = cdefZParams{
 		pri:     int32(priStrength),
 		sec:     int32(secStrength),
 		dirPri:  int32(dir+2) * 4,
@@ -31,8 +31,6 @@ func cdefZParamsFor(priStrength, secStrength, dir, damping, edges, bitdepthMin8 
 	if secStrength != 0 {
 		p.secShr = int32(damping - ulog2(uint32(secStrength)))
 	}
-
-	return p
 }
 
 //go:noescape
