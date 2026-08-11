@@ -7,6 +7,10 @@
 // nothing has to be transposed. There are enough vector registers to hold
 // every tap, so the filter itself touches no memory.
 
+#define VLEW VLE16V
+#define VSEW VSE16V
+#define SGN  15
+
 #define E      0(X11)
 #define I      4(X11)
 #define H      8(X11)
@@ -38,11 +42,11 @@
 
 #define STOREO(OFF, VS)       \
 	ADD    $OFF, X13, X6; \
-	VSE32V VS, (X6)
+	VSEW VS, (X6)
 
 #define LOADS(OFF, VD)        \
 	ADD    $OFF, X12, X6; \
-	VLE32V (X6), VD
+	VLEW (X6), VD
 
 // GTA leaves set the lanes where |A-B| exceeds THRV. The sign bit of the
 // difference is the mask, so no mask register is involved.
@@ -51,7 +55,7 @@
 	VRSUBVX X0, T, V24; \
 	VMAXVV  V24, T, T;  \
 	VSUBVV  T, THRV, T; \
-	VSRAVI  $31, T, T
+	VSRAVI  $SGN, T, T
 
 #define ACCGT(A, B, THRV, T, M) \
 	GTA(A, B, THRV, T);     \
@@ -81,9 +85,9 @@
 	VADDVV V25, V18, V18;           \
 	VSRAVI $3, V18, V18;            \
 	ADD    $DST, X13, X6;           \
-	VLE32V (X6), V19;               \
+	VLEW (X6), V19;               \
 	SEL(V17, V19, V18, V20);        \
-	VSE32V V20, (X6)
+	VSEW V20, (X6)
 
 #define WIDE6(A, B, C, D, F, DST) \
 	VADDVV B, A, V18;         \
@@ -96,9 +100,9 @@
 	VADDVV V25, V18, V18;     \
 	VSRAVI $3, V18, V18;      \
 	ADD    $DST, X13, X6;     \
-	VLE32V (X6), V19;         \
+	VLEW (X6), V19;         \
 	SEL(V17, V19, V18, V20);  \
-	VSE32V V20, (X6)
+	VSEW V20, (X6)
 
 // TAP14 is one output of the fourteen tap filter: the sliding window plus the
 // middle three samples again, then the window moves on.
@@ -109,9 +113,9 @@
 	VADDVV V25, V18, V18;           \
 	VSRAVI $4, V18, V18;            \
 	ADD    $DST, X13, X6;           \
-	VLE32V (X6), V19;               \
+	VLEW (X6), V19;               \
 	SEL(V17, V19, V18, V20);        \
-	VSE32V V20, (X6);               \
+	VSEW V20, (X6);               \
 	VADDVV ADDV, V26, V26;          \
 	VSUBVV SUBV, V26, V26
 
@@ -122,9 +126,9 @@
 	VADDVV V25, V18, V18;     \
 	VSRAVI $4, V18, V18;      \
 	ADD    $DST, X13, X6;     \
-	VLE32V (X6), V19;         \
+	VLEW (X6), V19;         \
 	SEL(V17, V19, V18, V20);  \
-	VSE32V V20, (X6)
+	VSEW V20, (X6)
 
 #define ALLSET(M, LABEL)     \
 	VREDANDVS M, M, V24; \
@@ -169,7 +173,7 @@
 	VADDVV  V19, V18, V18; \
 	BCAST(E, V23); \
 	VSUBVV  V18, V23, V18; \
-	VSRAVI  $31, V18, V18; \
+	VSRAVI  $SGN, V18, V18; \
 	VORVV   V18, V15, V15; \
 	MOV  $4, X6; \
 	BGE  X6, X18, fmdone; \
@@ -292,18 +296,19 @@
 	MOV $-6, X19; \
 	MOV $12, X16;
 
-// func lpf8RVV(dst *uint8, stridea, strideb int, p *lpfParams)
-TEXT ·lpf8RVV(SB), NOSPLIT, $736-32
+// func lpf8RVV(dst *uint8, stridea, strideb int, p *lpfParams, n int)
+TEXT ·lpf8RVV(SB), NOSPLIT, $688-40
 	MOV  dst+0(FP), X10
 	MOV  stridea+8(FP), X14
 	MOV  strideb+16(FP), X15
 	MOV  p+24(FP), X11
-	ADD  $216, X2, X12
-	ADD  $536, X2, X13
-	ADD  $680, X2, X23
+	MOV  n+32(FP), X24
+	ADD  $128, X2, X12
+	ADD  $448, X2, X13
+	ADD  $568, X2, X23
 
-	MOV     $4, X17
-	VSETVLI X17, E32, M1, TA, MA, X7
+	MOV     $8, X17
+	VSETVLI X17, E16, M1, TA, MA, X7
 
 	MOVW WD, X18
 	MOV  $-2, X19
@@ -322,46 +327,76 @@ TEXT ·lpf8RVV(SB), NOSPLIT, $736-32
 	MOV  $14, X16
 
 spanset:
-	SLLI $2, X19, X6
+	SLLI $3, X19, X6
 	ADD  X23, X6, X22
-	ADD  $28, X22, X22
+	ADD  $56, X22, X22
 	MOV  $1, X6
 	BNE  X6, X14, gatherrows
 
-	// The four lines are contiguous, so one strided load takes every tap.
+	// The lines are contiguous, so one strided load takes every tap. Their
+	// elements are only four byte aligned, so eight lines take two.
 	MUL     X15, X19, X8
 	ADD     X10, X8, X8
 	VSETVLI X16, E32, M2, TA, MA, X7
 	VLSE32V (X8), X15, V8
-	VSE32V  V8, (X22)
+	MOV     $8, X6
+	VSSE32V V8, X6, (X22)
+	ADD     $4, X22, X9
+	MOV     $8, X20
+	BNE     X20, X24, gatherdup
+	ADD     $4, X8, X8
+	VLSE32V (X8), X15, V8
+
+gatherdup:
+	VSSE32V V8, X6, (X9)
 	JMP     widen
 
 gatherrows:
-	// The taps run along each line instead, so the four rows are read whole
-	// and the segment store interleaves them into tap order.
-	ADD       X19, X10, X8
-	VSETVLI   X16, E8, M1, TA, MA, X7
-	VLE8V     (X8), V8
-	ADD       X14, X8, X8
-	VLE8V     (X8), V9
-	ADD       X14, X8, X8
-	VLE8V     (X8), V10
-	ADD       X14, X8, X8
-	VLE8V     (X8), V11
-	VSSEG4E8V V8, (X22)
+	// The taps run along each line instead, so the rows are read whole and
+	// the segment store interleaves them into tap order.
+	ADD     X19, X10, X8
+	VSETVLI X16, E8, M1, TA, MA, X7
+	VLE8V   (X8), V8
+	ADD     X14, X8, X8
+	VLE8V   (X8), V9
+	ADD     X14, X8, X8
+	VLE8V   (X8), V10
+	ADD     X14, X8, X8
+	VLE8V   (X8), V11
+	MOV     $8, X6
+	BNE     X6, X24, gatherrows4
+
+	ADD   X14, X8, X8
+	VLE8V (X8), V12
+	ADD   X14, X8, X8
+	VLE8V (X8), V13
+	ADD   X14, X8, X8
+	VLE8V (X8), V14
+	ADD   X14, X8, X8
+	VLE8V (X8), V15
+	JMP   rowstore
+
+gatherrows4:
+	VMVVV V8, V12
+	VMVVV V9, V13
+	VMVVV V10, V14
+	VMVVV V11, V15
+
+rowstore:
+	VSSEG8E8V V8, (X22)
 
 widen:
-	SLLI     $2, X16, X20
-	VSETVLI  X20, E8, M2, TA, MA, X7
+	SLLI     $3, X16, X20
+	VSETVLI  X20, E8, M4, TA, MA, X7
 	VLE8V    (X22), V8
-	VSETVLI  X20, E32, M8, TA, MA, X7
-	VZEXTVF4 V8, V16
+	VSETVLI  X20, E16, M8, TA, MA, X7
+	VZEXTVF2 V8, V16
 	SLLI     $4, X19, X6
 	ADD      X12, X6, X9
-	VSE32V   V16, (X9)
+	VSE16V   V16, (X9)
 	ADD      $320, X9, X6
-	VSE32V   V16, (X6)
-	VSETVLI  X17, E32, M1, TA, MA, X7
+	VSE16V   V16, (X6)
+	VSETVLI  X17, E16, M1, TA, MA, X7
 
 	LOADS(-32, P1)
 	LOADS(-16, P0)
@@ -390,17 +425,15 @@ taps:
 scatter:
 	SLLI    $4, X19, X6
 	ADD     X13, X6, X9
-	SLLI    $2, X16, X20
-	VSETVLI X20, E32, M8, TA, MA, X7
-	VLE32V  (X9), V16
-	VSETVLI X20, E16, M4, TA, MA, X7
+	SLLI    $3, X16, X20
+	VSETVLI X20, E16, M8, TA, MA, X7
+	VLE16V  (X9), V16
+	VSETVLI X20, E8, M4, TA, MA, X7
 	VNSRLWI $0, V16, V8
-	VSETVLI X20, E8, M2, TA, MA, X7
-	VNSRLWI $0, V8, V24
-	SLLI    $2, X19, X6
+	SLLI    $3, X19, X6
 	ADD     X23, X6, X22
-	ADD     $28, X22, X22
-	VSE8V   V24, (X22)
+	ADD     $56, X22, X22
+	VSE8V   V8, (X22)
 
 	MOV  $1, X6
 	BNE  X6, X14, scatterrows
@@ -408,13 +441,20 @@ scatter:
 	MUL     X15, X19, X8
 	ADD     X10, X8, X8
 	VSETVLI X16, E32, M2, TA, MA, X7
-	VLE32V  (X22), V8
+	MOV     $8, X6
+	VLSE32V (X22), X6, V8
+	VSSE32V V8, X15, (X8)
+	MOV     $8, X20
+	BNE     X20, X24, done
+	ADD     $4, X22, X9
+	VLSE32V (X9), X6, V8
+	ADD     $4, X8, X8
 	VSSE32V V8, X15, (X8)
 	RET
 
 scatterrows:
 	VSETVLI   X16, E8, M1, TA, MA, X7
-	VLSEG4E8V (X22), V8
+	VLSEG8E8V (X22), V8
 	ADD       X19, X10, X8
 	VSE8V     V8, (X8)
 	ADD       X14, X8, X8
@@ -423,9 +463,27 @@ scatterrows:
 	VSE8V     V10, (X8)
 	ADD       X14, X8, X8
 	VSE8V     V11, (X8)
+	MOV       $8, X6
+	BNE       X6, X24, done
+
+	ADD   X14, X8, X8
+	VSE8V V12, (X8)
+	ADD   X14, X8, X8
+	VSE8V V13, (X8)
+	ADD   X14, X8, X8
+	VSE8V V14, (X8)
+	ADD   X14, X8, X8
+	VSE8V V15, (X8)
 
 done:
 	RET
+
+#undef VLEW
+#undef VSEW
+#undef SGN
+#define VLEW VLE32V
+#define VSEW VSE32V
+#define SGN  31
 
 // func lpf16RVV(dst *uint16, stridea, strideb int, p *lpfParams)
 TEXT ·lpf16RVV(SB), NOSPLIT, $736-32
