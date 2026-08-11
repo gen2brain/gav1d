@@ -33,8 +33,14 @@ func cdefFilterBlockAVX2(tmp []int16, dst []uint8, dstOff, dstStride int,
 	const tmpStride = 12
 	tmpOff := 2*tmpStride + 2
 
-	if hasAVX512 && w == 4 && h == 4 && bitdepthMax == 255 {
+	if hasAVX512 && bitdepthMax == 255 && (w == 4 && h == 4 || w == 8 && h == 8) {
 		zp := cdefZParamsFor(priStrength, secStrength, dir, damping, edges)
+		if w == 8 {
+			cdef8x8AVX512(&dst[dstOff], dstStride, &left[leftOff], &top[topOff],
+				&bottom[bottomOff], &zp)
+
+			return
+		}
 		cdef4x4AVX512(&dst[dstOff], dstStride, &left[leftOff], &top[topOff],
 			&bottom[bottomOff], &zp)
 

@@ -34,3 +34,6 @@ func cdefZParamsFor(priStrength, secStrength, dir, damping, edges int) cdefZPara
 
 	return p
 }
+
+//go:noescape
+func cdef8x8AVX512(dst *uint8, stride int, left *uint8, top *uint8, bot *uint8, p *cdefZParams)

@@ -592,14 +592,21 @@ TEXT ·cdef4x4AVX512(SB), NOSPLIT, $0-48
 	VINSERTI32X4 $3, -4(R10)(DX*1), Z0, Z0
 
 zmain:
-	VMOVDQU8     cdefLut4<>(SB), Z5
+	VMOVDQU8 cdefLut4<>(SB), Z5
+	VPERMI2B Z1, Z0, Z5
+	MOVLQSX  ZEDGE, BX
+	CALL     cdefquad<>(SB)
+	VZEROUPPER
+	RET
+
+// cdefquad filters one four by four quadrant. Z5 is its lut, BX its edges.
+TEXT cdefquad<>(SB), NOSPLIT, $0
 	VMOVDQU8     cdefPxIdx<>(SB), Z3
-	VPERMI2B     Z1, Z0, Z5
 	VPBROADCASTD cdefBias<>(SB), Z0
 	VPXORD       Z7, Z7, Z7
 	VPERMB       Z5, Z3, Z6
 
-	CMPQ R13, $15
+	CMPQ BX, $15
 	JNE  zmaskedges
 
 	MOVLQSX ZPRI, R14
@@ -628,7 +635,7 @@ zseconly:
 
 zmaskedges:
 	LEAQ         cdefEdgeMask<>(SB), R14
-	VPBROADCASTQ (R14)(R13*8), Z8
+	VPBROADCASTQ (R14)(BX*8), Z8
 	MOVLQSX      ZPRI, R14
 	TESTQ        R14, R14
 	JZ           zmaskseconly
@@ -686,5 +693,89 @@ zend:
 	VPEXTRD  $1, X0, (DI)(DX*1)
 	VPEXTRD  $2, X0, (DI)(DX*2)
 	VPEXTRD  $3, X0, (DI)(R12*1)
+	RET
+
+DATA cdefLut8<>+0(SB)/8, $0x2726252423222120
+DATA cdefLut8<>+8(SB)/8, $0x3736353433323130
+DATA cdefLut8<>+16(SB)/8, $0x2b2a292827262524
+DATA cdefLut8<>+24(SB)/8, $0x3b3a393837363534
+DATA cdefLut8<>+32(SB)/8, $0x0504030201000d0c
+DATA cdefLut8<>+40(SB)/8, $0x1514131211100f0e
+DATA cdefLut8<>+48(SB)/8, $0x0908070605040302
+DATA cdefLut8<>+56(SB)/8, $0x1918171615141312
+DATA cdefLut8<>+64(SB)/8, $0x2524232221201d1c
+DATA cdefLut8<>+72(SB)/8, $0x3534333231301f1e
+DATA cdefLut8<>+80(SB)/8, $0x2928272625242322
+DATA cdefLut8<>+88(SB)/8, $0x3938373635343332
+GLOBL cdefLut8<>(SB), RODATA|NOPTR, $96
+
+// func cdef8x8AVX512(dst *uint8, stride int, left *uint8, top *uint8, bot *uint8, p *cdefZParams)
+TEXT ·cdef8x8AVX512(SB), NOSPLIT, $0-48
+	MOVQ dst+0(FP), DI
+	MOVQ stride+8(FP), DX
+	MOVQ left+16(FP), R8
+	MOVQ top+24(FP), R9
+	MOVQ bot+32(FP), R10
+	MOVQ p+40(FP), R11
+	LEAQ (DX)(DX*2), R12
+	LEAQ (DI)(DX*4), R15
+
+	VMOVDQU32    (DI), X13
+	VPINSRD      $3, (R8), X13, X13
+	VINSERTI128  $1, (DI)(DX*1), Y13, Y13
+	VMOVDQU32    (DI)(DX*2), X14
+	VINSERTI32X4 $2, -2(R9), Z13, Z13
+	VPINSRD      $3, 4(R8), X14, X14
+	VINSERTI32X4 $3, -2(R9)(DX*1), Z13, Z13
+	VINSERTI128  $1, (DI)(R12*1), Y14, Y14
+	VPBROADCASTD 8(R8), Y15
+	VPBLENDD     $0x80, Y15, Y14, Y14
+	VMOVDQU32    (R15)(DX*2), X15
+	VINSERTI32X4 $2, (R15), Z14, Z14
+	VPINSRD      $3, 12(R8), X15, X15
+	VINSERTI32X4 $3, (R15)(DX*1), Z14, Z14
+	VINSERTI128  $1, (R15)(R12*1), Y15, Y15
+	MOVLQSX      ZEDGE, BX
+	TESTQ        $8, BX
+	JZ           z8main
+	VINSERTI32X4 $2, -2(R10), Z15, Z15
+	VINSERTI32X4 $3, -2(R10)(DX*1), Z15, Z15
+
+z8main:
+	VMOVDQU8   cdefLut8<>(SB), Z22
+	VMOVDQU8   cdefLut8<>+32(SB), Z23
+	VPERMB     Z13, Z22, Z13
+	VPERMB     Z14, Z23, Z14
+	VPERMB     Z15, Z22, Z15
+	VSHUFI32X4 $0x88, Z14, Z13, Z28
+	VSHUFI32X4 $0xDD, Z14, Z13, Z29
+	VSHUFI32X4 $0x28, Z15, Z14, Z30
+	VSHUFI32X4 $0x7D, Z15, Z14, Z31
+
+	MOVLQSX ZEDGE, R15
+	VMOVDQU8 Z28, Z5
+	MOVQ    R15, BX
+	ORQ     $0xA, BX
+	CALL    cdefquad<>(SB)
+
+	ADDQ    $4, DI
+	VMOVDQU8 Z29, Z5
+	MOVQ    R15, BX
+	ORQ     $0x9, BX
+	CALL    cdefquad<>(SB)
+
+	LEAQ    (DI)(DX*4), DI
+	SUBQ    $4, DI
+	VMOVDQU8 Z30, Z5
+	MOVQ    R15, BX
+	ORQ     $0x6, BX
+	CALL    cdefquad<>(SB)
+
+	ADDQ    $4, DI
+	VMOVDQU8 Z31, Z5
+	MOVQ    R15, BX
+	ORQ     $0x5, BX
+	CALL    cdefquad<>(SB)
+
 	VZEROUPPER
 	RET
