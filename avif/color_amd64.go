@@ -105,3 +105,33 @@ func convertRow16AVX2(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
 
 	convertRow16Go(dst, yf, u0, u1, v0, v1, a, n, c)
 }
+
+//go:noescape
+func normRow8AVX2(dst *float32, src *uint8, n int, bias, rng float32)
+
+//go:noescape
+func normRow16AVX2(dst *float32, src *uint8, n int, maxCh uint32, bias, rng float32)
+
+func normRow(dst []float32, src []uint8, bias, rng float32) {
+	if n8 := len(dst) &^ 7; hasAVX2 && n8 > 0 {
+		normRow8AVX2(&dst[0], &src[0], n8, bias, rng)
+		if n8 == len(dst) {
+			return
+		}
+		dst, src = dst[n8:], src[n8:]
+	}
+
+	normRowGo(dst, src, bias, rng)
+}
+
+func normRow16(dst []float32, src []uint8, maxCh uint16, bias, rng float32) {
+	if n8 := len(dst) &^ 7; hasAVX2 && n8 > 0 {
+		normRow16AVX2(&dst[0], &src[0], n8, uint32(maxCh), bias, rng)
+		if n8 == len(dst) {
+			return
+		}
+		dst, src = dst[n8:], src[2*n8:]
+	}
+
+	normRow16Go(dst, src, maxCh, bias, rng)
+}

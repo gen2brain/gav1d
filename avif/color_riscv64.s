@@ -227,3 +227,54 @@ loop16:
 	BNEZ X17, loop16
 
 	RET
+
+// func normRow8RVV(dst *float32, src *uint8, n int, bias, rng float32)
+TEXT ·normRow8RVV(SB), NOSPLIT, $0-32
+	MOV  dst+0(FP), X10
+	MOV  src+8(FP), X11
+	MOV  n+16(FP), X12
+	MOVF bias+24(FP), F0
+	MOVF rng+28(FP), F1
+
+loop8:
+	VSETVLI   X12, E32, M1, TA, MA, X13
+	VLE8V     (X11), V1
+	VZEXTVF4  V1, V2
+	VFCVTFXUV V2, V2
+	VFSUBVF   F0, V2, V2
+	VFDIVVF   F1, V2, V2
+	VSE32V    V2, (X10)
+	ADD       X13, X11
+	SLLI      $2, X13, X14
+	ADD       X14, X10
+	SUB       X13, X12
+	BNEZ      X12, loop8
+
+	RET
+
+// func normRow16RVV(dst *float32, src *uint8, n int, maxCh uint32, bias, rng float32)
+TEXT ·normRow16RVV(SB), NOSPLIT, $0-36
+	MOV  dst+0(FP), X10
+	MOV  src+8(FP), X11
+	MOV  n+16(FP), X12
+	MOV  maxCh+24(FP), X15
+	MOVF bias+28(FP), F0
+	MOVF rng+32(FP), F1
+
+loop16w:
+	VSETVLI   X12, E32, M1, TA, MA, X13
+	VLE16V    (X11), V1
+	VZEXTVF2  V1, V2
+	VMINUVX   X15, V2, V2
+	VFCVTFXUV V2, V2
+	VFSUBVF   F0, V2, V2
+	VFDIVVF   F1, V2, V2
+	VSE32V    V2, (X10)
+	SLLI      $1, X13, X14
+	ADD       X14, X11
+	SLLI      $2, X13, X14
+	ADD       X14, X10
+	SUB       X13, X12
+	BNEZ      X12, loop16w
+
+	RET

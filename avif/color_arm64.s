@@ -236,3 +236,62 @@ loop16:
 	CBNZ R7, loop16
 
 	RET
+
+#define UCVTF(Vd, Vn)      WORD $(0x6E21D800 | ((Vn) << 5) | (Vd))
+#define UMINH(Vd, Vn, Vm)  WORD $(0x6E606C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+
+// func normRow8NEON(dst *float32, src *uint8, n int, bias, rng float32)
+TEXT ·normRow8NEON(SB), NOSPLIT, $0-32
+	MOVD dst+0(FP), R0
+	MOVD src+8(FP), R1
+	MOVD n+16(FP), R2
+	MOVW bias+24(FP), R3
+	VDUP R3, V1.S4
+	MOVW rng+28(FP), R3
+	VDUP R3, V2.S4
+
+loop8:
+	VLD1.P  8(R1), [V0.B8]
+	VUSHLL  $0, V0.B8, V0.H8
+	VUSHLL  $0, V0.H4, V3.S4
+	VUSHLL2 $0, V0.H8, V4.S4
+	UCVTF(3, 3)
+	UCVTF(4, 4)
+	FSUB(3, 3, 1)
+	FSUB(4, 4, 1)
+	FDIV(3, 3, 2)
+	FDIV(4, 4, 2)
+	VST1.P  [V3.S4, V4.S4], 32(R0)
+	SUB     $8, R2
+	CBNZ    R2, loop8
+
+	RET
+
+// func normRow16NEON(dst *float32, src *uint8, n int, maxCh uint32, bias, rng float32)
+TEXT ·normRow16NEON(SB), NOSPLIT, $0-36
+	MOVD dst+0(FP), R0
+	MOVD src+8(FP), R1
+	MOVD n+16(FP), R2
+	MOVW maxCh+24(FP), R3
+	VDUP R3, V5.H8
+	MOVW bias+28(FP), R3
+	VDUP R3, V1.S4
+	MOVW rng+32(FP), R3
+	VDUP R3, V2.S4
+
+loop16w:
+	VLD1.P  16(R1), [V0.H8]
+	UMINH(0, 0, 5)
+	VUSHLL  $0, V0.H4, V3.S4
+	VUSHLL2 $0, V0.H8, V4.S4
+	UCVTF(3, 3)
+	UCVTF(4, 4)
+	FSUB(3, 3, 1)
+	FSUB(4, 4, 1)
+	FDIV(3, 3, 2)
+	FDIV(4, 4, 2)
+	VST1.P  [V3.S4, V4.S4], 32(R0)
+	SUB     $8, R2
+	CBNZ    R2, loop16w
+
+	RET

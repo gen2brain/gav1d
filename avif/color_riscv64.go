@@ -55,3 +55,21 @@ func convertRow16Vec(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
 
 	convertRow16Go(dst, yf, u0, u1, v0, v1, a, n, c)
 }
+
+//go:noescape
+func normRow8RVV(dst *float32, src *uint8, n int, bias, rng float32)
+
+//go:noescape
+func normRow16RVV(dst *float32, src *uint8, n int, maxCh uint32, bias, rng float32)
+
+func normRow(dst []float32, src []uint8, bias, rng float32) {
+	if len(dst) > 0 {
+		normRow8RVV(&dst[0], &src[0], len(dst), bias, rng)
+	}
+}
+
+func normRow16(dst []float32, src []uint8, maxCh uint16, bias, rng float32) {
+	if len(dst) > 0 {
+		normRow16RVV(&dst[0], &src[0], len(dst), uint32(maxCh), bias, rng)
+	}
+}

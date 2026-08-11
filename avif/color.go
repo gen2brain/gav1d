@@ -45,6 +45,8 @@ type colorState struct {
 	maxChannel int
 
 	kr, kg, kb       float32
+	biasY, rangeY    float32
+	biasUV, rangeUV  float32
 	tableY, tableUV  []float32
 	tw0, tw1, tw2    []float32
 	pixLUT           []uint16
@@ -130,6 +132,9 @@ func newColorState(pic *av1.Picture, ci ColorInfo, outDepth int) *colorState {
 	if !s.fullRange {
 		rangeUV = float32(int(224) << shift)
 	}
+
+	s.biasY, s.rangeY = biasY, rangeY
+	s.biasUV, s.rangeUV = biasUV, rangeUV
 
 	n := 1 << s.depth
 	s.tableY = make([]float32, n)

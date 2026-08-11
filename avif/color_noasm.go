@@ -17,3 +17,11 @@ func rowFn16(ssHor int) convertRow16 {
 
 	return convertRow16Go
 }
+
+func normRow(dst []float32, src []uint8, bias, rng float32) {
+	normRowGo(dst, src, bias, rng)
+}
+
+func normRow16(dst []float32, src []uint8, maxCh uint16, bias, rng float32) {
+	normRow16Go(dst, src, maxCh, bias, rng)
+}

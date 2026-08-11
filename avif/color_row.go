@@ -59,18 +59,19 @@ func (s *colorState) rowConsts() rowConsts {
 	}
 }
 
-// padUV normalizes one chroma row with its end samples replicated, which turns
-// the column clamp at the two edges into the same neighbour arithmetic as the
-// rest of the row.
-func padUV(dst []float32, tab []float32, src []byte, stride, y, uw int) []float32 {
-	row := src[y*stride : y*stride+uw]
-	for i, v := range row {
-		dst[i+1] = tab[v]
+func normRowGo(dst []float32, src []uint8, bias, rng float32) {
+	src = src[:len(dst)]
+	for i, v := range src {
+		dst[i] = (float32(v) - bias) / rng
 	}
-	dst[0] = dst[1]
-	dst[uw+1] = dst[uw]
+}
 
-	return dst
+func normRow16Go(dst []float32, src []uint8, maxCh uint16, bias, rng float32) {
+	src = src[: 2*len(dst) : 2*len(dst)]
+	for i := range dst {
+		v := min(binary.NativeEndian.Uint16(src[2*i:]), maxCh)
+		dst[i] = (float32(v) - bias) / rng
+	}
 }
 
 // convertRow444Go and convertRow16x444Go are the full chroma references. The
@@ -198,13 +199,10 @@ func (s *colorState) rowPlanes(pic *av1.Picture, y, w int) (u0, u1, v0, v1 []flo
 // padRow normalizes one chroma row at whatever depth the picture carries.
 func (s *colorState) padRow(dst []float32, src []byte, stride, y, uw int) []float32 {
 	if s.depth == 8 {
-		return padUV(dst, s.tableUV, src, stride, y, uw)
-	}
-
-	row := src[y*stride : y*stride+2*uw]
-	tab, maxCh := s.tableUV, uint16(s.maxChannel)
-	for i := range uw {
-		dst[i+1] = tab[min(binary.NativeEndian.Uint16(row[2*i:]), maxCh)]
+		normRow(dst[1:1+uw], src[y*stride:y*stride+uw], s.biasUV, s.rangeUV)
+	} else {
+		normRow16(dst[1:1+uw], src[y*stride:y*stride+2*uw],
+			uint16(s.maxChannel), s.biasUV, s.rangeUV)
 	}
 	dst[0] = dst[1]
 	dst[uw+1] = dst[uw]
@@ -214,19 +212,12 @@ func (s *colorState) padRow(dst []float32, src []byte, stride, y, uw int) []floa
 
 // lumaRow normalizes one luma row.
 func (s *colorState) lumaRow(pic *av1.Picture, y, w int) []float32 {
+	off := y * pic.Stride[0]
 	if s.depth == 8 {
-		row := pic.Data[0][y*pic.Stride[0] : y*pic.Stride[0]+w]
-		for i, v := range row {
-			s.yf[i] = s.tableY[v]
-		}
-
-		return s.yf
-	}
-
-	row := pic.Data[0][y*pic.Stride[0] : y*pic.Stride[0]+2*w]
-	tab, maxCh := s.tableY, uint16(s.maxChannel)
-	for i := range w {
-		s.yf[i] = tab[min(binary.NativeEndian.Uint16(row[2*i:]), maxCh)]
+		normRow(s.yf[:w], pic.Data[0][off:off+w], s.biasY, s.rangeY)
+	} else {
+		normRow16(s.yf[:w], pic.Data[0][off:off+2*w],
+			uint16(s.maxChannel), s.biasY, s.rangeY)
 	}
 
 	return s.yf

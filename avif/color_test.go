@@ -139,3 +139,52 @@ func TestConvertRow16Asm(t *testing.T) {
 
 	t.Logf("%d cases", cases)
 }
+
+// TestNormRowAsm checks the normalization kernels against the pure Go ones.
+func TestNormRowAsm(t *testing.T) {
+	cases := 0
+
+	for _, depth := range []int{8, 10, 12} {
+		maxCh := uint16(1<<depth - 1)
+		shift := depth - 8
+
+		for _, full := range []bool{false, true} {
+			biasY, rangeY := float32(0), float32(maxCh)
+			if !full {
+				biasY, rangeY = float32(int(16)<<shift), float32(int(219)<<shift)
+			}
+			biasUV, rangeUV := float32(int(1)<<(depth-1)), float32(maxCh)
+			if !full {
+				rangeUV = float32(int(224) << shift)
+			}
+
+			for _, p := range [][2]float32{{biasY, rangeY}, {biasUV, rangeUV}} {
+				for n := 1; n <= 40; n++ {
+					src := make([]uint8, 2*n)
+					for i := range src {
+						src[i] = uint8(rowGen(depth, n, i))
+					}
+
+					got, want := make([]float32, n), make([]float32, n)
+					if depth == 8 {
+						normRow(got, src, p[0], p[1])
+						normRowGo(want, src, p[0], p[1])
+					} else {
+						normRow16(got, src, maxCh, p[0], p[1])
+						normRow16Go(want, src, maxCh, p[0], p[1])
+					}
+
+					for i := range want {
+						if got[i] != want[i] {
+							t.Fatalf("depth=%d full=%v bias=%g rng=%g n=%d: [%d] = %v, want %v",
+								depth, full, p[0], p[1], n, i, got[i], want[i])
+						}
+					}
+					cases++
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}

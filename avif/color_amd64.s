@@ -200,3 +200,49 @@ TEXT ·convertRow16x8AVX2(SB), NOSPLIT, $0-72
 TEXT ·convertRow16x444AVX2(SB), NOSPLIT, $0-72
 	ROW16(CHROMA444, 32)
 	RET
+
+// func normRow8AVX2(dst *float32, src *uint8, n int, bias, rng float32)
+TEXT ·normRow8AVX2(SB), NOSPLIT, $0-32
+	MOVQ         dst+0(FP), DI
+	MOVQ         src+8(FP), SI
+	MOVQ         n+16(FP), DX
+	VBROADCASTSS bias+24(FP), Y1
+	VBROADCASTSS rng+28(FP), Y2
+
+loop8:
+	VPMOVZXBD (SI), Y0
+	VCVTDQ2PS Y0, Y0
+	VSUBPS    Y1, Y0, Y0
+	VDIVPS    Y2, Y0, Y0
+	VMOVUPS   Y0, (DI)
+	ADDQ      $8, SI
+	ADDQ      $32, DI
+	SUBQ      $8, DX
+	JNZ       loop8
+	VZEROUPPER
+	RET
+
+// func normRow16AVX2(dst *float32, src *uint8, n int, maxCh uint32, bias, rng float32)
+TEXT ·normRow16AVX2(SB), NOSPLIT, $0-36
+	MOVQ         dst+0(FP), DI
+	MOVQ         src+8(FP), SI
+	MOVQ         n+16(FP), DX
+	MOVL         maxCh+24(FP), AX
+	VMOVD        AX, X3
+	VPBROADCASTD X3, Y3
+	VBROADCASTSS bias+28(FP), Y1
+	VBROADCASTSS rng+32(FP), Y2
+
+loop16w:
+	VPMOVZXWD (SI), Y0
+	VPMINUD   Y3, Y0, Y0
+	VCVTDQ2PS Y0, Y0
+	VSUBPS    Y1, Y0, Y0
+	VDIVPS    Y2, Y0, Y0
+	VMOVUPS   Y0, (DI)
+	ADDQ      $16, SI
+	ADDQ      $32, DI
+	SUBQ      $8, DX
+	JNZ       loop16w
+	VZEROUPPER
+	RET
