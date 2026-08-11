@@ -8,11 +8,12 @@ import "unsafe"
 func mcPut8Asm(dst *uint8, dstStride int, src *uint8, srcStride int, w, h int)
 
 func mcPutFast[P pixel](dst []P, dstOff, dstStride int, src []P, srcOff, srcStride, w, h int) bool {
-	if unsafe.Sizeof(*new(P)) != 1 || h&1 != 0 {
+	if h&1 != 0 {
 		return false
 	}
-	mcPut8Asm((*uint8)(unsafe.Pointer(&dst[dstOff])), dstStride,
-		(*uint8)(unsafe.Pointer(&src[srcOff])), srcStride, w, h)
+	n := int(unsafe.Sizeof(*new(P)))
+	mcPut8Asm((*uint8)(unsafe.Pointer(&dst[dstOff])), dstStride*n,
+		(*uint8)(unsafe.Pointer(&src[srcOff])), srcStride*n, w*n, h)
 
 	return true
 }
