@@ -33,3 +33,7 @@ func (s *msacContext) symbolAdapt(cdf []uint16, nSymbols int) uint32 {
 
 	return s.symbolAdaptGo(cdf, nSymbols)
 }
+
+func (s *msacContext) symbolAdapt4(cdf *[4]uint16, nSymbols int) uint32 {
+	return msacSymbolAdaptRVV(s, &cdf[0], nSymbols)
+}

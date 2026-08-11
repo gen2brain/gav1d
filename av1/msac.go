@@ -148,17 +148,17 @@ func (s *msacContext) boolAdaptGo(cdf []uint16) uint32 {
 	return bit
 }
 
-func (s *msacContext) hiTok(cdf []uint16) uint32 {
-	tokBr := s.symbolAdapt(cdf, 3)
+func (s *msacContext) hiTok(cdf *[4]uint16) uint32 {
+	tokBr := s.symbolAdapt4(cdf, 3)
 	tok := 3 + tokBr
 	if tokBr == 3 {
-		tokBr = s.symbolAdapt(cdf, 3)
+		tokBr = s.symbolAdapt4(cdf, 3)
 		tok = 6 + tokBr
 		if tokBr == 3 {
-			tokBr = s.symbolAdapt(cdf, 3)
+			tokBr = s.symbolAdapt4(cdf, 3)
 			tok = 9 + tokBr
 			if tokBr == 3 {
-				tok = 12 + s.symbolAdapt(cdf, 3)
+				tok = 12 + s.symbolAdapt4(cdf, 3)
 			}
 		}
 	}

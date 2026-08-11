@@ -11,3 +11,7 @@ func (s *msacContext) boolEqui() uint32 { return s.boolEquiGo() }
 func (s *msacContext) boolF(f uint32) uint32 { return s.boolFGo(f) }
 
 func (s *msacContext) boolAdapt(cdf []uint16) uint32 { return s.boolAdaptGo(cdf) }
+
+func (s *msacContext) symbolAdapt4(cdf *[4]uint16, nSymbols int) uint32 {
+	return s.symbolAdaptGo(cdf[:], nSymbols)
+}

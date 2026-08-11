@@ -45,3 +45,7 @@ func (s *msacContext) boolAdapt(cdf []uint16) uint32 {
 
 	return msacBoolAdaptSSE(s, &cdf[0])
 }
+
+func (s *msacContext) symbolAdapt4(cdf *[4]uint16, nSymbols int) uint32 {
+	return msacSymbolAdapt4SSE(s, &cdf[0], nSymbols)
+}

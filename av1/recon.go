@@ -209,19 +209,20 @@ func getDcSignCtx(tx int, a []uint8, aOff int, l []uint8, lOff int) uint32 {
 }
 
 func getLoCtx2D(levels []uint8, off int, offset uint32, stride int) (uint32, uint32) {
-	mag := uint32(levels[off+1]) + uint32(levels[off+stride]) +
-		uint32(levels[off+stride+1])
+	r0 := (*[3]uint8)(levels[off : off+3])
+	r1 := (*[2]uint8)(levels[off+stride : off+stride+2])
+	mag := uint32(r0[1]) + uint32(r1[0]) + uint32(r1[1])
 	hiMag := mag
-	mag += uint32(levels[off+2]) + uint32(levels[off+2*stride])
+	mag += uint32(r0[2]) + uint32(levels[off+2*stride])
 
 	return offset + min((mag+64)>>7, 4), hiMag
 }
 
 func getLoCtx1D(levels []uint8, off int, y uint32, stride int) (uint32, uint32) {
-	mag := uint32(levels[off+1]) + uint32(levels[off+stride]) +
-		uint32(levels[off+2])
+	r0 := (*[5]uint8)(levels[off : off+5])
+	mag := uint32(r0[1]) + uint32(levels[off+stride]) + uint32(r0[2])
 	hiMag := mag
-	mag += uint32(levels[off+3]) + uint32(levels[off+4])
+	mag += uint32(r0[3]) + uint32(r0[4])
 
 	offset := uint32(26)
 	if y > 1 {
@@ -346,7 +347,7 @@ func decodeCoefs[P pixel, C coef](t *taskContext[P, C], a []uint8, aOff int,
 		levels := t.scratch.levels[:]
 
 		ctx := uint32(1 + b2i(eob > 2<<tx2dszctx) + b2i(eob > 4<<tx2dszctx))
-		eobTok := int(ts.msac.symbolAdapt(eobCdf[ctx][:], 2))
+		eobTok := int(ts.msac.symbolAdapt4(&eobCdf[ctx], 2))
 		tok := eobTok + 1
 		levelTok := tok * 0x41
 		var mag uint32
@@ -404,7 +405,7 @@ func decodeCoefs[P pixel, C coef](t *taskContext[P, C], a []uint8, aOff int,
 					c = 14
 				}
 			}
-			tok = int(ts.msac.hiTok(hiCdf[c][:]))
+			tok = int(ts.msac.hiTok(&hiCdf[c]))
 			levelTok = tok + (3 << 6)
 		}
 
@@ -432,7 +433,7 @@ func decodeCoefs[P pixel, C coef](t *taskContext[P, C], a []uint8, aOff int,
 				level = int(x)*stride + int(y)
 				ctx, mag = getLoCtx1D(levels, level, y, stride)
 			}
-			tok = int(ts.msac.symbolAdapt(loCdf[ctx][:], 3))
+			tok = int(ts.msac.symbolAdapt4(&loCdf[ctx], 3))
 			if tok == 3 {
 				mag &= 63
 				base := uint32(7)
@@ -448,7 +449,7 @@ func decodeCoefs[P pixel, C coef](t *taskContext[P, C], a []uint8, aOff int,
 				} else {
 					ctx = base + (mag+1)>>1
 				}
-				tok = int(ts.msac.hiTok(hiCdf[ctx][:]))
+				tok = int(ts.msac.hiTok(&hiCdf[ctx]))
 				levels[level] = uint8(tok + (3 << 6))
 				cf[rcI] = C(uint32(tok<<11) | rc)
 				rc = rcI
@@ -468,7 +469,7 @@ func decodeCoefs[P pixel, C coef](t *taskContext[P, C], a []uint8, aOff int,
 		} else {
 			ctx, mag = getLoCtx1D(levels, 0, 0, stride)
 		}
-		dcTok = ts.msac.symbolAdapt(loCdf[ctx][:], 3)
+		dcTok = ts.msac.symbolAdapt4(&loCdf[ctx], 3)
 		if dcTok == 3 {
 			if txClass == txClass2d {
 				mag = uint32(levels[0*stride+1]) + uint32(levels[1*stride+0]) +
@@ -480,13 +481,13 @@ func decodeCoefs[P pixel, C coef](t *taskContext[P, C], a []uint8, aOff int,
 			} else {
 				ctx = (mag + 1) >> 1
 			}
-			dcTok = ts.msac.hiTok(hiCdf[ctx][:])
+			dcTok = ts.msac.hiTok(&hiCdf[ctx])
 		}
 	} else {
-		tokBr := ts.msac.symbolAdapt(eobCdf[0][:], 2)
+		tokBr := ts.msac.symbolAdapt4(&eobCdf[0], 2)
 		dcTok = 1 + tokBr
 		if tokBr == 2 {
-			dcTok = ts.msac.hiTok(hiCdf[0][:])
+			dcTok = ts.msac.hiTok(&hiCdf[0])
 		}
 		rc = 0
 	}

@@ -72,7 +72,7 @@ func TestMsac(t *testing.T) {
 		case "A":
 			got = int64(s.boolAdapt(cdf))
 		case "H":
-			got = int64(s.hiTok(cdf))
+			got = int64(s.hiTok((*[4]uint16)(cdf)))
 		case "E":
 			got = int64(s.boolEqui())
 		case "F":
