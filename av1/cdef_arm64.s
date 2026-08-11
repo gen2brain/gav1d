@@ -116,6 +116,25 @@
 	ADD   $48, R2;                \
 	SUB   $2, R12
 
+// LOADPX416 is the same for halfword pixels, which need no widening.
+#define LOADPX416                   \
+	VLD1  (R0), [V1.D1];        \
+	ADD   R1, R0, R14;          \
+	VLD1  (R14), [V22.D1];      \
+	VZIP1 V22.D2, V1.D2, V1.D2; \
+	VEOR  V2.B16, V2.B16, V2.B16
+
+#define STOREPX416       \
+	VMOV V2.D[0], R9; \
+	MOVD R9, (R0);    \
+	VMOV V2.D[1], R9; \
+	ADD  R1, R0, R14; \
+	MOVD R9, (R14);   \
+	ADD  R1, R0;      \
+	ADD  R1, R0;      \
+	ADD  $48, R2;     \
+	SUB  $2, R12
+
 // LOADPX16 needs no widening; the pixel is already a halfword.
 #define LOADPX16                    \
 	VLD1 (R0), [V1.H8];         \
@@ -363,5 +382,65 @@ storedc16:
 	ADD  $24, R2
 	SUB  $1, R12
 	CBNZ R12, loopc16
+
+	RET
+
+// func cdefFilter416NEON(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
+TEXT ·cdefFilter416NEON(SB), NOSPLIT, $0-32
+	SETUP16
+
+loop416:
+	LOADPX416
+
+	TAP(LDPAIR, ADD, R4, 12, 14, 18)
+	TAP(LDPAIR, SUB, R4, 12, 14, 18)
+	TAP(LDPAIR, ADD, R5, 12, 14, 19)
+	TAP(LDPAIR, SUB, R5, 12, 14, 19)
+
+	TAP(LDPAIR, ADD, R6, 13, 15, 20)
+	TAP(LDPAIR, SUB, R6, 13, 15, 20)
+	TAP(LDPAIR, ADD, R8, 13, 15, 20)
+	TAP(LDPAIR, SUB, R8, 13, 15, 20)
+	TAP(LDPAIR, ADD, R7, 13, 15, 21)
+	TAP(LDPAIR, SUB, R7, 13, 15, 21)
+	TAP(LDPAIR, ADD, R10, 13, 15, 21)
+	TAP(LDPAIR, SUB, R10, 13, 15, 21)
+
+	ROUND
+	SMAX(2, 2, 31)
+	SMIN(2, 2, 17)
+	STOREPX416
+	CBNZ R12, loop416
+
+	RET
+
+// func cdefFilterClip416NEON(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
+TEXT ·cdefFilterClip416NEON(SB), NOSPLIT, $0-32
+	SETUP16
+
+loopc416:
+	LOADPX416
+	VMOV V1.B16, V3.B16
+	VMOV V1.B16, V4.B16
+
+	TAPC(LDPAIR, ADD, R4, 12, 14, 18)
+	TAPC(LDPAIR, SUB, R4, 12, 14, 18)
+	TAPC(LDPAIR, ADD, R5, 12, 14, 19)
+	TAPC(LDPAIR, SUB, R5, 12, 14, 19)
+
+	TAPC(LDPAIR, ADD, R6, 13, 15, 20)
+	TAPC(LDPAIR, SUB, R6, 13, 15, 20)
+	TAPC(LDPAIR, ADD, R8, 13, 15, 20)
+	TAPC(LDPAIR, SUB, R8, 13, 15, 20)
+	TAPC(LDPAIR, ADD, R7, 13, 15, 21)
+	TAPC(LDPAIR, SUB, R7, 13, 15, 21)
+	TAPC(LDPAIR, ADD, R10, 13, 15, 21)
+	TAPC(LDPAIR, SUB, R10, 13, 15, 21)
+
+	ROUND
+	SMAX(2, 2, 4)
+	SMIN(2, 2, 3)
+	STOREPX416
+	CBNZ R12, loopc416
 
 	RET
