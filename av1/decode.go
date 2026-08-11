@@ -1,14 +1,23 @@
 package av1
 
+import "encoding/binary"
+
 func setCtx(dst []uint8, off, n int, v uint8) {
-	for i := range n {
-		dst[off+i] = v
+	d := dst[off : off+n]
+	w := uint64(v) * 0x0101010101010101
+	for len(d) >= 8 {
+		binary.LittleEndian.PutUint64(d, w)
+		d = d[8:]
+	}
+	for i := range d {
+		d[i] = v
 	}
 }
 
 func setCtxI8(dst []int8, off, n int, v int8) {
-	for i := range n {
-		dst[off+i] = v
+	d := dst[off : off+n]
+	for i := range d {
+		d[i] = v
 	}
 }
 

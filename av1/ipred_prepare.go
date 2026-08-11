@@ -191,8 +191,8 @@ func bitdepthFromMax(bitdepthMax int32) int {
 
 func gatherColumn[P pixel](out []P, outOff int, src []P, srcOff, stride, n int) {
 	out = out[outOff-(n-1) : outOff+1]
-	for i := range out {
-		out[len(out)-1-i] = src[srcOff]
+	for i := len(out) - 1; i >= 0; i-- {
+		out[i] = src[srcOff]
 		srcOff += stride
 	}
 }
