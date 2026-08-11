@@ -6,9 +6,8 @@
 
 A port of [dav1d](https://code.videolan.org/videolan/dav1d), bit-exact against it. No CGo, no dependencies.
 
-SIMD support for amd64 (AVX2, and AVX-512 on Ice Lake and later), arm64 (NEON) and riscv64
-(RVV, with `GORISCV64=rva23u64`). Everything is selected at runtime; build with `-tags noasm`
-for pure Go everywhere.
+SIMD support for amd64 (AVX2, AVX-512), arm64 (NEON) and riscv64 (RVV, with `GORISCV64=rva23u64`).
+Build with `-tags noasm` for pure Go everywhere.
 
 ### Decoding
 
