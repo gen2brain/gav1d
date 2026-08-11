@@ -72,14 +72,18 @@ func dcGenLeft[P pixel](tl []P, tlOff, height int) int32 {
 	return int32(dc >> bits.TrailingZeros32(uint32(height)))
 }
 
+func sumPixels[P pixel](a []P) uint32 {
+	var s uint32
+	for _, v := range a {
+		s += uint32(v)
+	}
+
+	return s
+}
+
 func dcGen[P pixel](tl []P, tlOff, width, height int, bitdepthMax int32) int32 {
-	dc := uint32((width + height) >> 1)
-	for i := range width {
-		dc += uint32(tl[tlOff+i+1])
-	}
-	for i := range height {
-		dc += uint32(tl[tlOff-(i+1)])
-	}
+	dc := uint32((width+height)>>1) + sumPixels(tl[tlOff+1:tlOff+1+width]) +
+		sumPixels(tl[tlOff-height:tlOff])
 	dc >>= bits.TrailingZeros32(uint32(width + height))
 
 	if width != height {
