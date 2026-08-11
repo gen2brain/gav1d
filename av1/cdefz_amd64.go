@@ -40,3 +40,6 @@ func cdef8x8AVX512(dst *uint8, stride int, left *uint8, top *uint8, bot *uint8, 
 
 //go:noescape
 func cdef4x4_16AVX512(dst *uint16, stride int, left *uint16, top *uint16, bot *uint16, p *cdefZParams)
+
+//go:noescape
+func cdef8x8_16AVX512(dst *uint16, stride int, left *uint16, top *uint16, bot *uint16, p *cdefZParams)
