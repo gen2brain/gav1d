@@ -39,12 +39,18 @@ func lpf8WAVX512(dst *uint8, stridea, strideb int, p *lpfParams)
 //go:noescape
 func lpf8HWAVX512(dst *uint8, stridea, strideb int, p *lpfParams)
 
+//go:noescape
+func lpf8ZAVX512(dst *uint8, stridea, strideb int, p *lpfParams)
+
 func loopFilter8AVX512(dst []uint8, dstOff int, e, i, h int32,
 	stridea, strideb int, wd, lines int, bitdepthMax int32,
 ) {
 	p := lpfParamsFor(e, i, h, wd, bitdepthMax)
 	switch {
 	case stridea == 1:
+		for ; lines >= 16; lines, dstOff = lines-16, dstOff+16 {
+			lpf8ZAVX512(&dst[dstOff], stridea, strideb, &p)
+		}
 		for ; lines >= 8; lines, dstOff = lines-8, dstOff+8 {
 			lpf8WAVX512(&dst[dstOff], stridea, strideb, &p)
 		}
