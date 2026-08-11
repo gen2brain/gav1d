@@ -267,3 +267,99 @@ rnext:
 
 rdone:
 	RET
+
+// func itxDC8RVV(dst *uint8, stride int, dc int32, w, h int, bitdepthMax int32)
+TEXT ·itxDC8RVV(SB), NOSPLIT, $0-44
+	MOV  dst+0(FP), X10
+	MOV  stride+8(FP), X11
+	MOVW dc+16(FP), X12
+	MOV  w+24(FP), X13
+	MOV  h+32(FP), X14
+
+	MOV  $0, X15
+	BGE  X12, ZERO, pos8
+	SUB  X12, ZERO, X12
+	MOV  $1, X15
+
+pos8:
+	MOV  $255, X16
+	BLTU X12, X16, sat8
+	MOV  X16, X12
+
+sat8:
+	MOV X10, X17
+
+row8:
+	MOV X13, X18
+	MOV X17, X19
+
+col8:
+	VSETVLI X18, E8, M1, TA, MA, X20
+	VLE8V   (X19), V1
+	BNEZ    X15, s8
+	VSADDUVX X12, V1, V1
+	JMP      st8
+
+s8:
+	VSSUBUVX X12, V1, V1
+
+st8:
+	VSE8V V1, (X19)
+	ADD   X20, X19, X19
+	SUB   X20, X18, X18
+	BNEZ  X18, col8
+
+	ADD  X11, X17, X17
+	ADD  $-1, X14, X14
+	BNEZ X14, row8
+	RET
+
+// func itxDC16RVV(dst *uint16, stride int, dc int32, w, h int, bitdepthMax int32)
+TEXT ·itxDC16RVV(SB), NOSPLIT, $0-44
+	MOV   dst+0(FP), X10
+	MOV   stride+8(FP), X11
+	MOVW  dc+16(FP), X12
+	MOV   w+24(FP), X13
+	MOV   h+32(FP), X14
+	MOVWU bitdepthMax+40(FP), X21
+	SLLI  $1, X11, X11
+
+	MOV  $0, X15
+	BGE  X12, ZERO, pos16
+	SUB  X12, ZERO, X12
+	MOV  $1, X15
+
+pos16:
+	MOV  $65535, X16
+	BLTU X12, X16, sat16
+	MOV  X16, X12
+
+sat16:
+	MOV X10, X17
+
+row16:
+	MOV X13, X18
+	MOV X17, X19
+
+col16:
+	VSETVLI X18, E16, M1, TA, MA, X20
+	VLE16V  (X19), V1
+	BNEZ    X15, s16
+	VSADDUVX X12, V1, V1
+	VMINUVX  X21, V1, V1
+	JMP      st16
+
+s16:
+	VSSUBUVX X12, V1, V1
+
+st16:
+	VSE16V V1, (X19)
+	SLLI   $1, X20, X22
+	ADD    X22, X19, X19
+	SUB    X20, X18, X18
+	BNEZ   X18, col16
+
+	ADD  X11, X17, X17
+	ADD  $-1, X14, X14
+	BNEZ X14, row16
+	RET

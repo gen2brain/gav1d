@@ -37,3 +37,17 @@ func widenCoefs16RVV(dst *int32, dstStride int, src *int16, srcStride, cols, n, 
 
 //go:noescape
 func widenCoefs16Rect2RVV(dst *int32, dstStride int, src *int16, srcStride, cols, n, lanes int)
+
+//go:noescape
+func itxDC8RVV(dst *uint8, stride int, dc int32, w, h int, bitdepthMax int32)
+
+//go:noescape
+func itxDC16RVV(dst *uint16, stride int, dc int32, w, h int, bitdepthMax int32)
+
+func itxDC8Vec(dst []uint8, dstOff, stride int, dc int32, w, h int, bitdepthMax int32) {
+	itxDC8RVV(&dst[dstOff], stride, dc, w, h, bitdepthMax)
+}
+
+func itxDC16Vec(dst []uint16, dstOff, stride int, dc int32, w, h int, bitdepthMax int32) {
+	itxDC16RVV(&dst[dstOff], stride, dc, w, h, bitdepthMax)
+}

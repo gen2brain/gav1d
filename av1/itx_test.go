@@ -392,6 +392,35 @@ func TestItxDCAsm(t *testing.T) {
 	}
 
 	cases := 0
+	for _, depth := range []int{10, 12} {
+		d16 := dsp16()
+		bdMax := int32(1<<depth - 1)
+		for _, w := range []int{4, 8, 16, 32, 64} {
+			for _, h := range []int{4, 8, 16, 32, 64} {
+				for _, dc := range []int32{0, 1, -1, 7, -7, 1023, -1023, 4095, -4095, 70000, -70000} {
+					stride := w + 13
+					got := make([]uint16, stride*h+64)
+					want := make([]uint16, len(got))
+					for i := range got {
+						got[i] = uint16(rowSeed(w, h, i)) & uint16(bdMax)
+						want[i] = got[i]
+					}
+
+					d16.itxDC(got, 7, stride, dc, w, h, bdMax)
+					itxDCGo(want, 7, stride, dc, w, h, bdMax)
+
+					for i := range want {
+						if got[i] != want[i] {
+							t.Fatalf("d=%d w=%d h=%d dc=%d: [%d] = %d, want %d",
+								depth, w, h, dc, i, got[i], want[i])
+						}
+					}
+					cases++
+				}
+			}
+		}
+	}
+
 	for _, w := range []int{4, 8, 16, 32, 64} {
 		for _, h := range []int{4, 8, 16, 32, 64} {
 			for _, dc := range []int32{0, 1, -1, 7, -7, 254, -254, 255, -255, 1000, -1000} {

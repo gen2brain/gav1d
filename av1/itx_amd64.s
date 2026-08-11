@@ -585,3 +585,84 @@ rownext8:
 	JNZ  rowloop8
 	VZEROUPPER
 	RET
+
+// func itxDC16AVX2(dst *uint16, stride int, dc int32, w, h int, bitdepthMax int32)
+TEXT ·itxDC16AVX2(SB), NOSPLIT, $0-44
+	MOVQ  dst+0(FP), DI
+	MOVQ  stride+8(FP), SI
+	MOVL  dc+16(FP), AX
+	MOVQ  w+24(FP), DX
+	MOVQ  h+32(FP), R11
+	MOVL  bitdepthMax+40(FP), R12
+	SHLQ  $1, SI
+	SHLQ  $1, DX
+
+	XORL  R8, R8
+	TESTL AX, AX
+	JNS   dcpos16
+	NEGL  AX
+	MOVL  $1, R8
+
+dcpos16:
+	CMPL AX, $65535
+	JBE  dcsat16
+	MOVL $65535, AX
+
+dcsat16:
+	MOVD         AX, X0
+	VPBROADCASTW X0, Y0
+	MOVD         R12, X2
+	VPBROADCASTW X2, Y2
+
+rowloop16:
+	XORQ BX, BX
+
+colloop16:
+	MOVQ DX, R9
+	SUBQ BX, R9
+	CMPQ R9, $32
+	JB   tail16
+	VMOVDQU (DI)(BX*1), Y1
+	TESTL   R8, R8
+	JNZ     sub16
+	VPADDUSW Y0, Y1, Y1
+	VPMINUW  Y2, Y1, Y1
+	JMP      st16
+
+sub16:
+	VPSUBUSW Y0, Y1, Y1
+
+st16:
+	VMOVDQU Y1, (DI)(BX*1)
+	ADDQ    $32, BX
+	JMP     colloop16
+
+tail16:
+	TESTQ R9, R9
+	JZ    rownext16
+	MOVWLZX (DI)(BX*1), R10
+	TESTL   R8, R8
+	JNZ     tsub16
+	ADDL    AX, R10
+	CMPL    R10, R12
+	JBE     tst16
+	MOVL    R12, R10
+	JMP     tst16
+
+tsub16:
+	SUBL AX, R10
+	JAE  tst16
+	XORL R10, R10
+
+tst16:
+	MOVW R10, (DI)(BX*1)
+	ADDQ $2, BX
+	SUBQ $2, R9
+	JMP  tail16
+
+rownext16:
+	ADDQ SI, DI
+	DECQ R11
+	JNZ  rowloop16
+	VZEROUPPER
+	RET

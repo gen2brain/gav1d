@@ -57,3 +57,10 @@ func itxDC8AVX2(dst *uint8, stride int, dc int32, w, h int, bitdepthMax int32)
 func itxDC8Vec(dst []uint8, dstOff, stride int, dc int32, w, h int, bitdepthMax int32) {
 	itxDC8AVX2(&dst[dstOff], stride, dc, w, h, bitdepthMax)
 }
+
+//go:noescape
+func itxDC16AVX2(dst *uint16, stride int, dc int32, w, h int, bitdepthMax int32)
+
+func itxDC16Vec(dst []uint16, dstOff, stride int, dc int32, w, h int, bitdepthMax int32) {
+	itxDC16AVX2(&dst[dstOff], stride, dc, w, h, bitdepthMax)
+}

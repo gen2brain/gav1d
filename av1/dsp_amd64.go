@@ -27,6 +27,7 @@ func dspInit[P pixel](d *dspContext[P]) {
 	if d16, ok := any(d).(*dspContext[uint16]); ok {
 		d16.cdefFilter = cdefFilterBlock16AVX2
 		d16.itxAdd = itxAdd16Vec
+		d16.itxDC = itxDC16Vec
 		d16.cdefDir = cdefFindDir16AVX2
 		d16.loopFilter = loopFilter16AVX2
 		d16.put8tap = put8tap16AVX2

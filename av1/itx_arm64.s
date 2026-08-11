@@ -341,3 +341,157 @@ rnext:
 
 rdone:
 	RET
+
+#define UQADDB(Vd, Vn, Vm) WORD $(0x6E200C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define UQSUBB(Vd, Vn, Vm) WORD $(0x6E202C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define UQADDH(Vd, Vn, Vm) WORD $(0x6E600C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define UQSUBH(Vd, Vn, Vm) WORD $(0x6E602C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+#define UMINH(Vd, Vn, Vm)  WORD $(0x6E606C00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
+
+// func itxDC8NEON(dst *uint8, stride int, dc int32, w, h int, bitdepthMax int32)
+TEXT ·itxDC8NEON(SB), NOSPLIT, $0-44
+	MOVD  dst+0(FP), R0
+	MOVD  stride+8(FP), R1
+	MOVW  dc+16(FP), R2
+	MOVD  w+24(FP), R3
+	MOVD  h+32(FP), R4
+
+	MOVD  $0, R5
+	CMPW  $0, R2
+	BGE   pos8
+	NEGW  R2, R2
+	MOVD  $1, R5
+
+pos8:
+	CMPW $255, R2
+	BLS  sat8
+	MOVD $255, R2
+
+sat8:
+	VDUP R2, V0.B16
+
+row8:
+	MOVD $0, R6
+
+col8:
+	SUB  R6, R3, R7
+	CMP  $16, R7
+	BLO  tail8
+	ADD  R6, R0, R8
+	VLD1 (R8), [V1.B16]
+	CBNZ R5, s8
+	UQADDB(1, 1, 0)
+	B    st8
+
+s8:
+	UQSUBB(1, 1, 0)
+
+st8:
+	VST1 [V1.B16], (R8)
+	ADD  $16, R6, R6
+	B    col8
+
+tail8:
+	CBZ   R7, next8
+	ADD   R6, R0, R8
+	MOVBU (R8), R9
+	CBNZ  R5, ts8
+	ADD   R2, R9, R9
+	CMP   $255, R9
+	BLS   tst8
+	MOVD  $255, R9
+	B     tst8
+
+ts8:
+	SUBS R2, R9, R9
+	BGE  tst8
+	MOVD $0, R9
+
+tst8:
+	MOVB R9, (R8)
+	ADD  $1, R6, R6
+	SUB  $1, R7, R7
+	B    tail8
+
+next8:
+	ADD  R1, R0, R0
+	SUB  $1, R4, R4
+	CBNZ R4, row8
+	RET
+
+// func itxDC16NEON(dst *uint16, stride int, dc int32, w, h int, bitdepthMax int32)
+TEXT ·itxDC16NEON(SB), NOSPLIT, $0-44
+	MOVD  dst+0(FP), R0
+	MOVD  stride+8(FP), R1
+	MOVW  dc+16(FP), R2
+	MOVD  w+24(FP), R3
+	MOVD  h+32(FP), R4
+	MOVWU bitdepthMax+40(FP), R10
+	LSL   $1, R1, R1
+	LSL   $1, R3, R3
+
+	MOVD  $0, R5
+	CMPW  $0, R2
+	BGE   pos16
+	NEGW  R2, R2
+	MOVD  $1, R5
+
+pos16:
+	MOVD $65535, R11
+	CMP  R11, R2
+	BLS  sat16
+	MOVD R11, R2
+
+sat16:
+	VDUP R2, V0.H8
+	VDUP R10, V2.H8
+
+row16:
+	MOVD $0, R6
+
+col16:
+	SUB  R6, R3, R7
+	CMP  $16, R7
+	BLO  tail16
+	ADD  R6, R0, R8
+	VLD1 (R8), [V1.H8]
+	CBNZ R5, s16
+	UQADDH(1, 1, 0)
+	UMINH(1, 1, 2)
+	B    st16
+
+s16:
+	UQSUBH(1, 1, 0)
+
+st16:
+	VST1 [V1.H8], (R8)
+	ADD  $16, R6, R6
+	B    col16
+
+tail16:
+	CBZ   R7, next16
+	ADD   R6, R0, R8
+	MOVHU (R8), R9
+	CBNZ  R5, ts16
+	ADD   R2, R9, R9
+	CMP   R10, R9
+	BLS   tst16
+	MOVD  R10, R9
+	B     tst16
+
+ts16:
+	SUBS R2, R9, R9
+	BGE  tst16
+	MOVD $0, R9
+
+tst16:
+	MOVH R9, (R8)
+	ADD  $2, R6, R6
+	SUB  $2, R7, R7
+	B    tail16
+
+next16:
+	ADD  R1, R0, R0
+	SUB  $1, R4, R4
+	CBNZ R4, row16
+	RET
