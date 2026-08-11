@@ -59,10 +59,48 @@ func filter8tapI(src []int16, off int, f *[8]int8, stride int) int32 {
 }
 
 func mcPut[P pixel](dst []P, dstOff, dstStride int, src []P, srcOff, srcStride, w, h int) {
-	for range h {
-		copy(dst[dstOff:dstOff+w], src[srcOff:srcOff+w])
-		dstOff += dstStride
-		srcOff += srcStride
+	switch w {
+	case 2:
+		for range h {
+			*(*[2]P)(dst[dstOff : dstOff+2]) = *(*[2]P)(src[srcOff : srcOff+2])
+			dstOff += dstStride
+			srcOff += srcStride
+		}
+
+	case 4:
+		for range h {
+			*(*[4]P)(dst[dstOff : dstOff+4]) = *(*[4]P)(src[srcOff : srcOff+4])
+			dstOff += dstStride
+			srcOff += srcStride
+		}
+
+	case 8:
+		for range h {
+			*(*[8]P)(dst[dstOff : dstOff+8]) = *(*[8]P)(src[srcOff : srcOff+8])
+			dstOff += dstStride
+			srcOff += srcStride
+		}
+
+	case 16:
+		for range h {
+			*(*[16]P)(dst[dstOff : dstOff+16]) = *(*[16]P)(src[srcOff : srcOff+16])
+			dstOff += dstStride
+			srcOff += srcStride
+		}
+
+	case 32:
+		for range h {
+			*(*[32]P)(dst[dstOff : dstOff+32]) = *(*[32]P)(src[srcOff : srcOff+32])
+			dstOff += dstStride
+			srcOff += srcStride
+		}
+
+	default:
+		for range h {
+			copy(dst[dstOff:dstOff+w], src[srcOff:srcOff+w])
+			dstOff += dstStride
+			srcOff += srcStride
+		}
 	}
 }
 

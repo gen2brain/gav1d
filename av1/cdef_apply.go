@@ -34,7 +34,8 @@ func backup2x8[P pixel, C coef](f *frameContext[P, C], dst *[3][16]P, src *[3]in
 	if flag&backup2x8Y != 0 {
 		yOff := 0
 		for y := range 8 {
-			copy(dst[0][y*2:y*2+2], f.cur[0][src[0]+yOff+xOff-2:])
+			o := src[0] + yOff + xOff - 2
+			*(*[2]P)(dst[0][y*2 : y*2+2]) = *(*[2]P)(f.cur[0][o : o+2])
 			yOff += f.stride[0]
 		}
 	}
@@ -46,8 +47,9 @@ func backup2x8[P pixel, C coef](f *frameContext[P, C], dst *[3][16]P, src *[3]in
 	xOff >>= f.ssHor
 	yOff := 0
 	for y := range 8 >> f.ssVer {
-		copy(dst[1][y*2:y*2+2], f.cur[1][src[1]+yOff+xOff-2:])
-		copy(dst[2][y*2:y*2+2], f.cur[2][src[2]+yOff+xOff-2:])
+		o1, o2 := src[1]+yOff+xOff-2, src[2]+yOff+xOff-2
+		*(*[2]P)(dst[1][y*2 : y*2+2]) = *(*[2]P)(f.cur[1][o1 : o1+2])
+		*(*[2]P)(dst[2][y*2 : y*2+2]) = *(*[2]P)(f.cur[2][o2 : o2+2])
 		yOff += f.stride[1]
 	}
 }
