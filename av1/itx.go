@@ -190,7 +190,7 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 		ws, ts, tw, th = max(sh, g), max(w, g), max(w, g), max(h, g)
 		lanes = min((n+g-1)/g*g, ws)
 	}
-	wide := tmp[th*ts:][:tw*ws]
+	wide := tmp[th*ts : th*ts+tw*ws]
 
 	if isRect2 {
 		widenCoefsRect2(wide, ws, coeff, sh, sw, n, lanes)
@@ -203,7 +203,7 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 
 	clear(coeff[:sw*sh])
 
-	if dsp.itxCol == nil || !dsp.itxCol(wide, lanes, ws, w, int(txtps[0]), rowClipMin, rowClipMax, tmp[itxDct64Scratch:]) {
+	if !dsp.itxCol(wide, lanes, ws, w, int(txtps[0]), rowClipMin, rowClipMax, tmp[itxDct64Scratch:]) {
 		for y := range n {
 			first1d(wide, y, ws, rowClipMin, rowClipMax)
 		}
@@ -214,7 +214,7 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 	dsp.itxClip(tmp[:lanes*ts], rnd, shift, colClipMin, colClipMax)
 	clear(tmp[lanes*ts : th*ts])
 
-	if dsp.itxCol == nil || !dsp.itxCol(tmp, ts, ts, h, int(txtps[1]), colClipMin, colClipMax, tmp[itxDct64Scratch:]) {
+	if !dsp.itxCol(tmp, ts, ts, h, int(txtps[1]), colClipMin, colClipMax, tmp[itxDct64Scratch:]) {
 		for x := range w {
 			second1d(tmp, x, ts, colClipMin, colClipMax)
 		}
@@ -275,6 +275,10 @@ func itxClipGo(tmp []int32, rnd int32, shift int, lo, hi int32) {
 	for i, v := range tmp {
 		tmp[i] = clip((v+rnd)>>shift, lo, hi)
 	}
+}
+
+func itxColNone([]int32, int, int, int, int, int32, int32, []int32) bool {
+	return false
 }
 
 func itxDCGo[P pixel](dst []P, dstOff, stride int, dc int32, w, h int,

@@ -70,6 +70,7 @@ func newDspGo[P pixel]() *dspContext[P] {
 		itxClip:      itxClipGo,
 		itxAdd:       itxAddGo[P],
 		itxDC:        itxDCGo[P],
+		itxCol:       itxColNone,
 		itxTranspose: itxTransposeGo,
 	}
 	// Bound once here, since cdefFilterBlock reaches the padding copy
