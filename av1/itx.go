@@ -161,8 +161,6 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 	}
 
 	txtps := &tx1dTypes[txtp]
-	first1d := tx1dFns[tDim.lw][txtps[0]]
-	second1d := tx1dFns[tDim.lh][txtps[1]]
 	sh, sw := min(h, 32), min(w, 32)
 
 	var rowClipMin, colClipMin int32
@@ -204,6 +202,7 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 	clear(coeff[:sw*sh])
 
 	if !dsp.itxCol(wide, lanes, ws, w, int(txtps[0]), rowClipMin, rowClipMax, tmp[itxDct64Scratch:]) {
+		first1d := tx1dFns[tDim.lw][txtps[0]]
 		for y := range n {
 			first1d(wide, y, ws, rowClipMin, rowClipMax)
 		}
@@ -215,6 +214,7 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 	clear(tmp[lanes*ts : th*ts])
 
 	if !dsp.itxCol(tmp, ts, ts, h, int(txtps[1]), colClipMin, colClipMax, tmp[itxDct64Scratch:]) {
+		second1d := tx1dFns[tDim.lh][txtps[1]]
 		for x := range w {
 			second1d(tmp, x, ts, colClipMin, colClipMax)
 		}
