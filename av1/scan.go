@@ -24,6 +24,28 @@ var scans = [nRectTxSizes][]uint16{
 
 var lastNonzeroColFromEob [nRectTxSizes][]uint8
 
+var loCtxOffFromScan [nRectTxSizes][]uint8
+
+func initLoCtxOffFromScan(tx int) []uint8 {
+	scan := scans[tx]
+	if scan == nil {
+		return nil
+	}
+
+	slh := min(int(txfmDimensions[tx].lh), tx32x32)
+	shift, mask := slh+2, uint32(4<<slh)-1
+	nonsquare := b2i(tx >= rtx4x8)
+	offsets := &loCtxOffsets[nonsquare+(tx&nonsquare)]
+
+	tbl := make([]uint8, len(scan))
+	for i, rc := range scan {
+		x, y := uint32(rc)>>shift, uint32(rc)&mask
+		tbl[i] = offsets[min(y, 4)][min(x, 4)]
+	}
+
+	return tbl
+}
+
 func initLastNonzeroColFromEob(scan []uint16, w, h int) []uint8 {
 	tbl := make([]uint8, w*h)
 	maxCol := 0
@@ -77,5 +99,9 @@ func init() {
 		rtx32x8:  t32x8,
 		rtx16x64: t16x32,
 		rtx64x16: t32x16,
+	}
+
+	for tx := range loCtxOffFromScan {
+		loCtxOffFromScan[tx] = initLoCtxOffFromScan(tx)
 	}
 }

@@ -74,7 +74,13 @@ func TestReconCtx(t *testing.T) {
 				levels[i] = uint8(num(fields[6+i]))
 			}
 
-			got, hiMag := getLoCtx(levels, 0, txClass, &loCtxOffsets[ctxIdx], x, y, stride)
+			var got, hiMag uint32
+			if txClass == txClass2d {
+				offset := uint32(loCtxOffsets[ctxIdx][min(y, 4)][min(x, 4)])
+				got, hiMag = getLoCtx2D(levels, 0, offset, stride)
+			} else {
+				got, hiMag = getLoCtx1D(levels, 0, y, stride)
+			}
 			if int(got) != num(want[0]) || int(hiMag) != num(want[1]) {
 				t.Fatalf("line %d: getLoCtx class=%d x=%d y=%d = (%d, %d), want (%s, %s)",
 					line, txClass, x, y, got, hiMag, want[0], want[1])
