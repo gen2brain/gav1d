@@ -140,6 +140,43 @@
 	MOVW  SRC, X6; \
 	VMVVX X6, VD
 
+#define TAPLOADS \
+	LOADS(TP1, P1); \
+	LOADS(TP0, P0); \
+	LOADS(TQ0, Q0); \
+	LOADS(TQ1, Q1); \
+	MOV  $4, X6;    \
+	BGE  X6, X18, taps; \
+	LOADS(TP2, P2); \
+	LOADS(TQ2, Q2); \
+	MOV  $6, X6;    \
+	BGE  X6, X18, taps; \
+	LOADS(TP3, P3); \
+	LOADS(TQ3, Q3); \
+	MOV  $16, X6;   \
+	BLT  X18, X6, taps; \
+	LOADS(TP6, P6); \
+	LOADS(TP5, P5); \
+	LOADS(TP4, P4); \
+	LOADS(TQ4, Q4); \
+	LOADS(TQ5, Q5); \
+	LOADS(TQ6, Q6)
+
+#define TP6 -112
+#define TP5 -96
+#define TP4 -80
+#define TP3 -64
+#define TP2 -48
+#define TP1 -32
+#define TP0 -16
+#define TQ0 0
+#define TQ1 16
+#define TQ2 32
+#define TQ3 48
+#define TQ4 64
+#define TQ5 80
+#define TQ6 96
+
 #define OP5 -96
 #define OP4 -80
 #define OP3 -64
@@ -296,6 +333,13 @@
 	MOV $-6, X19; \
 	MOV $12, X16;
 
+// func lpfVL16RVV() int
+TEXT ·lpfVL16RVV(SB), NOSPLIT, $0-8
+	MOV     $16, X5
+	VSETVLI X5, E16, M1, TA, MA, X6
+	MOV     X6, ret+0(FP)
+	RET
+
 // func lpf8RVV(dst *uint8, stridea, strideb int, p *lpfParams, n int)
 TEXT ·lpf8RVV(SB), NOSPLIT, $688-40
 	MOV  dst+0(FP), X10
@@ -398,26 +442,7 @@ widen:
 	VSE16V   V16, (X6)
 	VSETVLI  X17, E16, M1, TA, MA, X7
 
-	LOADS(-32, P1)
-	LOADS(-16, P0)
-	LOADS(0, Q0)
-	LOADS(16, Q1)
-	MOV  $4, X6
-	BGE  X6, X18, taps
-	LOADS(-48, P2)
-	LOADS(32, Q2)
-	MOV  $6, X6
-	BGE  X6, X18, taps
-	LOADS(-64, P3)
-	LOADS(48, Q3)
-	MOV  $16, X6
-	BLT  X18, X6, taps
-	LOADS(-112, P6)
-	LOADS(-96, P5)
-	LOADS(-80, P4)
-	LOADS(64, Q4)
-	LOADS(80, Q5)
-	LOADS(96, Q6)
+	TAPLOADS
 
 taps:
 	LPFBODY
@@ -477,6 +502,311 @@ scatterrows:
 
 done:
 	RET
+
+#undef TP6
+#undef TP5
+#undef TP4
+#undef TP3
+#undef TP2
+#undef TP1
+#undef TP0
+#undef TQ0
+#undef TQ1
+#undef TQ2
+#undef TQ3
+#undef TQ4
+#undef TQ5
+#undef TQ6
+#undef OP5
+#undef OP4
+#undef OP3
+#undef OP2
+#undef OP1
+#undef OP0
+#undef OQ0
+#undef OQ1
+#undef OQ2
+#undef OQ3
+#undef OQ4
+#undef OQ5
+
+// Sixteen lines fill a 256 bit register at sixteen bit elements, so every slot
+// and every output doubles.
+#define TP6 -224
+#define TP5 -192
+#define TP4 -160
+#define TP3 -128
+#define TP2 -96
+#define TP1 -64
+#define TP0 -32
+#define TQ0 0
+#define TQ1 32
+#define TQ2 64
+#define TQ3 96
+#define TQ4 128
+#define TQ5 160
+#define TQ6 192
+
+#define OP5 -192
+#define OP4 -160
+#define OP3 -128
+#define OP2 -96
+#define OP1 -64
+#define OP0 -32
+#define OQ0 0
+#define OQ1 32
+#define OQ2 64
+#define OQ3 96
+#define OQ4 128
+#define OQ5 160
+
+// func lpf8WideRVV(dst *uint8, stridea, strideb int, p *lpfParams)
+TEXT ·lpf8WideRVV(SB), $1424-32
+	MOV  dst+0(FP), X10
+	MOV  stridea+8(FP), X14
+	MOV  strideb+16(FP), X15
+	MOV  p+24(FP), X11
+	ADD  $240, X2, X12
+	ADD  $880, X2, X13
+	ADD  $1168, X2, X23
+
+	MOV     $16, X17
+	VSETVLI X17, E16, M1, TA, MA, X7
+
+	MOVW WD, X18
+	MOV  $-2, X19
+	MOV  $4, X16
+	MOV  $4, X6
+	BGE  X6, X18, wspanset
+	MOV  $-3, X19
+	MOV  $6, X16
+	MOV  $6, X6
+	BGE  X6, X18, wspanset
+	MOV  $-4, X19
+	MOV  $8, X16
+	MOV  $16, X6
+	BLT  X18, X6, wspanset
+	MOV  $-7, X19
+	MOV  $14, X16
+
+wspanset:
+	SLLI $4, X19, X6
+	ADD  X23, X6, X22
+	ADD  $112, X22, X22
+	MOV  $16, X21
+	MOV  $1, X6
+	BNE  X6, X14, wgatherrows
+
+	MUL     X15, X19, X8
+	ADD     X10, X8, X8
+	VSETVLI X16, E32, M2, TA, MA, X7
+	VLSE32V (X8), X15, V8
+	VSSE32V V8, X21, (X22)
+	ADD     $4, X8, X9
+	ADD     $4, X22, X6
+	VLSE32V (X9), X15, V8
+	VSSE32V V8, X21, (X6)
+	ADD     $8, X8, X9
+	ADD     $8, X22, X6
+	VLSE32V (X9), X15, V8
+	VSSE32V V8, X21, (X6)
+	ADD     $12, X8, X9
+	ADD     $12, X22, X6
+	VLSE32V (X9), X15, V8
+	VSSE32V V8, X21, (X6)
+	JMP     wwiden
+
+wgatherrows:
+	ADD     X19, X10, X8
+	VSETVLI X16, E8, M1, TA, MA, X7
+	VLE8V   (X8), V8
+	ADD     X14, X8, X8
+	VLE8V   (X8), V9
+	ADD     X14, X8, X8
+	VLE8V   (X8), V10
+	ADD     X14, X8, X8
+	VLE8V   (X8), V11
+	ADD     X14, X8, X8
+	VLE8V   (X8), V12
+	ADD     X14, X8, X8
+	VLE8V   (X8), V13
+	ADD     X14, X8, X8
+	VLE8V   (X8), V14
+	ADD     X14, X8, X8
+	VLE8V   (X8), V15
+	VSSSEG8E8V V8, X21, (X22)
+	ADD     X14, X8, X8
+	VLE8V   (X8), V8
+	ADD     X14, X8, X8
+	VLE8V   (X8), V9
+	ADD     X14, X8, X8
+	VLE8V   (X8), V10
+	ADD     X14, X8, X8
+	VLE8V   (X8), V11
+	ADD     X14, X8, X8
+	VLE8V   (X8), V12
+	ADD     X14, X8, X8
+	VLE8V   (X8), V13
+	ADD     X14, X8, X8
+	VLE8V   (X8), V14
+	ADD     X14, X8, X8
+	VLE8V   (X8), V15
+	ADD     $8, X22, X6
+	VSSSEG8E8V V8, X21, (X6)
+
+	// Sixteen lines of more than eight taps overrun a single eight register
+	// group, so the widening walks the taps eight at a time.
+wwiden:
+	SLLI $4, X19, X6
+	ADD  X23, X6, X22
+	ADD  $112, X22, X22
+	SLLI $5, X19, X6
+	ADD  X12, X6, X9
+	MOV  X16, X21
+
+wchunk:
+	MOV  $8, X20
+	BGE  X21, X20, wfull
+	MOV  X21, X20
+
+wfull:
+	SLLI     $4, X20, X6
+	VSETVLI  X6, E8, M4, TA, MA, X7
+	VLE8V    (X22), V8
+	VSETVLI  X6, E16, M8, TA, MA, X7
+	VZEXTVF2 V8, V16
+	VSE16V   V16, (X9)
+	ADD      $640, X9, X6
+	VSE16V   V16, (X6)
+	SLLI     $4, X20, X6
+	ADD      X6, X22, X22
+	SLLI     $5, X20, X6
+	ADD      X6, X9, X9
+	SUB      X20, X21, X21
+	BNEZ     X21, wchunk
+
+	VSETVLI X17, E16, M1, TA, MA, X7
+	TAPLOADS
+
+taps:
+	LPFBODY
+
+scatter:
+	SLLI $5, X19, X6
+	ADD  X13, X6, X9
+	SLLI $4, X19, X6
+	ADD  X23, X6, X22
+	ADD  $112, X22, X22
+	MOV  X16, X21
+	MOV  X22, X8
+
+wschunk:
+	MOV  $8, X20
+	BGE  X21, X20, wsfull
+	MOV  X21, X20
+
+wsfull:
+	SLLI    $4, X20, X6
+	VSETVLI X6, E16, M8, TA, MA, X7
+	VLE16V  (X9), V16
+	VSETVLI X6, E8, M4, TA, MA, X7
+	VNSRLWI $0, V16, V8
+	VSE8V   V8, (X8)
+	SLLI    $4, X20, X6
+	ADD     X6, X8, X8
+	SLLI    $5, X20, X6
+	ADD     X6, X9, X9
+	SUB     X20, X21, X21
+	BNEZ    X21, wschunk
+
+	MOV $16, X21
+	MOV $1, X6
+	BNE X6, X14, wscatterrows
+
+	MUL     X15, X19, X8
+	ADD     X10, X8, X8
+	VSETVLI X16, E32, M2, TA, MA, X7
+	VLSE32V (X22), X21, V8
+	VSSE32V V8, X15, (X8)
+	ADD     $4, X22, X6
+	ADD     $4, X8, X9
+	VLSE32V (X6), X21, V8
+	VSSE32V V8, X15, (X9)
+	ADD     $8, X22, X6
+	ADD     $8, X8, X9
+	VLSE32V (X6), X21, V8
+	VSSE32V V8, X15, (X9)
+	ADD     $12, X22, X6
+	ADD     $12, X8, X9
+	VLSE32V (X6), X21, V8
+	VSSE32V V8, X15, (X9)
+	RET
+
+wscatterrows:
+	VSETVLI    X16, E8, M1, TA, MA, X7
+	VLSSEG8E8V (X22), X21, V8
+	ADD        X19, X10, X8
+	VSE8V      V8, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V9, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V10, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V11, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V12, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V13, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V14, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V15, (X8)
+	ADD        $8, X22, X6
+	VLSSEG8E8V (X6), X21, V8
+	ADD        X14, X8, X8
+	VSE8V      V8, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V9, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V10, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V11, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V12, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V13, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V14, (X8)
+	ADD        X14, X8, X8
+	VSE8V      V15, (X8)
+
+done:
+	RET
+
+#undef OP5
+#undef OP4
+#undef OP3
+#undef OP2
+#undef OP1
+#undef OP0
+#undef OQ0
+#undef OQ1
+#undef OQ2
+#undef OQ3
+#undef OQ4
+#undef OQ5
+#define OP5 -96
+#define OP4 -80
+#define OP3 -64
+#define OP2 -48
+#define OP1 -32
+#define OP0 -16
+#define OQ0 0
+#define OQ1 16
+#define OQ2 32
+#define OQ3 48
+#define OQ4 64
+#define OQ5 80
 
 #undef VLEW
 #undef VSEW
