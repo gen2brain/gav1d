@@ -65,7 +65,6 @@ func dspInit[P pixel](d *dspContext[P]) {
 		d8.prepBilin = prepBilin8AVX2
 		d8.itxAdd = itxAdd8Vec
 		d8.itxDC = itxDC8Vec
-		edgeFilter8Asm = edgeFilter8AVX2
 		d8.cdefDir = cdefFindDir8AVX2
 		d8.cdefCopy = cdefCopy8AVX2Rows
 		d8.loopFilter = loopFilter8AVX2
