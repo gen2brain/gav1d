@@ -5,12 +5,23 @@ package avif
 //go:noescape
 func convertRowRVV(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint8, n int, c *rowConsts)
 
+//go:noescape
+func convertRow444RVV(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint8, n int, c *rowConsts)
+
 func rowFn(ssHor int) convertRow {
 	if ssHor == 0 {
-		return convertRow444Go
+		return convertRow444Vec
 	}
 
 	return convertRowVec
+}
+
+func convertRow444Vec(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
+	n int, c *rowConsts,
+) {
+	if n > 0 {
+		convertRow444RVV(&dst[0], &yf[0], &u0[0], &u1[0], &v0[0], &v1[0], &a[0], n, c)
+	}
 }
 
 func convertRowVec(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
@@ -32,12 +43,23 @@ func convertRowVec(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
 //go:noescape
 func convertRow16RVV(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint16, n int, c *rowConsts)
 
+//go:noescape
+func convertRow16x444RVV(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint16, n int, c *rowConsts)
+
 func rowFn16(ssHor int) convertRow16 {
 	if ssHor == 0 {
-		return convertRow16x444Go
+		return convertRow16x444Vec
 	}
 
 	return convertRow16Vec
+}
+
+func convertRow16x444Vec(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
+	n int, c *rowConsts,
+) {
+	if n > 0 {
+		convertRow16x444RVV(&dst[0], &yf[0], &u0[0], &u1[0], &v0[0], &v1[0], &a[0], n, c)
+	}
 }
 
 func convertRow16Vec(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,

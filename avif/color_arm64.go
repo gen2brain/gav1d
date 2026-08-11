@@ -5,12 +5,30 @@ package avif
 //go:noescape
 func convertRow4NEON(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint8, n int, c *rowConsts)
 
+//go:noescape
+func convertRow444NEON(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint8, n int, c *rowConsts)
+
 func rowFn(ssHor int) convertRow {
 	if ssHor == 0 {
-		return convertRow444Go
+		return convertRow444NEONRow
 	}
 
 	return convertRowNEON
+}
+
+func convertRow444NEONRow(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
+	n int, c *rowConsts,
+) {
+	if n4 := n &^ 3; n4 > 0 {
+		convertRow444NEON(&dst[0], &yf[0], &u0[0], &u1[0], &v0[0], &v1[0], &a[0], n4, c)
+		if n4 == n {
+			return
+		}
+		dst, yf, a, n = dst[4*n4:], yf[n4:], a[n4:], n-n4
+		u0, u1, v0, v1 = u0[n4:], u1[n4:], v0[n4:], v1[n4:]
+	}
+
+	convertRow444Go(dst, yf, u0, u1, v0, v1, a, n, c)
 }
 
 func convertRowNEON(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
@@ -32,12 +50,30 @@ func convertRowNEON(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
 //go:noescape
 func convertRow16x4NEON(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint16, n int, c *rowConsts)
 
+//go:noescape
+func convertRow16x444NEON(dst *uint8, yf, u0, u1, v0, v1 *float32, a *uint16, n int, c *rowConsts)
+
 func rowFn16(ssHor int) convertRow16 {
 	if ssHor == 0 {
-		return convertRow16x444Go
+		return convertRow16x444NEONRow
 	}
 
 	return convertRow16NEON
+}
+
+func convertRow16x444NEONRow(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
+	n int, c *rowConsts,
+) {
+	if n4 := n &^ 3; n4 > 0 {
+		convertRow16x444NEON(&dst[0], &yf[0], &u0[0], &u1[0], &v0[0], &v1[0], &a[0], n4, c)
+		if n4 == n {
+			return
+		}
+		dst, yf, a, n = dst[8*n4:], yf[n4:], a[n4:], n-n4
+		u0, u1, v0, v1 = u0[n4:], u1[n4:], v0[n4:], v1[n4:]
+	}
+
+	convertRow16x444Go(dst, yf, u0, u1, v0, v1, a, n, c)
 }
 
 func convertRow16NEON(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
