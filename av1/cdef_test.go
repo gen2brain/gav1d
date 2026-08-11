@@ -316,6 +316,7 @@ func cdefDirAsmDepth[P pixel](t *testing.T, bitdepthMax int32) int {
 // replace. The sums are whatever the block sums can produce, including the
 // negatives and the wide magnitudes that make the squares wrap.
 func TestCdefDirCostAsm(t *testing.T) {
+	_ = dsp8()
 	if cdefDirCosts == nil {
 		t.Skip("no direction cost assembly on this architecture")
 	}
