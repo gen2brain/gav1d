@@ -92,7 +92,9 @@ func cdefAsmDepth[P pixel](t *testing.T, d *dspContext[P], bitdepthMax int32) in
 			for _, s := range shapes {
 				w, h := s[0], s[1]
 				for edges := range 16 {
-					for _, pri := range []int{0, 1 << min8, 5 << min8, 15 << min8} {
+					// An even level picks the other primary tap pair, which no
+					// odd level ever reaches.
+					for _, pri := range []int{0, 1 << min8, 2 << min8, 5 << min8, 15 << min8} {
 						for _, sec := range []int{0, 1 << min8, 2 << min8, 4 << min8} {
 							for dir := range 8 {
 								for _, damping := range []int{3 + min8, 6 + min8} {
