@@ -89,13 +89,34 @@ func lpf16AVX512(dst *uint16, stridea, strideb int, p *lpfParams)
 //go:noescape
 func lpf16WAVX512(dst *uint16, stridea, strideb int, p *lpfParams)
 
+//go:noescape
+func lpf16ZAVX512(dst *uint16, stridea, strideb int, p *lpfParams)
+
+//go:noescape
+func lpf16HZAVX512(dst *uint16, stridea, strideb int, p *lpfParams)
+
+//go:noescape
+func lpf16HZ14AVX512(dst *uint16, stridea, strideb int, p *lpfParams)
+
 func loopFilter16AVX512(dst []uint16, dstOff int, e, i, h int32,
 	stridea, strideb int, wd, lines int, bitdepthMax int32,
 ) {
 	p := lpfParamsFor(e, i, h, wd, bitdepthMax)
-	if stridea == 1 {
+	switch {
+	case stridea == 1:
+		for ; lines >= 16; lines, dstOff = lines-16, dstOff+16 {
+			lpf16ZAVX512(&dst[dstOff], stridea, strideb, &p)
+		}
 		for ; lines >= 8; lines, dstOff = lines-8, dstOff+8 {
 			lpf16WAVX512(&dst[dstOff], stridea, strideb, &p)
+		}
+	case wd < 16:
+		for ; lines >= 16; lines, dstOff = lines-16, dstOff+16*stridea {
+			lpf16HZAVX512(&dst[dstOff], stridea, strideb, &p)
+		}
+	default:
+		for ; lines >= 16; lines, dstOff = lines-16, dstOff+16*stridea {
+			lpf16HZ14AVX512(&dst[dstOff], stridea, strideb, &p)
 		}
 	}
 	for ; lines > 0; lines, dstOff = lines-4, dstOff+4*stridea {
