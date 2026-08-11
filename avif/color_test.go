@@ -11,9 +11,6 @@ func rowGen(iter, kind, i int) uint32 {
 	return v * 2654435761
 }
 
-// TestConvertRowAsm checks the architecture-specific row against the pure Go
-// one over every width and each matrix, comparing the whole destination so a
-// kernel that writes past the row fails.
 func TestConvertRowAsm(t *testing.T) {
 	matrices := []int{mcBT601, mcBT709, mcBT2020NCL}
 	cases := 0
@@ -140,7 +137,6 @@ func TestConvertRow16Asm(t *testing.T) {
 	t.Logf("%d cases", cases)
 }
 
-// TestNormRowAsm checks the normalization kernels against the pure Go ones.
 func TestNormRowAsm(t *testing.T) {
 	cases := 0
 

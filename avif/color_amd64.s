@@ -2,8 +2,6 @@
 
 #include "textflag.h"
 
-// The closest chroma sample of an output pair and its neighbour, as lane
-// selections over the padded row: eight outputs read six samples.
 DATA rowPermC<>+0(SB)/8, $0x0000000100000001
 DATA rowPermC<>+8(SB)/8, $0x0000000200000002
 DATA rowPermC<>+16(SB)/8, $0x0000000300000003
@@ -20,8 +18,6 @@ DATA rowShuf<>+0(SB)/8, $0x0d0905010c080400
 DATA rowShuf<>+8(SB)/8, $0x0f0b07030e0a0602
 GLOBL rowShuf<>(SB), RODATA|NOPTR, $16
 
-// CHROMA folds the four taps of one plane. The multiply and the add stay
-// separate because the scalar path rounds between them.
 #define CHROMA(P0, P1, OUT)          \
 	VMOVUPS  (P0), Y3;           \
 	VPERMPS  Y3, Y13, Y4;        \
@@ -37,14 +33,9 @@ GLOBL rowShuf<>(SB), RODATA|NOPTR, $16
 	VMULPS   Y10, Y5, Y5;        \
 	VADDPS   Y5, OUT, OUT
 
-// CHROMA444 is the same tap for a full chroma plane, where the sample sits
-// under the pixel and the padded row puts it one float in. The second plane
-// argument goes unused, so the row body reads the same either way.
 #define CHROMA444(P0, P1, OUT) \
 	VMOVUPS 4(P0), OUT
 
-// PIXEL clamps one channel to the pixel range and rounds it the way the scalar
-// path does, leaving the result as dwords.
 #define PIXEL(V)                     \
 	VMAXPS Y1, V, V;             \
 	VMINPS Y2, V, V;             \

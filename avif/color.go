@@ -18,7 +18,6 @@ const (
 	mcBT2020NCL = 9
 )
 
-// yuvCoefficients returns kr, kg, kb for a CICP matrix_coefficients value.
 func yuvCoefficients(matrix int) (float32, float32, float32) {
 	kr, kb := float32(0.299), float32(0.114)
 
@@ -68,7 +67,6 @@ type colorState struct {
 	cbRow, crRow []float32
 }
 
-// colorInfo resolves the description the same way the conversion does.
 func (f *file) colorInfo(it *item, pic *av1.Picture) ColorInfo {
 	ci := ColorInfo{
 		Primaries: uint16(pic.ColorPrimaries),
@@ -155,9 +153,6 @@ func newColorState(pic *av1.Picture, ci ColorInfo, outDepth int) *colorState {
 	return s
 }
 
-// derive folds the upsample weights and the matrix constants into tables. Each
-// is the same float32 the per-pixel expression would have produced, so the
-// output is unchanged.
 func (s *colorState) derive() {
 	const w0, w1, w2 = 9.0 / 16.0, 3.0 / 16.0, 1.0 / 16.0
 
@@ -180,8 +175,6 @@ func (s *colorState) derive() {
 	s.gcr, s.gcb = s.kr*(1-s.kr), s.kb*(1-s.kb)
 }
 
-// prepare sizes the row scratch and precomputes the chroma column indices,
-// which depend only on x and the width.
 func (s *colorState) prepare(w int) {
 	uw := (w + s.ssHor) >> s.ssHor
 
@@ -216,8 +209,6 @@ func (s *colorState) prepare(w int) {
 	}
 }
 
-// fillIdx widens one plane row into sample indices, so the inner loops index
-// tables without a depth test per pixel.
 func (s *colorState) fillIdx(data []byte, stride, y, n int, dst []uint16) {
 	if s.depth == 8 {
 		row := data[y*stride : y*stride+n]
@@ -236,9 +227,6 @@ func (s *colorState) fillIdx(data []byte, stride, y, n int, dst []uint16) {
 	}
 }
 
-// chromaRow gathers Cb and Cr for one output row, upsampling a subsampled plane
-// from the closest sample, the adjacent column, the adjacent row and the
-// diagonal.
 func (s *colorState) chromaRow(pic *av1.Picture, y, w int) {
 	uvY := y >> s.ssVer
 	uw := (w + s.ssHor) >> s.ssHor
@@ -285,7 +273,6 @@ func (s *colorState) chromaRow(pic *av1.Picture, y, w int) {
 	}
 }
 
-// rgbRow converts one row into r, g, b triples scaled to the output depth.
 func (s *colorState) rgbRow(pic *av1.Picture, y int, dst []uint16) {
 	w := pic.Width
 	s.fillIdx(pic.Data[0], pic.Stride[0], y, w, s.yRow)
@@ -331,7 +318,6 @@ func (s *colorState) rgbRow(pic *av1.Picture, y int, dst []uint16) {
 	}
 }
 
-// alphaRow reads one row of the alpha plane straight through the sample table.
 func (s *colorState) alphaRow(pic *av1.Picture, y, w int, dst []uint16) {
 	s.fillIdx(pic.Data[0], pic.Stride[0], y, w, s.yRow)
 	for x, v := range s.yRow {
@@ -350,7 +336,6 @@ func clampF(v float32) float32 {
 	return v
 }
 
-// lumaTable builds the luma normalization, which alpha uses too.
 func lumaTable(depth int, full bool) []float32 {
 	maxChannel := int(1)<<depth - 1
 	shift := depth - 8

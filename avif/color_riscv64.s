@@ -2,8 +2,6 @@
 
 #include "textflag.h"
 
-// CHROMA folds the four taps of one plane. The multiply and the add stay
-// separate because the scalar path rounds between them.
 #define CHROMA(P0, P1, OUT)      \
 	VLE32V     (P0), V3;     \
 	VRGATHERVV V6, V3, V4;   \
@@ -19,8 +17,6 @@
 	VFMULVF    F2, V5, V5;   \
 	VFADDVV    V5, OUT, OUT
 
-// PIXEL clamps one channel to the pixel range and rounds it the way the scalar
-// path does, leaving the result as words.
 #define PIXEL(V)             \
 	VFMAXVF     F11, V, V; \
 	VFMINVF     F9, V, V;  \
@@ -28,7 +24,6 @@
 	VFADDVF     F10, V, V; \
 	VFCVTRTZXFV V, V
 
-// NARROW takes one channel down to bytes, two halvings apart.
 #define NARROW(SRC, DST)                   \
 	VSETVLI X5, E16, MF2, TA, MA, X6;  \
 	VNSRLWI $0, SRC, V20;              \
@@ -62,7 +57,6 @@ TEXT ·convertRowRVV(SB), NOSPLIT, $0-72
 	MOVF 44(X18), F11
 
 loop:
-	// A strip is capped so the gather stays inside the row's slack.
 	MOV     $16, X19
 	MIN     X17, X19, X19
 	VSETVLI X19, E32, M1, TA, MA, X5
@@ -129,8 +123,6 @@ loop:
 
 	RET
 
-// SWAP16 narrows one channel to halfwords and puts them in the big-endian order
-// NRGBA64 stores.
 #define SWAP16(SRC, DST)                  \
 	VSETVLI X5, E16, MF2, TA, MA, X6; \
 	VNSRLWI $0, SRC, DST;             \
@@ -165,7 +157,6 @@ TEXT ·convertRow16RVV(SB), NOSPLIT, $0-72
 	MOVF 44(X18), F11
 
 loop16:
-	// A strip is capped so the gather stays inside the row's slack.
 	MOV     $16, X19
 	MIN     X17, X19, X19
 	VSETVLI X19, E32, M1, TA, MA, X5

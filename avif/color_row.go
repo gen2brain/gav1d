@@ -6,9 +6,6 @@ import (
 	"github.com/gen2brain/gav1d/av1"
 )
 
-// rowConsts carries everything the row kernel needs. The scalar path builds the
-// same values into tables, so the kernels reproduce its arithmetic exactly
-// rather than approximating it.
 type rowConsts struct {
 	w0, w1, w2     float32
 	crCoef, cbCoef float32
@@ -18,21 +15,12 @@ type rowConsts struct {
 	zero           float32
 }
 
-// convertRow is a whole output row. The samples arrive already normalized,
-// which is one table lookup per sample rather than one per tap, and leaves the
-// kernels pure arithmetic: no gather and no divide.
 type convertRow func(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
 	n int, c *rowConsts)
 
-// convertRow16 is the same row for a 16-bit output image. It writes the
-// big-endian pairs NRGBA64 stores, so the scalar path's separate widening loop
-// disappears with it.
 type convertRow16 func(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
 	n int, c *rowConsts)
 
-// fastRow reports whether the row kernel covers this image. It handles both
-// chroma layouts, matching input and output depth and the three-coefficient
-// matrices; the scalar path keeps everything else.
 func (s *colorState) fastRow(outDepth int) bool {
 	if !s.hasColor {
 		return false
@@ -74,9 +62,6 @@ func normRow16Go(dst []float32, src []uint8, maxCh uint16, bias, rng float32) {
 	}
 }
 
-// convertRow444Go and convertRow16x444Go are the full chroma references. The
-// sample sits under the pixel, so the four taps collapse to the padded sample
-// and the second row goes unread.
 func convertRow444Go(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
 	n int, c *rowConsts,
 ) {
@@ -114,7 +99,6 @@ func convertRow16x444Go(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
 	}
 }
 
-// convertRow16Go is the reference the 16-bit kernels are tested against.
 func convertRow16Go(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
 	n int, c *rowConsts,
 ) {
@@ -142,7 +126,6 @@ func convertRow16Go(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
 	}
 }
 
-// convertRowGo is the reference the kernels are tested against.
 func convertRowGo(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
 	n int, c *rowConsts,
 ) {
@@ -169,8 +152,6 @@ func convertRowGo(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
 	}
 }
 
-// rowPlanes picks the two chroma rows an output row reads, replicating the
-// vertical neighbour the way the scalar path clamps it.
 func (s *colorState) rowPlanes(pic *av1.Picture, y, w int) (u0, u1, v0, v1 []float32) {
 	uvY := y >> s.ssVer
 	uw := (w + s.ssHor) >> s.ssHor
@@ -196,7 +177,6 @@ func (s *colorState) rowPlanes(pic *av1.Picture, y, w int) (u0, u1, v0, v1 []flo
 	return u0, u1, v0, v1
 }
 
-// padRow normalizes one chroma row at whatever depth the picture carries.
 func (s *colorState) padRow(dst []float32, src []byte, stride, y, uw int) []float32 {
 	if s.depth == 8 {
 		normRow(dst[1:1+uw], src[y*stride:y*stride+uw], s.biasUV, s.rangeUV)
@@ -210,7 +190,6 @@ func (s *colorState) padRow(dst []float32, src []byte, stride, y, uw int) []floa
 	return dst
 }
 
-// lumaRow normalizes one luma row.
 func (s *colorState) lumaRow(pic *av1.Picture, y, w int) []float32 {
 	off := y * pic.Stride[0]
 	if s.depth == 8 {

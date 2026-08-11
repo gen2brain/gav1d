@@ -2,7 +2,6 @@
 
 #include "textflag.h"
 
-// Go's arm64 assembler has no vector float arithmetic.
 #define FMUL(Vd, Vn, Vm)   WORD $(0x6E20DC00 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
 #define FADD(Vd, Vn, Vm)   WORD $(0x4E20D400 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
 #define FSUB(Vd, Vn, Vm)   WORD $(0x4EA0D400 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
@@ -11,8 +10,6 @@
 #define FMIN(Vd, Vn, Vm)   WORD $(0x4EA0F400 | ((Vm) << 16) | ((Vn) << 5) | (Vd))
 #define FCVTZS(Vd, Vn)     WORD $(0x4EA1B800 | ((Vn) << 5) | (Vd))
 
-// The closest chroma sample of an output pair and its neighbour, as byte
-// selections over four floats: four outputs read four samples.
 DATA rowSelC<>+0(SB)/8, $0x0706050407060504
 DATA rowSelC<>+8(SB)/8, $0x0b0a09080b0a0908
 GLOBL rowSelC<>(SB), RODATA|NOPTR, $16
@@ -21,13 +18,10 @@ DATA rowSelN<>+0(SB)/8, $0x0b0a090803020100
 DATA rowSelN<>+8(SB)/8, $0x0f0e0d0c07060504
 GLOBL rowSelN<>(SB), RODATA|NOPTR, $16
 
-// One table lookup packs the four channels and interleaves them.
 DATA rowSelP<>+0(SB)/8, $0x3424140430201000
 DATA rowSelP<>+8(SB)/8, $0x3c2c1c0c38281808
 GLOBL rowSelP<>(SB), RODATA|NOPTR, $16
 
-// CHROMA folds the four taps of one plane. The multiply and the add stay
-// separate because the scalar path rounds between them.
 #define CHROMA(P0, P1, OUT)          \
 	VLD1 (P0), [V4.S4];          \
 	VTBL V16.B16, [V4.B16], V5.B16; \
@@ -43,8 +37,6 @@ GLOBL rowSelP<>(SB), RODATA|NOPTR, $16
 	FMUL(6, 6, 22);              \
 	FADD(OUT, OUT, 6)
 
-// PIXEL clamps one channel to the pixel range and rounds it the way the scalar
-// path does, leaving the result as words.
 #define PIXEL(V)          \
 	FMAX(V, V, 24);   \
 	FMIN(V, V, 25);   \
@@ -139,7 +131,6 @@ loop:
 
 	RET
 
-// Two lookups pack the four channels as big-endian pairs, four pixels at a time.
 DATA rowSelD<>+0(SB)/8, $0x3031202110110001
 DATA rowSelD<>+8(SB)/8, $0x3435242514150405
 GLOBL rowSelD<>(SB), RODATA|NOPTR, $16
