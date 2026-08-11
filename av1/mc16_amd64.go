@@ -4,15 +4,25 @@ package av1
 
 //go:noescape
 func mcTap16AVX2(dst *uint16, dstStride int, src *uint16, srcStride, tapStride int,
-	f *[8]int32, w, h int, rnd int32, shift int, maxv int32)
+	f *[4]int32, w, h int, rnd int32, shift int, maxv int32)
 
 //go:noescape
 func mcTapMid16AVX2(dst *int16, dstStride int, src *uint16, srcStride, tapStride int,
-	f *[8]int32, w, h int, rnd int32, shift int, maxv int32)
+	f *[4]int32, w, h int, rnd int32, shift int, maxv int32)
 
 //go:noescape
 func mcTapFromMid16AVX2(dst *uint16, dstStride int, src *int16, srcStride, tapStride int,
-	f *[8]int32, w, h int, rnd int32, shift int, maxv int32)
+	f *[4]int32, w, h int, rnd int32, shift int, maxv int32)
+
+// mcTapPairs packs the taps two to a dword, which is what VPMADDWD consumes.
+func mcTapPairs(f *[8]int8) [4]int32 {
+	var t [4]int32
+	for i := range t {
+		t[i] = int32(uint16(f[2*i])) | int32(f[2*i+1])<<16
+	}
+
+	return t
+}
 
 func put8tap16AVX2(mid []int16, dst []uint16, dstOff, dstStride int, src []uint16, srcOff, srcStride,
 	w, h, mx, my, filterType int, bitdepthMax int32,
@@ -31,20 +41,20 @@ func put8tap16AVX2(mid []int16, dst []uint16, dstOff, dstStride int, src []uint1
 
 	switch {
 	case fh != nil && fv != nil:
-		ft := mcTaps(fh)
+		ft := mcTapPairs(fh)
 		mcTapMid16AVX2(&mid[0], mcMidStride, &src[srcOff-3*srcStride-3], srcStride, 1,
 			&ft, w, h+7, int32(1)<<(5-ib), 6-ib, 0)
-		ft = mcTaps(fv)
+		ft = mcTapPairs(fv)
 		mcTapFromMid16AVX2(&dst[dstOff], dstStride, &mid[0], mcMidStride,
 			mcMidStride, &ft, w, h, int32(1)<<(5+ib), 6+ib, bitdepthMax)
 
 	case fh != nil:
-		ft := mcTaps(fh)
+		ft := mcTapPairs(fh)
 		mcTap16AVX2(&dst[dstOff], dstStride, &src[srcOff-3], srcStride, 1,
 			&ft, w, h, int32(32+((1<<(6-ib))>>1)), 6, bitdepthMax)
 
 	default:
-		ft := mcTaps(fv)
+		ft := mcTapPairs(fv)
 		mcTap16AVX2(&dst[dstOff], dstStride, &src[srcOff-3*srcStride], srcStride, srcStride,
 			&ft, w, h, 32, 6, bitdepthMax)
 	}
@@ -52,7 +62,7 @@ func put8tap16AVX2(mid []int16, dst []uint16, dstOff, dstStride int, src []uint1
 
 //go:noescape
 func mcTapPrepMid16AVX2(dst *int16, dstStride int, src *int16, srcStride, tapStride int,
-	f *[8]int32, w, h int, rnd int32, shift int, maxv int32)
+	f *[4]int32, w, h int, rnd int32, shift int, maxv int32)
 
 func prep8tap16AVX2(mid []int16, tmp []int16, src []uint16, srcOff, srcStride,
 	w, h, mx, my, filterType int, bitdepthMax int32,
@@ -71,19 +81,19 @@ func prep8tap16AVX2(mid []int16, tmp []int16, src []uint16, srcOff, srcStride,
 
 	switch {
 	case fh != nil && fv != nil:
-		ft := mcTaps(fh)
+		ft := mcTapPairs(fh)
 		mcTapMid16AVX2(&mid[0], mcMidStride, &src[srcOff-3*srcStride-3], srcStride, 1,
 			&ft, w, h+7, int32(1)<<(5-ib), 6-ib, 0)
-		ft = mcTaps(fv)
+		ft = mcTapPairs(fv)
 		mcTapPrepMid16AVX2(&tmp[0], w, &mid[0], mcMidStride, mcMidStride,
 			&ft, w, h, 32-prepBias(bitdepthMax)<<6, 6, 0)
 
 	case fh != nil:
-		ft := mcTaps(fh)
+		ft := mcTapPairs(fh)
 		mcTapMid16AVX2(&tmp[0], w, &src[srcOff-3], srcStride, 1, &ft, w, h, rnd, 6-ib, 0)
 
 	default:
-		ft := mcTaps(fv)
+		ft := mcTapPairs(fv)
 		mcTapMid16AVX2(&tmp[0], w, &src[srcOff-3*srcStride], srcStride, srcStride,
 			&ft, w, h, rnd, 6-ib, 0)
 	}

@@ -2,21 +2,17 @@
 
 #include "textflag.h"
 
-// At high bit depth the samples no longer fit the byte multiply the 8-bit
-// kernels use, so every tap goes through a 32-bit multiply. That makes the tap
-// stride free, which is what lets one kernel serve both directions.
+// At high bit depth a sample and a tap both fit a word, so two taps go through
+// one VPMADDWD. The pair is one tap stride apart, which is what still lets a
+// single kernel serve both directions.
 
-// FSETUP broadcasts the eight taps, which the caller has widened to dwords.
+// FSETUP broadcasts the four tap pairs the caller has packed.
 #define FSETUP                    \
 	MOVQ         f+40(FP), AX; \
 	VPBROADCASTD (AX), Y8;    \
 	VPBROADCASTD 4(AX), Y9;   \
 	VPBROADCASTD 8(AX), Y10;  \
 	VPBROADCASTD 12(AX), Y11; \
-	VPBROADCASTD 16(AX), Y12; \
-	VPBROADCASTD 20(AX), Y13; \
-	VPBROADCASTD 24(AX), Y14; \
-	VPBROADCASTD 28(AX), Y15; \
 	MOVQ         dst+0(FP), DI; \
 	MOVQ         src+16(FP), SI; \
 	MOVQ         tapStride+32(FP), R10; \
@@ -32,40 +28,61 @@
 	VPXOR        Y4, Y4, Y4;  \
 	MOVQ         h+56(FP), R12
 
-// TAPS8 accumulates the eight taps of one output group into Y0.
-#define TAPS8(WIDEN)     \
-	WIDEN (CX), Y1;  \
-	VPMULLD Y8, Y1, Y0; \
-	ADDQ  R10, CX;   \
-	WIDEN (CX), Y1;  \
-	VPMULLD Y9, Y1, Y1; \
-	VPADDD Y1, Y0, Y0; \
-	ADDQ  R10, CX;   \
-	WIDEN (CX), Y1;  \
-	VPMULLD Y10, Y1, Y1; \
-	VPADDD Y1, Y0, Y0; \
-	ADDQ  R10, CX;   \
-	WIDEN (CX), Y1;  \
-	VPMULLD Y11, Y1, Y1; \
-	VPADDD Y1, Y0, Y0; \
-	ADDQ  R10, CX;   \
-	WIDEN (CX), Y1;  \
-	VPMULLD Y12, Y1, Y1; \
-	VPADDD Y1, Y0, Y0; \
-	ADDQ  R10, CX;   \
-	WIDEN (CX), Y1;  \
-	VPMULLD Y13, Y1, Y1; \
-	VPADDD Y1, Y0, Y0; \
-	ADDQ  R10, CX;   \
-	WIDEN (CX), Y1;  \
-	VPMULLD Y14, Y1, Y1; \
-	VPADDD Y1, Y0, Y0; \
-	ADDQ  R10, CX;   \
-	WIDEN (CX), Y1;  \
-	VPMULLD Y15, Y1, Y1; \
-	VPADDD Y1, Y0, Y0; \
-	VPADDD Y7, Y0, Y0; \
-	VPSRAD X6, Y0, Y0
+// TAPS8 leaves the low half of every lane in A0 and the high half in A1, which
+// is the order VPACKUSDW puts back together.
+#define TAPS8(A0, A1, L0, L1, T0, T1, F0, F1, F2, F3, RND) \
+	VMOVDQU    (CX), L0;         \
+	VMOVDQU    (CX)(R10*1), L1;  \
+	VPUNPCKLWD L1, L0, A0;       \
+	VPUNPCKHWD L1, L0, A1;       \
+	VPMADDWD   F0, A0, A0;       \
+	VPMADDWD   F0, A1, A1;       \
+	LEAQ       (CX)(R10*2), CX;  \
+	VMOVDQU    (CX), L0;         \
+	VMOVDQU    (CX)(R10*1), L1;  \
+	VPUNPCKLWD L1, L0, T0;       \
+	VPUNPCKHWD L1, L0, T1;       \
+	VPMADDWD   F1, T0, T0;       \
+	VPMADDWD   F1, T1, T1;       \
+	VPADDD     T0, A0, A0;       \
+	VPADDD     T1, A1, A1;       \
+	LEAQ       (CX)(R10*2), CX;  \
+	VMOVDQU    (CX), L0;         \
+	VMOVDQU    (CX)(R10*1), L1;  \
+	VPUNPCKLWD L1, L0, T0;       \
+	VPUNPCKHWD L1, L0, T1;       \
+	VPMADDWD   F2, T0, T0;       \
+	VPMADDWD   F2, T1, T1;       \
+	VPADDD     T0, A0, A0;       \
+	VPADDD     T1, A1, A1;       \
+	LEAQ       (CX)(R10*2), CX;  \
+	VMOVDQU    (CX), L0;         \
+	VMOVDQU    (CX)(R10*1), L1;  \
+	VPUNPCKLWD L1, L0, T0;       \
+	VPUNPCKHWD L1, L0, T1;       \
+	VPMADDWD   F3, T0, T0;       \
+	VPMADDWD   F3, T1, T1;       \
+	VPADDD     T0, A0, A0;       \
+	VPADDD     T1, A1, A1;       \
+	VPADDD     RND, A0, A0;      \
+	VPADDD     RND, A1, A1;      \
+	VPSRAD     X6, A0, A0;       \
+	VPSRAD     X6, A1, A1
+
+#define TAPSY TAPS8(Y0, Y3, Y1, Y2, Y13, Y14, Y8, Y9, Y10, Y11, Y7)
+#define TAPSX TAPS8(X0, X3, X1, X2, X13, X14, X8, X9, X10, X11, X7)
+
+#define CLIPY               \
+	VPMAXSD Y4, Y0, Y0; \
+	VPMAXSD Y4, Y3, Y3; \
+	VPMINSD Y5, Y0, Y0; \
+	VPMINSD Y5, Y3, Y3
+
+#define CLIPX               \
+	VPMAXSD X4, X0, X0; \
+	VPMAXSD X4, X3, X3; \
+	VPMINSD X5, X0, X0; \
+	VPMINSD X5, X3, X3
 
 #define ROWSTEP(NAME)              \
 	MOVQ srcStride+24(FP), AX; \
@@ -129,7 +146,7 @@
 	DECQ R12;                  \
 	JNZ  NAME
 
-// func mcTap16AVX2(dst *uint16, dstStride int, src *uint16, srcStride, tapStride int, f *[8]int32, w, h int, rnd int32, shift int, maxv int32)
+// func mcTap16AVX2(dst *uint16, dstStride int, src *uint16, srcStride, tapStride int, f *[4]int32, w, h int, rnd int32, shift int, maxv int32)
 TEXT ·mcTap16AVX2(SB), NOSPLIT, $0-84
 	FSETUP
 
@@ -137,26 +154,36 @@ rows1:
 	MOVQ w+48(FP), DX
 	MOVQ SI, R11
 	MOVQ DI, R13
+	CMPQ DX, $16
+	JLT  narrow1
 
 cols1:
-
 	MOVQ R11, CX
-	TAPS8(VPMOVZXWD)
-	VPMAXSD   Y4, Y0, Y0
-	VPMINSD   Y5, Y0, Y0
-	VPACKUSDW Y0, Y0, Y0
-	VPERMQ    $0x08, Y0, Y0
-	VMOVDQU   X0, (R13)
-	ADDQ      $16, R11
-	ADDQ      $16, R13
-	SUBQ      $8, DX
-	JNZ       cols1
+	TAPSY
+	CLIPY
+	VPACKUSDW Y3, Y0, Y0
+	VMOVDQU   Y0, (R13)
+	ADDQ      $32, R11
+	ADDQ      $32, R13
+	SUBQ      $16, DX
+	CMPQ      DX, $16
+	JGE       cols1
+	TESTQ     DX, DX
+	JZ        next1
 
+narrow1:
+	MOVQ R11, CX
+	TAPSX
+	CLIPX
+	VPACKUSDW X3, X0, X0
+	VMOVDQU   X0, (R13)
+
+next1:
 	ROWSTEP(rows1)
 	VZEROUPPER
 	RET
 
-// func mcTapMid16AVX2(dst *int16, dstStride int, src *uint16, srcStride, tapStride int, f *[8]int32, w, h int, rnd int32, shift int, maxv int32)
+// func mcTapMid16AVX2(dst *int16, dstStride int, src *uint16, srcStride, tapStride int, f *[4]int32, w, h int, rnd int32, shift int, maxv int32)
 TEXT ·mcTapMid16AVX2(SB), NOSPLIT, $0-84
 	FSETUP
 
@@ -164,23 +191,34 @@ rows2:
 	MOVQ w+48(FP), DX
 	MOVQ SI, R11
 	MOVQ DI, R13
+	CMPQ DX, $16
+	JLT  narrow2
 
 cols2:
 	MOVQ R11, CX
-	TAPS8(VPMOVZXWD)
-	VPACKSSDW Y0, Y0, Y0
-	VPERMQ    $0x08, Y0, Y0
-	VMOVDQU   X0, (R13)
-	ADDQ      $16, R11
-	ADDQ      $16, R13
-	SUBQ      $8, DX
-	JNZ       cols2
+	TAPSY
+	VPACKSSDW Y3, Y0, Y0
+	VMOVDQU   Y0, (R13)
+	ADDQ      $32, R11
+	ADDQ      $32, R13
+	SUBQ      $16, DX
+	CMPQ      DX, $16
+	JGE       cols2
+	TESTQ     DX, DX
+	JZ        next2
 
+narrow2:
+	MOVQ R11, CX
+	TAPSX
+	VPACKSSDW X3, X0, X0
+	VMOVDQU   X0, (R13)
+
+next2:
 	ROWSTEP(rows2)
 	VZEROUPPER
 	RET
 
-// func mcTapFromMid16AVX2(dst *uint16, dstStride int, src *int16, srcStride, tapStride int, f *[8]int32, w, h int, rnd int32, shift int, maxv int32)
+// func mcTapFromMid16AVX2(dst *uint16, dstStride int, src *int16, srcStride, tapStride int, f *[4]int32, w, h int, rnd int32, shift int, maxv int32)
 TEXT ·mcTapFromMid16AVX2(SB), NOSPLIT, $0-84
 	FSETUP
 
@@ -188,25 +226,36 @@ rows3:
 	MOVQ w+48(FP), DX
 	MOVQ SI, R11
 	MOVQ DI, R13
+	CMPQ DX, $16
+	JLT  narrow3
 
 cols3:
 	MOVQ R11, CX
-	TAPS8(VPMOVSXWD)
-	VPMAXSD   Y4, Y0, Y0
-	VPMINSD   Y5, Y0, Y0
-	VPACKUSDW Y0, Y0, Y0
-	VPERMQ    $0x08, Y0, Y0
-	VMOVDQU   X0, (R13)
-	ADDQ      $16, R11
-	ADDQ      $16, R13
-	SUBQ      $8, DX
-	JNZ       cols3
+	TAPSY
+	CLIPY
+	VPACKUSDW Y3, Y0, Y0
+	VMOVDQU   Y0, (R13)
+	ADDQ      $32, R11
+	ADDQ      $32, R13
+	SUBQ      $16, DX
+	CMPQ      DX, $16
+	JGE       cols3
+	TESTQ     DX, DX
+	JZ        next3
 
+narrow3:
+	MOVQ R11, CX
+	TAPSX
+	CLIPX
+	VPACKUSDW X3, X0, X0
+	VMOVDQU   X0, (R13)
+
+next3:
 	ROWSTEP(rows3)
 	VZEROUPPER
 	RET
 
-// func mcTapPrepMid16AVX2(dst *int16, dstStride int, src *int16, srcStride, tapStride int, f *[8]int32, w, h int, rnd int32, shift int, maxv int32)
+// func mcTapPrepMid16AVX2(dst *int16, dstStride int, src *int16, srcStride, tapStride int, f *[4]int32, w, h int, rnd int32, shift int, maxv int32)
 TEXT ·mcTapPrepMid16AVX2(SB), NOSPLIT, $0-84
 	FSETUP
 
@@ -214,18 +263,29 @@ rows4:
 	MOVQ w+48(FP), DX
 	MOVQ SI, R11
 	MOVQ DI, R13
+	CMPQ DX, $16
+	JLT  narrow4
 
 cols4:
 	MOVQ R11, CX
-	TAPS8(VPMOVSXWD)
-	VPACKSSDW Y0, Y0, Y0
-	VPERMQ    $0x08, Y0, Y0
-	VMOVDQU   X0, (R13)
-	ADDQ      $16, R11
-	ADDQ      $16, R13
-	SUBQ      $8, DX
-	JNZ       cols4
+	TAPSY
+	VPACKSSDW Y3, Y0, Y0
+	VMOVDQU   Y0, (R13)
+	ADDQ      $32, R11
+	ADDQ      $32, R13
+	SUBQ      $16, DX
+	CMPQ      DX, $16
+	JGE       cols4
+	TESTQ     DX, DX
+	JZ        next4
 
+narrow4:
+	MOVQ R11, CX
+	TAPSX
+	VPACKSSDW X3, X0, X0
+	VMOVDQU   X0, (R13)
+
+next4:
 	ROWSTEP(rows4)
 	VZEROUPPER
 	RET
