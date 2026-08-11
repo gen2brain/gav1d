@@ -9,6 +9,12 @@ func cdefFilterNEON(dst *uint8, dstStride int, tmp *int16, p *cdefParams)
 func cdefFilterClipNEON(dst *uint8, dstStride int, tmp *int16, p *cdefParams)
 
 //go:noescape
+func cdefFilter4NEON(dst *uint8, dstStride int, tmp *int16, p *cdefParams)
+
+//go:noescape
+func cdefFilterClip4NEON(dst *uint8, dstStride int, tmp *int16, p *cdefParams)
+
+//go:noescape
 func cdefFilter16NEON(dst *uint16, dstStride int, tmp *int16, p *cdefParams)
 
 //go:noescape
@@ -26,13 +32,17 @@ func cdefFilterBlockNEON(tmp []int16, dst []uint8, dstOff, dstStride int,
 
 	p := cdefParamsFor(priStrength, secStrength, dir, damping, w, h, bitdepthMax)
 
-	if priStrength != 0 && secStrength != 0 {
+	clip := priStrength != 0 && secStrength != 0
+	switch {
+	case w == 4 && clip:
+		cdefFilterClip4NEON(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
+	case w == 4:
+		cdefFilter4NEON(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
+	case clip:
 		cdefFilterClipNEON(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
-
-		return
+	default:
+		cdefFilterNEON(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
 	}
-
-	cdefFilterNEON(&dst[dstOff], dstStride, &tmp[tmpOff], &p)
 }
 
 func cdefFilterBlock16NEON(tmp []int16, dst []uint16, dstOff, dstStride int,
