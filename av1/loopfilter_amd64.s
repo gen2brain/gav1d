@@ -19,6 +19,26 @@ DATA lpfWordInv<>+0(SB)/8, $0x0b0a030209080100
 DATA lpfWordInv<>+8(SB)/8, $0x0f0e07060d0c0504
 GLOBL lpfWordInv<>(SB), RODATA|NOPTR, $16
 
+// Sixteen lines transpose four rows at a time, which leaves each quarter of a
+// tap group in its own quadword; this gathers the four quarters back together.
+DATA lpfPerm16<>+0(SB)/4, $0
+DATA lpfPerm16<>+4(SB)/4, $4
+DATA lpfPerm16<>+8(SB)/4, $8
+DATA lpfPerm16<>+12(SB)/4, $12
+DATA lpfPerm16<>+16(SB)/4, $1
+DATA lpfPerm16<>+20(SB)/4, $5
+DATA lpfPerm16<>+24(SB)/4, $9
+DATA lpfPerm16<>+28(SB)/4, $13
+DATA lpfPerm16<>+32(SB)/4, $2
+DATA lpfPerm16<>+36(SB)/4, $6
+DATA lpfPerm16<>+40(SB)/4, $10
+DATA lpfPerm16<>+44(SB)/4, $14
+DATA lpfPerm16<>+48(SB)/4, $3
+DATA lpfPerm16<>+52(SB)/4, $7
+DATA lpfPerm16<>+56(SB)/4, $11
+DATA lpfPerm16<>+60(SB)/4, $15
+GLOBL lpfPerm16<>(SB), RODATA|NOPTR, $64
+
 #define LW 16
 #define MOVU VMOVDQU
 #define PXOR VPXOR
@@ -1286,4 +1306,239 @@ TEXT ·lpf8HWAVX512(SB), 0, $1536-32
 // func lpf8ZAVX512(dst *uint8, stridea, strideb int, p *lpfParams)
 TEXT ·lpf8ZAVX512(SB), 0, $2816-32
 	LPF8W(LPFBODY512)
+	RET
+
+// LPF8HZ is LPF8HW over sixteen rows. Two eight by eight transposes give each
+// tap as two halves, and one qword interleave joins them into a full lane.
+#define JOIN8B(A0, A1, A2, A3, B0, B1, B2, B3, D0, D1, D2, D3, D4, D5, D6, D7) \
+	VPUNPCKLQDQ B0, A0, D0; \
+	VPUNPCKHQDQ B0, A0, D1; \
+	VPUNPCKLQDQ B1, A1, D2; \
+	VPUNPCKHQDQ B1, A1, D3; \
+	VPUNPCKLQDQ B2, A2, D4; \
+	VPUNPCKHQDQ B2, A2, D5; \
+	VPUNPCKLQDQ B3, A3, D6; \
+	VPUNPCKHQDQ B3, A3, D7
+
+#define LPF8HZ(FILTER) \
+	MOVQ dst+0(FP), SI;        \
+	MOVQ stridea+8(FP), R8;    \
+	MOVQ p+24(FP), DI;         \
+	LEAQ 13*LW(SP), BX;        \
+	LEAQ (R8)(R8*2), R10;      \
+	VMOVQ -4(SI), X0;          \
+	VMOVQ -4(SI)(R8*1), X1;    \
+	VMOVQ -4(SI)(R8*2), X2;    \
+	VMOVQ -4(SI)(R10*1), X3;   \
+	LEAQ (SI)(R8*4), CX;       \
+	VMOVQ -4(CX), X4;          \
+	VMOVQ -4(CX)(R8*1), X5;    \
+	VMOVQ -4(CX)(R8*2), X6;    \
+	VMOVQ -4(CX)(R10*1), X7;   \
+	TRANSPOSE8B(X0, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11); \
+	LEAQ (CX)(R8*4), CX;       \
+	VMOVQ -4(CX), X0;          \
+	VMOVQ -4(CX)(R8*1), X1;    \
+	VMOVQ -4(CX)(R8*2), X2;    \
+	VMOVQ -4(CX)(R10*1), X3;   \
+	LEAQ (CX)(R8*4), CX;       \
+	VMOVQ -4(CX), X4;          \
+	VMOVQ -4(CX)(R8*1), X5;    \
+	VMOVQ -4(CX)(R8*2), X6;    \
+	VMOVQ -4(CX)(R10*1), X7;   \
+	TRANSPOSE8B(X0, X1, X2, X3, X4, X5, X6, X7, X12, X13, X14, X15); \
+	JOIN8B(X8, X9, X10, X11, X12, X13, X14, X15, X0, X1, X2, X3, X4, X5, X6, X7); \
+	VMOVDQU X0, 31*LW+0(BX);   \
+	VMOVDQU X1, 31*LW+16(BX);  \
+	VMOVDQU X2, 31*LW+32(BX);  \
+	VMOVDQU X3, 31*LW+48(BX);  \
+	VMOVDQU X4, 31*LW+64(BX);  \
+	VMOVDQU X5, 31*LW+80(BX);  \
+	VMOVDQU X6, 31*LW+96(BX);  \
+	VMOVDQU X7, 31*LW+112(BX); \
+	LEAQ  31*LW(BX), CX;       \
+	LEAQ  -4*LW(BX), DX;       \
+	MOVQ  $8, R14;             \
+	widenloop:;                \
+	VPMOVZXBD (CX), V0;        \
+	MOVU      V0, (DX);        \
+	MOVU      V0, 20*LW(DX);   \
+	ADDQ      $16, CX;         \
+	ADDQ      $LW, DX;         \
+	DECQ      R14;             \
+	JNZ       widenloop;       \
+	FILTER;                    \
+	scatter:;                  \
+	LEAQ  31*LW(BX), CX;       \
+	LEAQ  -4*LW(BX), DX;       \
+	MOVQ  $8, R14;             \
+	packloop:;                 \
+	MOVU      20*LW(DX), V0;   \
+	VPMOVUSDB V0, (CX);        \
+	ADDQ      $16, CX;         \
+	ADDQ      $LW, DX;         \
+	DECQ      R14;             \
+	JNZ       packloop;        \
+	VMOVQ 31*LW+0(BX), X0;     \
+	VMOVQ 31*LW+16(BX), X1;    \
+	VMOVQ 31*LW+32(BX), X2;    \
+	VMOVQ 31*LW+48(BX), X3;    \
+	VMOVQ 31*LW+64(BX), X4;    \
+	VMOVQ 31*LW+80(BX), X5;    \
+	VMOVQ 31*LW+96(BX), X6;    \
+	VMOVQ 31*LW+112(BX), X7;   \
+	TRANSPOSE8B(X0, X1, X2, X3, X4, X5, X6, X7, X8, X9, X10, X11); \
+	VMOVQ 31*LW+8(BX), X0;     \
+	VMOVQ 31*LW+24(BX), X1;    \
+	VMOVQ 31*LW+40(BX), X2;    \
+	VMOVQ 31*LW+56(BX), X3;    \
+	VMOVQ 31*LW+72(BX), X4;    \
+	VMOVQ 31*LW+88(BX), X5;    \
+	VMOVQ 31*LW+104(BX), X6;   \
+	VMOVQ 31*LW+120(BX), X7;   \
+	TRANSPOSE8B(X0, X1, X2, X3, X4, X5, X6, X7, X12, X13, X14, X15); \
+	LEAQ (R8)(R8*2), R10;      \
+	VMOVQ   X8, -4(SI);        \
+	VPEXTRQ $1, X8, AX;        \
+	MOVQ    AX, -4(SI)(R8*1);  \
+	VMOVQ   X9, -4(SI)(R8*2);  \
+	VPEXTRQ $1, X9, AX;        \
+	MOVQ    AX, -4(SI)(R10*1); \
+	LEAQ (SI)(R8*4), CX;       \
+	VMOVQ   X10, -4(CX);       \
+	VPEXTRQ $1, X10, AX;       \
+	MOVQ    AX, -4(CX)(R8*1);  \
+	VMOVQ   X11, -4(CX)(R8*2); \
+	VPEXTRQ $1, X11, AX;       \
+	MOVQ    AX, -4(CX)(R10*1); \
+	LEAQ (CX)(R8*4), CX;       \
+	VMOVQ   X12, -4(CX);       \
+	VPEXTRQ $1, X12, AX;       \
+	MOVQ    AX, -4(CX)(R8*1);  \
+	VMOVQ   X13, -4(CX)(R8*2); \
+	VPEXTRQ $1, X13, AX;       \
+	MOVQ    AX, -4(CX)(R10*1); \
+	LEAQ (CX)(R8*4), CX;       \
+	VMOVQ   X14, -4(CX);       \
+	VPEXTRQ $1, X14, AX;       \
+	MOVQ    AX, -4(CX)(R8*1);  \
+	VMOVQ   X15, -4(CX)(R8*2); \
+	VPEXTRQ $1, X15, AX;       \
+	MOVQ    AX, -4(CX)(R10*1); \
+	VZEROUPPER
+
+// func lpf8HZAVX512(dst *uint8, stridea, strideb int, p *lpfParams)
+TEXT ·lpf8HZAVX512(SB), 0, $2944-32
+	LPF8HZ(LPFBODY512)
+	RET
+
+// The fourteen taps fill a whole register, so a vertical edge cannot be
+// transposed a quadword at a time. TRIN takes four rows to four quarter taps
+// and TROUT takes four quarter taps back to four rows; the two are the same
+// sixteen by sixteen transpose read in opposite directions.
+#define TRIN(GOUT) \
+	VMOVDQU -7(CX), X0;                         \
+	VMOVDQU -7(CX)(R8*1), X1;                   \
+	VMOVDQU -7(CX)(R8*2), X2;                   \
+	VMOVDQU -7(CX)(R10*1), X3;                  \
+	TRANSPOSE4(X0, X1, X2, X3, X4, X5, X6, X7); \
+	VPSHUFB X8, X0, X0;                         \
+	VPSHUFB X8, X1, X1;                         \
+	VPSHUFB X8, X2, X2;                         \
+	VPSHUFB X8, X3, X3;                         \
+	VMOVDQU X0, 31*LW+GOUT+0(BX);               \
+	VMOVDQU X1, 31*LW+GOUT+64(BX);              \
+	VMOVDQU X2, 31*LW+GOUT+128(BX);             \
+	VMOVDQU X3, 31*LW+GOUT+192(BX);             \
+	LEAQ (CX)(R8*4), CX
+
+#define TROUT(GIN, GOUT) \
+	VMOVDQU 31*LW+GIN+0(BX), X0;                \
+	VMOVDQU 31*LW+GIN+16(BX), X1;               \
+	VMOVDQU 31*LW+GIN+32(BX), X2;               \
+	VMOVDQU 31*LW+GIN+48(BX), X3;               \
+	TRANSPOSE4(X0, X1, X2, X3, X4, X5, X6, X7); \
+	VPSHUFB X8, X0, X0;                         \
+	VPSHUFB X8, X1, X1;                         \
+	VPSHUFB X8, X2, X2;                         \
+	VPSHUFB X8, X3, X3;                         \
+	VMOVDQU X0, 35*LW+GOUT+0(BX);               \
+	VMOVDQU X1, 35*LW+GOUT+64(BX);              \
+	VMOVDQU X2, 35*LW+GOUT+128(BX);             \
+	VMOVDQU X3, 35*LW+GOUT+192(BX)
+
+#define STOREROWS4(Z, X, R) \
+	VMOVDQU       X, -7(R);           \
+	VEXTRACTI32X4 $1, Z, X4;          \
+	VMOVDQU       X4, -7(R)(R8*1);    \
+	VEXTRACTI32X4 $2, Z, X5;          \
+	VMOVDQU       X5, -7(R)(R8*2);    \
+	VEXTRACTI32X4 $3, Z, X6;          \
+	VMOVDQU       X6, -7(R)(R10*1)
+
+#define LPF8HZ14(FILTER) \
+	MOVQ dst+0(FP), SI;            \
+	MOVQ stridea+8(FP), R8;        \
+	MOVQ p+24(FP), DI;             \
+	LEAQ 13*LW(SP), BX;            \
+	LEAQ (R8)(R8*2), R10;          \
+	VMOVDQU32 lpfPerm16<>(SB), Z16; \
+	VMOVDQU   lpfShuf<>(SB), X8;   \
+	MOVQ SI, CX;                   \
+	TRIN(0);                       \
+	TRIN(16);                      \
+	TRIN(32);                      \
+	TRIN(48);                      \
+	VPERMD    31*LW+0(BX), Z16, Z0;   \
+	VPERMD    31*LW+64(BX), Z16, Z1;  \
+	VPERMD    31*LW+128(BX), Z16, Z2; \
+	VPERMD    31*LW+192(BX), Z16, Z3; \
+	MOVU      Z0, 31*LW+0(BX);        \
+	MOVU      Z1, 31*LW+64(BX);       \
+	MOVU      Z2, 31*LW+128(BX);      \
+	MOVU      Z3, 31*LW+192(BX);      \
+	LEAQ  31*LW(BX), CX;           \
+	LEAQ  -7*LW(BX), DX;           \
+	MOVQ  $14, R14;                \
+	widenloop:;                    \
+	VPMOVZXBD (CX), V0;            \
+	MOVU      V0, (DX);            \
+	MOVU      V0, 20*LW(DX);       \
+	ADDQ      $16, CX;             \
+	ADDQ      $LW, DX;             \
+	DECQ      R14;                 \
+	JNZ       widenloop;           \
+	FILTER;                        \
+	scatter:;                      \
+	LEAQ  31*LW+16(BX), CX;        \
+	LEAQ  -6*LW(BX), DX;           \
+	MOVQ  $12, R14;                \
+	packloop:;                     \
+	MOVU      20*LW(DX), V0;       \
+	VPMOVUSDB V0, (CX);            \
+	ADDQ      $16, CX;             \
+	ADDQ      $LW, DX;             \
+	DECQ      R14;                 \
+	JNZ       packloop;            \
+	VMOVDQU lpfShuf<>(SB), X8;     \
+	TROUT(0, 0);                   \
+	TROUT(64, 16);                 \
+	TROUT(128, 32);                \
+	TROUT(192, 48);                \
+	VPERMD    35*LW+0(BX), Z16, Z0;   \
+	VPERMD    35*LW+64(BX), Z16, Z1;  \
+	VPERMD    35*LW+128(BX), Z16, Z2; \
+	VPERMD    35*LW+192(BX), Z16, Z3; \
+	STOREROWS4(Z0, X0, SI);        \
+	LEAQ (SI)(R8*4), CX;           \
+	STOREROWS4(Z1, X1, CX);        \
+	LEAQ (CX)(R8*4), CX;           \
+	STOREROWS4(Z2, X2, CX);        \
+	LEAQ (CX)(R8*4), CX;           \
+	STOREROWS4(Z3, X3, CX);        \
+	VZEROUPPER
+
+// func lpf8HZ14AVX512(dst *uint8, stridea, strideb int, p *lpfParams)
+TEXT ·lpf8HZ14AVX512(SB), 0, $3328-32
+	LPF8HZ14(LPFBODY512)
 	RET
