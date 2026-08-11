@@ -255,15 +255,28 @@ func TestDecodeExternal(t *testing.T) {
 	t.Logf("%d bytes bit-exact", len(got))
 }
 
+// dav1dBin is the reference decoder the cross-checks run against. It is taken
+// from DAV1D_BIN, or from PATH, and an empty result skips those tests.
+var dav1dBin = func() string {
+	if bin := os.Getenv("DAV1D_BIN"); bin != "" {
+		return bin
+	}
+	bin, err := exec.LookPath("dav1d")
+	if err != nil {
+		return ""
+	}
+
+	return bin
+}()
+
 func dav1dYUV(t *testing.T, path string) []byte {
 	t.Helper()
 
-	bin := "/temp/av1/dav1d/build/tools/dav1d"
-	if _, err := os.Stat(bin); err != nil {
-		t.Skip("dav1d binary not built")
+	if dav1dBin == "" {
+		t.Skip("dav1d not found (set DAV1D_BIN)")
 	}
 	tmp := filepath.Join(t.TempDir(), "ref.yuv")
-	cmd := exec.Command(bin, "-i", path, "-o", tmp, "--muxer", "yuv")
+	cmd := exec.Command(dav1dBin, "-i", path, "-o", tmp, "--muxer", "yuv")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("dav1d: %v\n%s", err, out)
 	}
@@ -281,6 +294,9 @@ func TestConformance(t *testing.T) {
 	dir := os.Getenv("CONFORMANCE_DIR")
 	if dir == "" {
 		t.Skip("set CONFORMANCE_DIR")
+	}
+	if dav1dBin == "" {
+		t.Skip("dav1d not found (set DAV1D_BIN)")
 	}
 
 	var streams []string
@@ -495,8 +511,7 @@ func conformanceOne(path string) (res string) {
 		}
 	}
 
-	bin := "/temp/av1/dav1d/build/tools/dav1d"
-	cmd := exec.Command(bin, "-i", path, "-o", "-", "--muxer", "md5", "--filmgrain", "1")
+	cmd := exec.Command(dav1dBin, "-i", path, "-o", "-", "--muxer", "md5", "--filmgrain", "1")
 	ref, err := cmd.Output()
 	if err != nil {
 		return "dav1d: " + err.Error()
@@ -611,3 +626,8 @@ func TestFrameSizeLimit(t *testing.T) {
 		})
 	}
 }
+
+
+
+
+

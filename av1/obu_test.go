@@ -10,15 +10,13 @@ import (
 	"testing"
 )
 
-const defaultTestData = "/temp/av1/rav1d/tests/dav1d-test-data"
-
 func testDataDir(t *testing.T) string {
 	dir := os.Getenv("DAV1D_TEST_DATA")
 	if dir == "" {
-		dir = defaultTestData
+		t.Skip("set DAV1D_TEST_DATA")
 	}
 	if _, err := os.Stat(dir); err != nil {
-		t.Skipf("test data not available at %s (set DAV1D_TEST_DATA)", dir)
+		t.Skipf("test data not available at %s", dir)
 	}
 
 	return dir

@@ -23,7 +23,19 @@ import (
 	"github.com/gen2brain/gav1d/av1"
 )
 
-const avifdec = "/temp/av1/libavif-build/avifdec"
+// avifdec is libavif's decoder, which the cross-checks compare against. It is
+// taken from AVIFDEC_BIN, or from PATH, and an empty result skips those tests.
+var avifdec = func() string {
+	if bin := os.Getenv("AVIFDEC_BIN"); bin != "" {
+		return bin
+	}
+	bin, err := exec.LookPath("avifdec")
+	if err != nil {
+		return ""
+	}
+
+	return bin
+}()
 
 type y4m struct {
 	w, h   int
@@ -119,8 +131,8 @@ func readY4M(b []byte) (*y4m, error) {
 func decodeRef(t *testing.T, path string) *y4m {
 	t.Helper()
 
-	if _, err := os.Stat(avifdec); err != nil {
-		t.Skip("avifdec not built")
+	if avifdec == "" {
+		t.Skip("avifdec not found (set AVIFDEC_BIN)")
 	}
 	out := filepath.Join(t.TempDir(), "ref.y4m")
 	cmd := exec.Command(avifdec, "--no-strict", path, out)
@@ -235,6 +247,9 @@ func TestConformance(t *testing.T) {
 	env := os.Getenv("AVIF_CONFORMANCE_DIR")
 	if env == "" {
 		t.Skip("set AVIF_CONFORMANCE_DIR")
+	}
+	if avifdec == "" {
+		t.Skip("avifdec not found (set AVIFDEC_BIN)")
 	}
 	dirs := strings.Split(env, ":")
 
@@ -433,8 +448,8 @@ func TestDecode(t *testing.T) {
 // TestSequence decodes the bundled animation and compares every frame, and its
 // duration, against avifdec.
 func TestSequence(t *testing.T) {
-	if _, err := os.Stat(avifdec); err != nil {
-		t.Skip("avifdec not built")
+	if avifdec == "" {
+		t.Skip("avifdec not found (set AVIFDEC_BIN)")
 	}
 	const path = "testdata/anim.avif"
 
@@ -490,8 +505,8 @@ func decodePNG(t *testing.T, path string) image.Image {
 
 // TestColor compares each bundled file's RGB against avifdec.
 func TestColor(t *testing.T) {
-	if _, err := os.Stat(avifdec); err != nil {
-		t.Skip("avifdec not built")
+	if avifdec == "" {
+		t.Skip("avifdec not found (set AVIFDEC_BIN)")
 	}
 
 	files, err := filepath.Glob(filepath.Join("testdata", "*.avif"))
