@@ -56,7 +56,7 @@ func (s *msacContext) norm(dif uint64, rng uint32) {
 	}
 }
 
-func (s *msacContext) boolEqui() uint32 {
+func (s *msacContext) boolEquiGo() uint32 {
 	r := s.rng
 	dif := s.dif
 	v := (r>>8)<<7 + ecMinProb
@@ -72,7 +72,7 @@ func (s *msacContext) boolEqui() uint32 {
 	return ret ^ 1
 }
 
-func (s *msacContext) boolF(f uint32) uint32 {
+func (s *msacContext) boolFGo(f uint32) uint32 {
 	r := s.rng
 	dif := s.dif
 	v := (r>>8)*(f>>ecProbShift)>>(7-ecProbShift) + ecMinProb
@@ -88,7 +88,7 @@ func (s *msacContext) boolF(f uint32) uint32 {
 	return ret ^ 1
 }
 
-func (s *msacContext) symbolAdapt(cdf []uint16, nSymbols int) uint32 {
+func (s *msacContext) symbolAdaptGo(cdf []uint16, nSymbols int) uint32 {
 	c := uint32(s.dif >> (ecWinSize - 16))
 	r := s.rng >> 8
 	u, v, val := uint32(0), s.rng, ^uint32(0)
@@ -128,8 +128,8 @@ func (s *msacContext) symbolAdapt(cdf []uint16, nSymbols int) uint32 {
 	return val
 }
 
-func (s *msacContext) boolAdapt(cdf []uint16) uint32 {
-	bit := s.boolF(uint32(cdf[0]))
+func (s *msacContext) boolAdaptGo(cdf []uint16) uint32 {
+	bit := s.boolFGo(uint32(cdf[0]))
 
 	if s.allowUpdateCdf {
 		count := uint32(cdf[1])

@@ -124,3 +124,120 @@ func TestMsac(t *testing.T) {
 
 	t.Logf("%d ops", ops)
 }
+
+func TestSymbolAdaptAsm(t *testing.T) {
+	rnd := func(seed *uint32) uint32 {
+		*seed ^= *seed << 13
+		*seed ^= *seed >> 17
+		*seed ^= *seed << 5
+
+		return *seed
+	}
+
+	data := make([]byte, 4096)
+	seed := uint32(12345)
+	for i := range data {
+		data[i] = byte(rnd(&seed))
+	}
+
+	cases := 0
+	for _, n := range []int{2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15} {
+		for _, width := range []int{4, 8, 16} {
+			if width < n+1 {
+				continue
+			}
+			for _, upd := range []bool{false, true} {
+				var a, b msacContext
+				a.init(data, !upd)
+				b.init(data, !upd)
+
+				ca := make([]uint16, width)
+				cb := make([]uint16, width)
+				for i := range ca {
+					ca[i] = uint16(32768 - (i+1)*32768/(n+1))
+				}
+				ca[n] = 0
+				copy(cb, ca)
+
+				for iter := range 3000 {
+					got := a.symbolAdapt(ca, n)
+					want := b.symbolAdaptGo(cb, n)
+
+					if got != want || a.dif != b.dif || a.rng != b.rng ||
+						a.cnt != b.cnt || a.pos != b.pos {
+						t.Fatalf("n=%d w=%d upd=%v iter=%d: sym %d/%d dif %#x/%#x rng %#x/%#x cnt %d/%d pos %d/%d",
+							n, width, upd, iter, got, want, a.dif, b.dif,
+							a.rng, b.rng, a.cnt, b.cnt, a.pos, b.pos)
+					}
+					for i := 0; i <= n; i++ {
+						if ca[i] != cb[i] {
+							t.Fatalf("n=%d w=%d upd=%v iter=%d: cdf[%d] = %d, want %d",
+								n, width, upd, iter, i, ca[i], cb[i])
+						}
+					}
+					cases++
+				}
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+func TestBoolAsm(t *testing.T) {
+	rnd := func(seed *uint32) uint32 {
+		*seed ^= *seed << 13
+		*seed ^= *seed >> 17
+		*seed ^= *seed << 5
+
+		return *seed
+	}
+
+	data := make([]byte, 4096)
+	seed := uint32(987)
+	for i := range data {
+		data[i] = byte(rnd(&seed))
+	}
+
+	cases := 0
+	for _, upd := range []bool{false, true} {
+		for kind := range 3 {
+			var a, b msacContext
+			a.init(data, !upd)
+			b.init(data, !upd)
+
+			ca := []uint16{20000, 0, 0, 0}
+			cb := []uint16{20000, 0, 0, 0}
+
+			fseed := uint32(4242)
+			for iter := range 5000 {
+				var got, want uint32
+				switch kind {
+				case 0:
+					got, want = a.boolEqui(), b.boolEquiGo()
+				case 1:
+					f := rnd(&fseed)%32000 + 200
+					got, want = a.boolF(f), b.boolFGo(f)
+				default:
+					got, want = a.boolAdapt(ca), b.boolAdaptGo(cb)
+				}
+
+				if got != want || a.dif != b.dif || a.rng != b.rng ||
+					a.cnt != b.cnt || a.pos != b.pos {
+					t.Fatalf("kind=%d upd=%v iter=%d: %d/%d dif %#x/%#x rng %#x/%#x cnt %d/%d pos %d/%d",
+						kind, upd, iter, got, want, a.dif, b.dif, a.rng, b.rng,
+						a.cnt, b.cnt, a.pos, b.pos)
+				}
+				for i := range ca {
+					if ca[i] != cb[i] {
+						t.Fatalf("kind=%d upd=%v iter=%d: cdf[%d] = %d, want %d",
+							kind, upd, iter, i, ca[i], cb[i])
+					}
+				}
+				cases++
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
