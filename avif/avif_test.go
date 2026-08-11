@@ -26,16 +26,41 @@ import (
 // avifdec is libavif's decoder, which the cross-checks compare against. It is
 // taken from AVIFDEC_BIN, or from PATH, and an empty result skips those tests.
 var avifdec = func() string {
-	if bin := os.Getenv("AVIFDEC_BIN"); bin != "" {
-		return bin
+	name := os.Getenv("AVIFDEC_BIN")
+	if name == "" {
+		name = "avifdec"
 	}
-	bin, err := exec.LookPath("avifdec")
+	bin, err := exec.LookPath(name)
 	if err != nil {
 		return ""
 	}
 
 	return bin
 }()
+
+// avifdecLibyuv reports whether avifdec converts YUV to RGB through libyuv.
+// Its fixed point coefficients do not agree with the float path this package
+// ports, by up to 12 of 255 on limited range BT.2020, so an RGB comparison
+// against such a build cannot be exact. Plane comparisons are unaffected.
+var avifdecLibyuv = func() bool {
+	if avifdec == "" {
+		return false
+	}
+	out, err := exec.Command(avifdec, "--version").CombinedOutput()
+	if err != nil {
+		return false
+	}
+
+	return strings.Contains(string(out), "libyuv : available")
+}()
+
+func skipLibyuvRGB(t *testing.T) {
+	t.Helper()
+
+	if avifdecLibyuv {
+		t.Skip("avifdec converts through libyuv (build it with AVIF_LIBYUV=OFF)")
+	}
+}
 
 type y4m struct {
 	w, h   int
@@ -283,6 +308,10 @@ func TestConformance(t *testing.T) {
 				comparePlanes(t, pic, ref)
 				exact++
 
+				if avifdecLibyuv {
+					return
+				}
+
 				// avifpng.c copies the Y plane raw for 8-bit monochrome, skipping conversion.
 				if pic.BitDepth == 8 && pic.Layout == av1.LayoutI400 &&
 					f.alphaFor(f.primary().id) == nil &&
@@ -477,7 +506,7 @@ func TestSequence(t *testing.T) {
 		t.Fatalf("%d frames, want %d", len(a.Image), len(refs))
 	}
 	for i, rp := range refs {
-		if d := diffPixels(a.Image[i], decodePNG(t, rp)); d != "" {
+		if d := diffPixels(a.Image[i], decodePNG(t, rp)); d != "" && !avifdecLibyuv {
 			t.Fatalf("frame %d: %s", i, d)
 		}
 		if a.Delay[i] != 0.1 {
@@ -508,6 +537,7 @@ func TestColor(t *testing.T) {
 	if avifdec == "" {
 		t.Skip("avifdec not found (set AVIFDEC_BIN)")
 	}
+	skipLibyuvRGB(t)
 
 	files, err := filepath.Glob(filepath.Join("testdata", "*.avif"))
 	if err != nil {

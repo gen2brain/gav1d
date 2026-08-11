@@ -258,10 +258,11 @@ func TestDecodeExternal(t *testing.T) {
 // dav1dBin is the reference decoder the cross-checks run against. It is taken
 // from DAV1D_BIN, or from PATH, and an empty result skips those tests.
 var dav1dBin = func() string {
-	if bin := os.Getenv("DAV1D_BIN"); bin != "" {
-		return bin
+	name := os.Getenv("DAV1D_BIN")
+	if name == "" {
+		name = "dav1d"
 	}
-	bin, err := exec.LookPath("dav1d")
+	bin, err := exec.LookPath(name)
 	if err != nil {
 		return ""
 	}
