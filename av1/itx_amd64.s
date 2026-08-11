@@ -510,3 +510,78 @@ vrnext:
 vrdone:
 	VZEROUPPER
 	RET
+
+// func itxDC8AVX2(dst *uint8, stride int, dc int32, w, h int, bitdepthMax int32)
+TEXT ·itxDC8AVX2(SB), NOSPLIT, $0-44
+	MOVQ  dst+0(FP), DI
+	MOVQ  stride+8(FP), SI
+	MOVL  dc+16(FP), AX
+	MOVQ  w+24(FP), DX
+	MOVQ  h+32(FP), CX
+
+	XORL R8, R8
+	TESTL AX, AX
+	JNS  dcpos8
+	NEGL AX
+	MOVL $1, R8
+
+dcpos8:
+	CMPL AX, $255
+	JBE  dcsat8
+	MOVL $255, AX
+
+dcsat8:
+	MOVD         AX, X0
+	VPBROADCASTB X0, Y0
+
+rowloop8:
+	XORQ BX, BX
+
+colloop8:
+	MOVQ DX, R9
+	SUBQ BX, R9
+	CMPQ R9, $32
+	JB   tail8
+	VMOVDQU (DI)(BX*1), Y1
+	TESTL   R8, R8
+	JNZ     sub8
+	VPADDUSB Y0, Y1, Y1
+	JMP      st8
+
+sub8:
+	VPSUBUSB Y0, Y1, Y1
+
+st8:
+	VMOVDQU Y1, (DI)(BX*1)
+	ADDQ    $32, BX
+	JMP     colloop8
+
+tail8:
+	TESTQ R9, R9
+	JZ    rownext8
+	MOVBLZX (DI)(BX*1), R10
+	TESTL   R8, R8
+	JNZ     tsub8
+	ADDL    AX, R10
+	CMPL    R10, $255
+	JBE     tst8
+	MOVL    $255, R10
+	JMP     tst8
+
+tsub8:
+	SUBL AX, R10
+	JAE  tst8
+	XORL R10, R10
+
+tst8:
+	MOVB R10, (DI)(BX*1)
+	INCQ BX
+	DECQ R9
+	JMP  tail8
+
+rownext8:
+	ADDQ SI, DI
+	DECQ CX
+	JNZ  rowloop8
+	VZEROUPPER
+	RET

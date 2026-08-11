@@ -155,12 +155,7 @@ func invTxfmAdd[P pixel, C coef](dsp *dspContext[P], dst []P, dstOff, stride int
 		dc = (dc*181 + 128) >> 8
 		dc = (dc + rnd) >> shift
 		dc = (dc*181 + 128 + 2048) >> 12
-		for y := range h {
-			row := dstOff + y*stride
-			for x := range w {
-				dst[row+x] = P(clip(int32(dst[row+x])+dc, 0, bitdepthMax))
-			}
-		}
+		dsp.itxDC(dst, dstOff, stride, dc, w, h, bitdepthMax)
 
 		return
 	}
@@ -279,6 +274,17 @@ func itxTransposeGo(wide, tmp []int32, w, ws, ts, n int) {
 func itxClipGo(tmp []int32, rnd int32, shift int, lo, hi int32) {
 	for i, v := range tmp {
 		tmp[i] = clip((v+rnd)>>shift, lo, hi)
+	}
+}
+
+func itxDCGo[P pixel](dst []P, dstOff, stride int, dc int32, w, h int,
+	bitdepthMax int32,
+) {
+	for y := range h {
+		row := dst[dstOff+y*stride:][:w]
+		for x := range row {
+			row[x] = P(clip(int32(row[x])+dc, 0, bitdepthMax))
+		}
 	}
 }
 

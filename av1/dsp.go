@@ -36,6 +36,7 @@ type dspContext[P pixel] struct {
 
 	itxClip func(tmp []int32, rnd int32, shift int, lo, hi int32)
 	itxAdd  func(dst []P, dstOff, stride int, tmp []int32, w, h, ts int, bitdepthMax int32)
+	itxDC   func(dst []P, dstOff, stride int, dc int32, w, h int, bitdepthMax int32)
 	itxCol  func(tmp []int32, lanes, stride, n, txtp int, lo, hi int32, scratch []int32) bool
 
 	itxTranspose func(wide, tmp []int32, w, ws, ts, n int)
@@ -68,6 +69,7 @@ func newDspGo[P pixel]() *dspContext[P] {
 		prepBilin:    prepBilin[P],
 		itxClip:      itxClipGo,
 		itxAdd:       itxAddGo[P],
+		itxDC:        itxDCGo[P],
 		itxTranspose: itxTransposeGo,
 	}
 	// Bound once here, since cdefFilterBlock reaches the padding copy

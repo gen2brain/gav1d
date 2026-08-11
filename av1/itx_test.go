@@ -384,3 +384,45 @@ func TestWidenCoefsAsm(t *testing.T) {
 
 	t.Logf("%d cases", cases)
 }
+
+func TestItxDCAsm(t *testing.T) {
+	d8 := dsp8()
+	if d8.itxDC == nil {
+		t.Skip("no kernel")
+	}
+
+	cases := 0
+	for _, w := range []int{4, 8, 16, 32, 64} {
+		for _, h := range []int{4, 8, 16, 32, 64} {
+			for _, dc := range []int32{0, 1, -1, 7, -7, 254, -254, 255, -255, 1000, -1000} {
+				stride := w + 13
+				got := make([]uint8, stride*h+64)
+				want := make([]uint8, len(got))
+				for i := range got {
+					got[i] = uint8(rowSeed(w, h, i))
+					want[i] = got[i]
+				}
+
+				d8.itxDC(got, 7, stride, dc, w, h, 255)
+				itxDCGo(want, 7, stride, dc, w, h, 255)
+
+				for i := range want {
+					if got[i] != want[i] {
+						t.Fatalf("w=%d h=%d dc=%d: [%d] = %d, want %d",
+							w, h, dc, i, got[i], want[i])
+					}
+				}
+				cases++
+			}
+		}
+	}
+
+	t.Logf("%d cases", cases)
+}
+
+func rowSeed(a, b, i int) uint32 {
+	v := uint32(i)*2654435761 + uint32(a)*2246822519 + uint32(b)*3266489917
+	v ^= v >> 15
+
+	return v * 2654435761
+}
