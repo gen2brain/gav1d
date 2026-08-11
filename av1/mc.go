@@ -59,6 +59,10 @@ func filter8tapI(src []int16, off int, f *[8]int8, stride int) int32 {
 }
 
 func mcPut[P pixel](dst []P, dstOff, dstStride int, src []P, srcOff, srcStride, w, h int) {
+	if mcPutFast(dst, dstOff, dstStride, src, srcOff, srcStride, w, h) {
+		return
+	}
+
 	switch w {
 	case 2:
 		for range h {
