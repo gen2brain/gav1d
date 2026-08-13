@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func fwdRoundtrip(t *testing.T, tx, txtp int, scale float64) float64 {
+func fwdRoundtrip(t *testing.T, tx, txtp, pattern int) float64 {
 	t.Helper()
 
 	tDim := &txfmDimensions[tx]
@@ -25,7 +25,15 @@ func fwdRoundtrip(t *testing.T, tx, txtp int, scale float64) float64 {
 	}
 	for y := range h {
 		for x := range w {
-			v := int32(next(256))
+			var v int32
+			switch pattern {
+			case 1:
+				v = int32(255 * ((x + y) & 1))
+			case 2:
+				v = 255
+			default:
+				v = int32(next(256))
+			}
 			src[y*stride+x] = v - 128
 			pix[y*stride+x] = 128
 			want[y*stride+x] = uint8(v)
@@ -34,7 +42,7 @@ func fwdRoundtrip(t *testing.T, tx, txtp int, scale float64) float64 {
 
 	coeff := make([]int32, sw*sh)
 	c16 := make([]int16, sw*sh)
-	fwdTxfmScaled(coeff, src, stride, tx, txtp, scale)
+	fwdTxfm(coeff, src, stride, tx, txtp, make([]int32, fwdScratch))
 	for i, v := range coeff {
 		c16[i] = int16(max(min(v, 32767), -32768))
 	}
@@ -60,9 +68,20 @@ func TestFwdTxfm(t *testing.T) {
 			continue
 		}
 		tDim := &txfmDimensions[tx]
-		r := fwdRoundtrip(t, tx, dctDct, fwdScale(tx))
-		if r > 0.25 {
-			t.Errorf("tx=%d %dx%d rmse %.4f", tx, 4*tDim.w, 4*tDim.h, r)
+		for txtp := range nTxTypes {
+			if int(tDim.max)+1 >= tx64x64 && txtp != dctDct && txtp != idtx {
+				continue
+			}
+			if max(tDim.w, tDim.h) > 4 && txtp >= idtx {
+				continue
+			}
+			for pattern := range 3 {
+				r := fwdRoundtrip(t, tx, txtp, pattern)
+				if r > 0.25 {
+					t.Errorf("tx=%d %dx%d txtp=%d pattern=%d rmse %.4f",
+						tx, 4*tDim.w, 4*tDim.h, txtp, pattern, r)
+				}
+			}
 		}
 	}
 }
@@ -85,7 +104,7 @@ func TestQuantRoundtrip(t *testing.T) {
 	coeff := make([]int32, 64)
 	levels := make([]int32, 64)
 	back := make([]int32, 64)
-	fwdTxfm(coeff, src, stride, tx8x8, dctDct)
+	fwdTxfm(coeff, src, stride, tx8x8, dctDct, make([]int32, fwdScratch))
 
 	for _, qidx := range []int{20, 60, 120, 200, 255} {
 		dc := uint32(dqTbl[0][qidx][0])
@@ -112,32 +131,5 @@ func TestQuantRoundtrip(t *testing.T) {
 			}
 		}
 		t.Logf("qidx=%3d dc=%4d ac=%4d worst coefficient error %d", qidx, dc, ac, worst)
-	}
-}
-
-func TestFwdDotAsm(t *testing.T) {
-	for _, n := range []int{4, 8, 16, 32, 64} {
-		b := make([]float64, n*n)
-		src := make([]float64, n)
-		g := uint32(7)
-		for i := range b {
-			g = g*1664525 + 1013904223
-			b[i] = float64(int32(g>>16)%2000-1000) / 512
-		}
-		for i := range src {
-			g = g*1664525 + 1013904223
-			src[i] = float64(int32(g>>16)%500 - 250)
-		}
-
-		want := make([]float64, n)
-		got := make([]float64, n)
-		fwdDotGo(want, b, src, n)
-		fwdDot(got, b, src, n)
-
-		for i := range n {
-			if math.Abs(got[i]-want[i]) > 1e-9*math.Abs(want[i])+1e-9 {
-				t.Fatalf("n=%d row %d: got %g, want %g", n, i, got[i], want[i])
-			}
-		}
 	}
 }

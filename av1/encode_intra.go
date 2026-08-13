@@ -245,7 +245,7 @@ func (e *encoder) quantTx(dst []uint8, off, stride int, src []uint8, sstride, sw
 	shift := quantShift(tx)
 
 	residual(e.res[:], dst, off, stride, src, sstride, sw, sh, px, py, tw, th)
-	fwdTxfm(e.coeff[:], e.res[:], tw, tx, txtp)
+	fwdTxfm(e.coeff[:], e.res[:], tw, tx, txtp, e.fwd)
 
 	cw, ch := min(tw, 32), min(th, 32)
 	for i := range cw * ch {
@@ -275,19 +275,21 @@ func (e *encoder) reconTx(dst []uint8, off, stride, tx, txtp, eob int) {
 	n := min(4*int(tDim.w), 32) * min(4*int(tDim.h), 32)
 
 	clear(e.cf[:n])
-	for i := range n {
-		if e.lv[i] == 0 {
+	scan := scans[tx]
+	for i := 0; i <= eob; i++ {
+		rc := scan[i]
+		if e.lv[rc] == 0 {
 			continue
 		}
 		dqv := uint32(e.dq[1])
-		if i == 0 {
+		if rc == 0 {
 			dqv = uint32(e.dq[0])
 		}
-		d := min(int32(uint32(abs32(e.lv[i]))*dqv>>uint(shift)), 1<<15-1)
-		if e.lv[i] < 0 {
+		d := min(int32(uint32(abs32(e.lv[rc]))*dqv>>uint(shift)), 1<<15-1)
+		if e.lv[rc] < 0 {
 			d = -d
 		}
-		e.cf[i] = int16(d)
+		e.cf[rc] = int16(d)
 	}
 	invTxfmAdd(e.dsp, dst, off, stride, e.cf[:], e.itx[:], eob, tx, txtp, 255)
 }

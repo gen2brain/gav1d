@@ -23,6 +23,7 @@ type encoder struct {
 	lambda  float64
 	dsp     *dspContext[uint8]
 	itx     []int32
+	fwd     []int32
 	res     [64 * 64]int32
 	coeff   [32 * 32]int32
 	lv      [32 * 32]int32
@@ -63,6 +64,7 @@ func (e *encoder) init(c *encConfig, seq *sequenceHeader) {
 	e.lambda = float64(e.dq[1]) * float64(e.dq[1]) / 1024
 	e.dsp = newDsp[uint8]()
 	e.itx = make([]int32, 64*64*2+itxDct64Scratch)
+	e.fwd = make([]int32, fwdScratch)
 	e.cdf.initStatic(uint8(c.QIndex))
 	e.msac.init(false)
 }
