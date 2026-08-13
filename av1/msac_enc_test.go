@@ -91,6 +91,10 @@ func TestMsacRoundtrip(t *testing.T) {
 						update, iter, i, o.kind, o.n, got, o.val)
 				}
 			}
+			if d.cnt <= -15 {
+				t.Fatalf("update=%v iter=%d: decoder overread, cnt=%d for %d bytes",
+					update, iter, d.cnt, len(data))
+			}
 		}
 	}
 }

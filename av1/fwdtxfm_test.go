@@ -114,3 +114,30 @@ func TestQuantRoundtrip(t *testing.T) {
 		t.Logf("qidx=%3d dc=%4d ac=%4d worst coefficient error %d", qidx, dc, ac, worst)
 	}
 }
+
+func TestFwdDotAsm(t *testing.T) {
+	for _, n := range []int{4, 8, 16, 32, 64} {
+		b := make([]float64, n*n)
+		src := make([]float64, n)
+		g := uint32(7)
+		for i := range b {
+			g = g*1664525 + 1013904223
+			b[i] = float64(int32(g>>16)%2000-1000) / 512
+		}
+		for i := range src {
+			g = g*1664525 + 1013904223
+			src[i] = float64(int32(g>>16)%500 - 250)
+		}
+
+		want := make([]float64, n)
+		got := make([]float64, n)
+		fwdDotGo(want, b, src, n)
+		fwdDot(got, b, src, n)
+
+		for i := range n {
+			if math.Abs(got[i]-want[i]) > 1e-9*math.Abs(want[i])+1e-9 {
+				t.Fatalf("n=%d row %d: got %g, want %g", n, i, got[i], want[i])
+			}
+		}
+	}
+}

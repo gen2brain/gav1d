@@ -1,7 +1,7 @@
 package av1
 
 type msacEncoder struct {
-	low            uint32
+	low            uint64
 	rng            uint32
 	cnt            int
 	precarry       []uint16
@@ -36,7 +36,7 @@ func (e *msacEncoder) renorm(lowIncr, rng uint32) {
 		low &= m
 	}
 
-	e.low = uint32(low) << uint(d)
+	e.low = low << uint(d)
 	e.rng = rng << uint(d)
 	e.cnt = s
 }
@@ -111,11 +111,11 @@ func (e *msacEncoder) uniform(v, n uint32) {
 }
 
 func (e *msacEncoder) done() []byte {
-	l := uint64(e.low)
+	l := e.low
 	c := e.cnt
 	s := 10 + c
 	m := uint64(0x3fff)
-	x := (l+m)&^m | m + 1
+	x := (l+m)&^m | (m + 1)
 
 	if s > 0 {
 		n := uint64(1)<<uint(c+16) - 1

@@ -67,6 +67,10 @@ func fwd1d(dst, src []float64, t1d, n int, flip bool) {
 		return
 	}
 
+	fwdDot(dst[:n], b, src[:n], n)
+}
+
+func fwdDotGo(dst, b, src []float64, n int) {
 	for k := range n {
 		var s float64
 		row := b[k*n:]

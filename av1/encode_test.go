@@ -49,6 +49,11 @@ func TestEncodeDav1d(t *testing.T) {
 		{Width: 64, Height: 96, BitDepth: 8, QIndex: 60},
 		{Width: 96, Height: 64, BitDepth: 8, QIndex: 20},
 		{Width: 48, Height: 48, BitDepth: 8, QIndex: 40},
+		{Width: 128, Height: 64, BitDepth: 8, QIndex: 60},
+		{Width: 64, Height: 128, BitDepth: 8, QIndex: 60},
+		{Width: 128, Height: 128, BitDepth: 8, QIndex: 30},
+		{Width: 320, Height: 240, BitDepth: 8, QIndex: 100},
+		{Width: 640, Height: 480, BitDepth: 8, QIndex: 150},
 	} {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "out.obu")
