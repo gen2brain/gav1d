@@ -38,12 +38,12 @@ func (e *encoder) reconBlock(bx, by, bs int) uint8 {
 	bDim := &blockDimensions[bs]
 	bw4, bh4 := int(bDim[0]), int(bDim[1])
 
-	dq := uint32(e.dq[0])
 	shift := quantShift(tx)
 	cfMax := int32(1<<15 - 1)
 
 	var res [64 * 64]int32
 	var coeff [32 * 32]int32
+	var lv [32 * 32]int32
 	cf := make([]int16, 32*32)
 
 	ctx := uint8(0x40)
@@ -70,25 +70,49 @@ func (e *encoder) reconBlock(bx, by, bs int) uint8 {
 			}
 
 			fwdTxfm(coeff[:], res[:], tw, tx, dctDct)
-			level := quantOne(coeff[0], dq, shift)
+			sw, sh := min(tw, 32), min(th, 32)
+			for i := range sw * sh {
+				d := e.dq[1]
+				if i == 0 {
+					d = e.dq[0]
+				}
+				lv[i] = quantOne(coeff[i], uint32(d), shift)
+			}
 
-			ctx = e.writeDCOnly(&coefCtx{a: e.a[bx>>5].lcoef[:], l: e.l.lcoef[:]},
-				(bx+x)&31, (by+y)&31, tx, bs, 0, dcPred, level)
+			ctx = e.writeCoefs(&coefCtx{a: e.a[bx>>5].lcoef[:], l: e.l.lcoef[:]},
+				(bx+x)&31, (by+y)&31, tx, bs, 0, dcPred, lv[:], e.levels[:])
 
 			aw := min(int(tDim.w), e.bw-(bx+x))
 			lh := min(int(tDim.h), e.bh-(by+y))
 			memset(e.a[bx>>5].lcoef[(bx+x)&31:][:aw], ctx)
 			memset(e.l.lcoef[(by+y)&31:][:lh], ctx)
 
-			if level != 0 {
-				clear(cf[:tw*th])
-				d := int32(uint32(abs32(level)) * dq >> uint(shift))
-				d = min(d, cfMax)
-				if level < 0 {
-					d = -d
+			eob := -1
+			for i := sw*sh - 1; i >= 0; i-- {
+				if lv[scans[tx][i]] != 0 {
+					eob = i
+
+					break
 				}
-				cf[0] = int16(d)
-				invTxfmAdd(e.dsp, e.recon, off, e.stride, cf, e.itx[:], 0, tx, dctDct, 255)
+			}
+			if eob >= 0 {
+				clear(cf[:sw*sh])
+				for i := range sw * sh {
+					if lv[i] == 0 {
+						continue
+					}
+					dqv := uint32(e.dq[1])
+					if i == 0 {
+						dqv = uint32(e.dq[0])
+					}
+					d := int32(uint32(abs32(lv[i])) * dqv >> uint(shift))
+					d = min(d, cfMax)
+					if lv[i] < 0 {
+						d = -d
+					}
+					cf[i] = int16(d)
+				}
+				invTxfmAdd(e.dsp, e.recon, off, e.stride, cf, e.itx[:], eob, tx, dctDct, 255)
 			}
 		}
 	}

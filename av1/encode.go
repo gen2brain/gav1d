@@ -17,6 +17,7 @@ type encoder struct {
 	dq      [2]uint16
 	dsp     *dspContext[uint8]
 	itx     []int32
+	levels  [64 * 66]uint8
 }
 
 func (e *encoder) init(c *encConfig) {

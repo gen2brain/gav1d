@@ -51,9 +51,15 @@ func TestEncodeDav1d(t *testing.T) {
 	}
 
 	for _, c := range []encConfig{
+		{Width: 128, Height: 96, BitDepth: 8, QIndex: 10, Monochrome: true,
+			Src: res, SrcStride: 256},
 		{Width: 128, Height: 96, BitDepth: 8, QIndex: 40, Monochrome: true,
 			Src: res, SrcStride: 256},
 		{Width: 192, Height: 128, BitDepth: 8, QIndex: 100, Monochrome: true,
+			Src: res, SrcStride: 256},
+		{Width: 256, Height: 256, BitDepth: 8, QIndex: 180, Monochrome: true,
+			Src: res, SrcStride: 256},
+		{Width: 64, Height: 64, BitDepth: 8, QIndex: 255, Monochrome: true,
 			Src: res, SrcStride: 256},
 		{Width: 64, Height: 64, BitDepth: 8, QIndex: 100},
 		{Width: 64, Height: 96, BitDepth: 8, QIndex: 60},
