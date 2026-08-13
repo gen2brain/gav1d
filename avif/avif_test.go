@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/draw"
 	"image/png"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -295,7 +296,7 @@ func TestConformance(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				f, err := parse(data)
+				f, err := parse(memSource(data))
 				if err != nil {
 					fails[err.Error()]++
 					t.Fatalf("parse: %v", err)
@@ -452,7 +453,7 @@ func TestDecode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			f, err := parse(raw)
+			f, err := parse(memSource(raw))
 			if err != nil {
 				t.Fatalf("parse: %v", err)
 			}
@@ -1760,5 +1761,97 @@ func TestGainMapFile(t *testing.T) {
 	}
 	if img == nil {
 		t.Fatal("file without a tmap item lost its base image")
+	}
+}
+
+// countingFile reports how much of a file a decode actually read, which is
+// what says whether the reader is being used a range at a time.
+type countingFile struct {
+	*bytes.Reader
+	read int64
+}
+
+func (c *countingFile) ReadAt(p []byte, off int64) (int, error) {
+	n, err := c.Reader.ReadAt(p, off)
+	c.read += int64(n)
+
+	return n, err
+}
+
+// TestSources decodes the same file through every shape of reader. A reader
+// that can seek is read by range, one that cannot is buffered, and both have
+// to give the same pixels.
+func TestSources(t *testing.T) {
+	const path = "testdata/yuv420-8.avif"
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := Decode(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("file", func(t *testing.T) {
+		fh, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fh.Close()
+
+		got, err := Decode(fh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		comparePixels(t, got, want)
+	})
+
+	// ReadAt is absolute, so only the part the caller has left belongs to us.
+	t.Run("prefix consumed", func(t *testing.T) {
+		r := bytes.NewReader(append([]byte("JUNK"), raw...))
+		if _, err := io.CopyN(io.Discard, r, 4); err != nil {
+			t.Fatal(err)
+		}
+		got, err := Decode(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		comparePixels(t, got, want)
+	})
+
+	t.Run("no seek", func(t *testing.T) {
+		got, err := Decode(struct{ io.Reader }{bytes.NewReader(raw)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		comparePixels(t, got, want)
+	})
+}
+
+// TestPartialRead pins that reading the header does not read the file.
+func TestPartialRead(t *testing.T) {
+	raw, err := os.ReadFile("testdata/yuv420-8.avif")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := &countingFile{Reader: bytes.NewReader(raw)}
+	cfg, err := DecodeConfig(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Width == 0 || cfg.Height == 0 {
+		t.Fatalf("config %dx%d", cfg.Width, cfg.Height)
+	}
+	if c.read >= int64(len(raw)) {
+		t.Fatalf("read %d of %d bytes, want less than all of it", c.read, len(raw))
+	}
+
+	c = &countingFile{Reader: bytes.NewReader(raw)}
+	if _, err := Decode(c); err != nil {
+		t.Fatal(err)
+	}
+	if c.read > int64(len(raw)) {
+		t.Fatalf("read %d of %d bytes", c.read, len(raw))
 	}
 }

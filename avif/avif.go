@@ -97,18 +97,28 @@ import (
 const alphaURN = "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha"
 
 type file struct {
-	data  []byte
+	src   *source
 	meta  *metaBox
 	movie *movie
 
 	frameSizeLimit int
 }
 
-func parse(data []byte) (*file, error) {
-	f := &file{data: data}
+func parse(src *source) (*file, error) {
+	f := &file{src: src}
 	var brandOK bool
 
-	err := eachBox(data, func(typ string, b []byte) error {
+	err := src.eachBox(func(typ string, off, n uint64) error {
+		switch typ {
+		case "ftyp", "meta", "moov":
+		default:
+			return nil
+		}
+		b, err := src.at(off, n)
+		if err != nil {
+			return err
+		}
+
 		switch typ {
 		case "ftyp":
 			r := &reader{b: b}
@@ -204,7 +214,7 @@ func (f *file) decodeItem(it *item) (*av1.Picture, error) {
 		return nil, ErrUnsupported
 	}
 
-	data, err := f.meta.data(it, f.data)
+	data, err := f.meta.data(it, f.src)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +270,7 @@ func parseGrid(b []byte) (gridInfo, error) {
 
 // decodeGrid decodes a grid item's dimg tiles and stitches them row-major.
 func (f *file) gridOf(it *item) (gridInfo, []uint32, error) {
-	data, err := f.meta.data(it, f.data)
+	data, err := f.meta.data(it, f.src)
 	if err != nil {
 		return gridInfo{}, nil, err
 	}
@@ -510,11 +520,11 @@ type Options struct {
 
 // Decode reads an AVIF image as *image.NRGBA, or *image.NRGBA64 above 8 bits.
 func Decode(r io.Reader, opts ...Options) (image.Image, error) {
-	data, err := io.ReadAll(r)
+	src, err := srcFor(r)
 	if err != nil {
 		return nil, err
 	}
-	f, err := parse(data)
+	f, err := parse(src)
 	if err != nil {
 		return nil, err
 	}
@@ -530,11 +540,11 @@ func Decode(r io.Reader, opts ...Options) (image.Image, error) {
 // DecodeColor reads an AVIF image and reports the color space it came from,
 // which is what the native planes of Options.ToYCbCr need to be read against.
 func DecodeColor(r io.Reader, opts ...Options) (image.Image, ColorInfo, error) {
-	data, err := io.ReadAll(r)
+	src, err := srcFor(r)
 	if err != nil {
 		return nil, ColorInfo{}, err
 	}
-	f, err := parse(data)
+	f, err := parse(src)
 	if err != nil {
 		return nil, ColorInfo{}, err
 	}
@@ -547,11 +557,11 @@ func DecodeColor(r io.Reader, opts ...Options) (image.Image, ColorInfo, error) {
 
 // DecodeAll reads every frame of an AVIF file. A still image gives one frame.
 func DecodeAll(r io.Reader, opts ...Options) (*AVIF, error) {
-	data, err := io.ReadAll(r)
+	src, err := srcFor(r)
 	if err != nil {
 		return nil, err
 	}
-	f, err := parse(data)
+	f, err := parse(src)
 	if err != nil {
 		return nil, err
 	}
@@ -574,11 +584,11 @@ func DecodeAll(r io.Reader, opts ...Options) (*AVIF, error) {
 
 // DecodeConfig reads the dimensions and color model without decoding pixels.
 func DecodeConfig(r io.Reader) (image.Config, error) {
-	data, err := io.ReadAll(r)
+	src, err := srcFor(r)
 	if err != nil {
 		return image.Config{}, err
 	}
-	f, err := parse(data)
+	f, err := parse(src)
 	if err != nil {
 		return image.Config{}, err
 	}
@@ -633,6 +643,31 @@ func (f *file) decodeStill(o Options) (image.Image, ColorInfo, error) {
 	}
 
 	return img, ci, nil
+}
+
+// srcFor uses the reader's own random access when it has any, so a file on
+// disk is read a range at a time rather than buffered whole. Seeking is what
+// bounds the range: ReadAt on a *bytes.Reader or an *os.File is absolute, and
+// only the part the caller has not consumed belongs to us.
+func srcFor(r io.Reader) (*source, error) {
+	ra, raOK := r.(io.ReaderAt)
+	sk, skOK := r.(io.Seeker)
+	if raOK && skOK {
+		cur, err1 := sk.Seek(0, io.SeekCurrent)
+		end, err2 := sk.Seek(0, io.SeekEnd)
+		if err1 == nil && err2 == nil && end > cur {
+			n := end - cur
+
+			return &source{r: io.NewSectionReader(ra, cur, n), size: uint64(n)}, nil
+		}
+	}
+
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	return memSource(data), nil
 }
 
 func decodeWrapper(r io.Reader) (image.Image, error) {

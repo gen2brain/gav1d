@@ -149,7 +149,7 @@ func (f *file) gainMap(o Options) (*GainMap, error) {
 		return nil, nil
 	}
 
-	data, err := f.meta.data(tmap, f.data)
+	data, err := f.meta.data(tmap, f.src)
 	if err != nil {
 		return nil, nil
 	}
@@ -204,11 +204,11 @@ func (f *file) gainMap(o Options) (*GainMap, error) {
 // without one, and for one this reader does not implement, in both cases
 // leaving the base image usable on its own.
 func DecodeGainMap(r io.Reader, opts ...Options) (image.Image, *GainMap, error) {
-	data, err := io.ReadAll(r)
+	src, err := srcFor(r)
 	if err != nil {
 		return nil, nil, err
 	}
-	f, err := parse(data)
+	f, err := parse(src)
 	if err != nil {
 		return nil, nil, err
 	}

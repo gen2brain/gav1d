@@ -416,15 +416,19 @@ func (f *file) decodeTrack(t *track) ([]*av1.Picture, error) {
 
 	// A sample needs at least one byte, so a table claiming more samples than
 	// the file has bytes is describing data that cannot exist.
-	if len(t.samples) > len(f.data) {
+	if uint64(len(t.samples)) > f.src.size {
 		return nil, ErrInvalid
 	}
 
 	for _, s := range t.samples {
-		if s.len == 0 || s.off > uint64(len(f.data)) || s.len > uint64(len(f.data))-s.off {
+		if s.len == 0 {
 			return nil, ErrInvalid
 		}
-		pics, err := d.DecodeOBUs(f.data[s.off : s.off+s.len])
+		b, err := f.src.at(s.off, s.len)
+		if err != nil {
+			return nil, err
+		}
+		pics, err := d.DecodeOBUs(b)
 		if err != nil {
 			return nil, err
 		}
