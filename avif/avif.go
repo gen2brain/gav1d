@@ -645,10 +645,7 @@ func (f *file) decodeStill(o Options) (image.Image, ColorInfo, error) {
 	return img, ci, nil
 }
 
-// srcFor uses the reader's own random access when it has any, so a file on
-// disk is read a range at a time rather than buffered whole. Seeking is what
-// bounds the range: ReadAt on a *bytes.Reader or an *os.File is absolute, and
-// only the part the caller has not consumed belongs to us.
+// srcFor reads by range when the reader can seek, bounded to what it has left.
 func srcFor(r io.Reader) (*source, error) {
 	ra, raOK := r.(io.ReaderAt)
 	sk, skOK := r.(io.Seeker)

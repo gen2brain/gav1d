@@ -696,4 +696,3 @@ func TestBilinAsm(t *testing.T) {
 
 	t.Logf("%d cases", cases)
 }
-

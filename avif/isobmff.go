@@ -9,10 +9,7 @@ import (
 // the point where anything can be decoded from it.
 var ErrInvalid = errors.New("avif: invalid file")
 
-// source is the file, addressed by range, which is what an ISOBMFF item or
-// sample is described by. A reader that can seek is read a range at a time;
-// anything else is buffered whole and b carries it, which also keeps the
-// common case free of copies.
+// source is the file, addressed by range. b carries it when it is buffered.
 type source struct {
 	b    []byte
 	r    io.ReaderAt
@@ -23,8 +20,7 @@ func memSource(b []byte) *source {
 	return &source{b: b, size: uint64(len(b))}
 }
 
-// at returns n bytes at off. The result aliases the file when it is already
-// in memory, so callers must not write to it.
+// at returns n bytes at off, aliasing a buffered file, so it must not be written to.
 func (s *source) at(off, n uint64) ([]byte, error) {
 	if off > s.size || n > s.size-off {
 		return nil, ErrInvalid
@@ -33,8 +29,6 @@ func (s *source) at(off, n uint64) ([]byte, error) {
 		return s.b[off : off+n], nil
 	}
 
-	// ReadAt may report io.EOF alongside a full read, and a short read means
-	// the file is smaller than it said it was, not that the caller erred.
 	buf := make([]byte, n)
 	_, err := io.ReadFull(io.NewSectionReader(s.r, int64(off), int64(n)), buf)
 	switch {
@@ -47,8 +41,7 @@ func (s *source) at(off, n uint64) ([]byte, error) {
 	return nil, err
 }
 
-// eachBox walks the top level boxes, reporting where each payload lives
-// rather than reading it, so a box the caller does not want costs nothing.
+// eachBox reports where each top level payload lives without reading it.
 func (s *source) eachBox(fn func(typ string, off, n uint64) error) error {
 	for off := uint64(0); off+8 <= s.size; {
 		b, err := s.at(off, 8)
@@ -672,8 +665,6 @@ func (m *metaBox) data(it *item, file *source) ([]byte, error) {
 		return src.at(off, n)
 	}
 
-	// An item cannot hold more than the file it lives in, and an extent that
-	// runs to the end costs nothing to declare, so bound the total.
 	var out []byte
 	for _, e := range it.extents {
 		off, n, err := span(e)

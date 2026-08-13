@@ -255,8 +255,7 @@ func TestDecodeExternal(t *testing.T) {
 	t.Logf("%d bytes bit-exact", len(got))
 }
 
-// dav1dBin is the reference decoder the cross-checks run against. It is taken
-// from DAV1D_BIN, or from PATH, and an empty result skips those tests.
+// dav1dBin is DAV1D_BIN, or dav1d on PATH, or empty to skip.
 var dav1dBin = func() string {
 	name := os.Getenv("DAV1D_BIN")
 	if name == "" {
@@ -627,8 +626,3 @@ func TestFrameSizeLimit(t *testing.T) {
 		})
 	}
 }
-
-
-
-
-
