@@ -29,16 +29,22 @@ func (s *source) at(off, n uint64) ([]byte, error) {
 	if off > s.size || n > s.size-off {
 		return nil, ErrInvalid
 	}
-	if s.b != nil {
+	if s.r == nil {
 		return s.b[off : off+n], nil
 	}
 
+	// ReadAt may report io.EOF alongside a full read, and a short read means
+	// the file is smaller than it said it was, not that the caller erred.
 	buf := make([]byte, n)
-	if _, err := s.r.ReadAt(buf, int64(off)); err != nil {
-		return nil, err
+	_, err := io.ReadFull(io.NewSectionReader(s.r, int64(off), int64(n)), buf)
+	switch {
+	case err == nil:
+		return buf, nil
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		return nil, ErrInvalid
 	}
 
-	return buf, nil
+	return nil, err
 }
 
 // eachBox walks the top level boxes, reporting where each payload lives
@@ -647,7 +653,7 @@ func (m *metaBox) data(it *item, file *source) ([]byte, error) {
 
 	span := func(e extent) (uint64, uint64, error) {
 		off, n := it.baseOffset+e.off, e.len
-		if off > src.size {
+		if off < it.baseOffset || off > src.size {
 			return 0, 0, ErrInvalid
 		}
 		if n == 0 {
@@ -666,11 +672,16 @@ func (m *metaBox) data(it *item, file *source) ([]byte, error) {
 		return src.at(off, n)
 	}
 
+	// An item cannot hold more than the file it lives in, and an extent that
+	// runs to the end costs nothing to declare, so bound the total.
 	var out []byte
 	for _, e := range it.extents {
 		off, n, err := span(e)
 		if err != nil {
 			return nil, err
+		}
+		if uint64(len(out))+n > src.size {
+			return nil, ErrInvalid
 		}
 		b, err := src.at(off, n)
 		if err != nil {

@@ -1855,3 +1855,84 @@ func TestPartialRead(t *testing.T) {
 		t.Fatalf("read %d of %d bytes", c.read, len(raw))
 	}
 }
+
+// TestItemDataNoIdat pins that an item claiming to live in idat when the file
+// has no idat box is rejected rather than dereferencing nothing.
+func TestItemDataNoIdat(t *testing.T) {
+	m := &metaBox{items: map[uint32]*item{}}
+	it := &item{method: 1, extents: []extent{{off: 0, len: 0}}}
+
+	b, err := m.data(it, memSource(nil))
+	if err != nil {
+		t.Fatalf("data: %v", err)
+	}
+	if len(b) != 0 {
+		t.Fatalf("%d bytes, want none", len(b))
+	}
+}
+
+// eofReaderAt is a conforming io.ReaderAt: the docs allow reporting io.EOF
+// alongside a full read when the read ends at the end of the input.
+type eofReaderAt struct{ b []byte }
+
+func (e eofReaderAt) Read(p []byte) (int, error) { return 0, io.EOF }
+func (e eofReaderAt) Seek(off int64, whence int) (int64, error) {
+	if whence == io.SeekEnd {
+		return int64(len(e.b)), nil
+	}
+
+	return 0, nil
+}
+
+func (e eofReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	n, err := bytes.NewReader(e.b).ReadAt(p, off)
+	if err == nil && off+int64(n) == int64(len(e.b)) {
+		err = io.EOF
+	}
+
+	return n, err
+}
+
+// TestReaderAtEOF checks the two ways a range read reaches the end of a file:
+// a reader that reports io.EOF with a full read, and a zero length box that
+// starts exactly at the end.
+func TestReaderAtEOF(t *testing.T) {
+	raw, err := os.ReadFile("testdata/yuv420-8.avif")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := Decode(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("eof with full read", func(t *testing.T) {
+		got, err := Decode(eofReaderAt{raw})
+		if err != nil {
+			t.Fatal(err)
+		}
+		comparePixels(t, got, want)
+	})
+
+	// An empty box at the end makes parse ask for zero bytes at src.size.
+	t.Run("empty trailing box", func(t *testing.T) {
+		tail := append(append([]byte{}, raw...), 0, 0, 0, 8, 'f', 't', 'y', 'p')
+		got, err := Decode(bytes.NewReader(tail))
+		if err != nil {
+			t.Fatal(err)
+		}
+		comparePixels(t, got, want)
+	})
+}
+
+// TestExtentAmplification checks that extents cannot ask for more than the
+// file holds. Every extent here is free to declare and runs to the end.
+func TestExtentAmplification(t *testing.T) {
+	src := memSource(make([]byte, 1<<16))
+	m := &metaBox{items: map[uint32]*item{}}
+	it := &item{extents: make([]extent, 2000)}
+
+	if _, err := m.data(it, src); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("err = %v, want ErrInvalid", err)
+	}
+}
