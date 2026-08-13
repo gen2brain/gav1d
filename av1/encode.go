@@ -34,6 +34,7 @@ type encoder struct {
 	edge    [257]uint8
 	levels  [64 * 66]uint8
 	ymode   [256]uint8
+	bskip   [256]uint8
 	uvmode  [256]uint8
 	split   [nBlLevels][256]bool
 	entry   [nBlLevels]sbState
@@ -101,14 +102,14 @@ func (e *encoder) writeBlock(bx, by, bs, edgeFlags int) {
 
 	skip := uint32(1)
 	if e.cfg.Src != nil {
-		skip = 0
+		skip = uint32(e.bskip[sbIdx(bx, by)])
 	}
 	sctx := int(ab.skip[bx4]) + int(e.l.skip[by4])
 	e.msac.boolAdapt(e.cdf.m.skip[sctx][:], skip)
 
 	ymodeCdf := e.cdf.kfym[intraModeContext[ab.mode[bx4]]][intraModeContext[e.l.mode[by4]]][:]
 	mode := dcPred
-	if skip == 0 {
+	if e.cfg.Src != nil {
 		mode = int(e.ymode[sbIdx(bx, by)])
 	}
 	e.msac.symbolAdapt(ymodeCdf, nIntraPredModes-1, uint32(mode))
@@ -121,7 +122,7 @@ func (e *encoder) writeBlock(bx, by, bs, edgeFlags int) {
 		cflAllowed := b2i(cflAllowedMask&(1<<bs) != 0)
 		nSym := nUvIntraPredModes - 1 - (1 - cflAllowed)
 		cdf := e.cdf.m.uvMode[cflAllowed][mode][:]
-		if skip == 0 {
+		if e.cfg.Src != nil {
 			uvMode = int(e.uvmode[sbIdx(bx, by)])
 		}
 		e.msac.symbolAdapt(cdf, nSym, uint32(uvMode))
@@ -130,10 +131,10 @@ func (e *encoder) writeBlock(bx, by, bs, edgeFlags int) {
 		}
 	}
 
-	if skip == 0 {
-		e.reconBlock(bx, by, bs, edgeFlags, mode)
+	if e.cfg.Src != nil {
+		e.reconBlock(bx, by, bs, edgeFlags, mode, skip != 0)
 		if hasChroma {
-			e.reconChroma(bx, by, bs, edgeFlags, uvMode)
+			e.reconChroma(bx, by, bs, edgeFlags, uvMode, skip != 0)
 		}
 	}
 
@@ -145,7 +146,7 @@ func (e *encoder) writeBlock(bx, by, bs, edgeFlags int) {
 		setCtx(edge.mode[:], off, n, uint8(mode))
 		setCtx(edge.intra[:], off, n, 1)
 		setCtx(edge.skip[:], off, n, uint8(skip))
-		if skip != 0 {
+		if e.cfg.Src == nil {
 			memset(edge.lcoef[off:off+n], 0x40)
 		}
 	}
@@ -155,7 +156,7 @@ func (e *encoder) writeBlock(bx, by, bs, edgeFlags int) {
 		cbh4 := (bh4 + e.ssVer) >> e.ssVer
 		setCtx(ab.uvmode[:], bx4>>e.ssHor, cbw4, uint8(uvMode))
 		setCtx(e.l.uvmode[:], by4>>e.ssVer, cbh4, uint8(uvMode))
-		if skip != 0 {
+		if e.cfg.Src == nil {
 			for pl := range 2 {
 				memset(ab.ccoef[pl][bx4>>e.ssHor:][:cbw4], 0x40)
 				memset(e.l.ccoef[pl][by4>>e.ssVer:][:cbh4], 0x40)
@@ -372,24 +373,40 @@ func (e *encoder) trialBlock(bx, by, bs, edgeFlags int) float64 {
 	ab := &e.a[bx>>5]
 
 	sctx := int(ab.skip[bx4]) + int(e.l.skip[by4])
-	cost := e.lambda * cdfBits(e.cdf.m.skip[sctx][:], 0)
+	skipCdf := e.cdf.m.skip[sctx][:]
+	coded := e.lambda * cdfBits(skipCdf, 0)
+	skipped := e.lambda * cdfBits(skipCdf, 1)
 
 	ymodeCdf := e.cdf.kfym[intraModeContext[ab.mode[bx4]]][intraModeContext[e.l.mode[by4]]][:]
-	mode, c := e.pickMode(bx, by, bs, edgeFlags, ymodeCdf)
-	cost += c
+	mode, c, sk := e.pickMode(bx, by, bs, edgeFlags, ymodeCdf)
+	coded += c
+	skipped += sk
 
 	uvMode := dcPred
-	if e.hasChroma(bx, by, bs) {
+	hasChroma := e.hasChroma(bx, by, bs)
+	if hasChroma {
 		cflAllowed := b2i(cflAllowedMask&(1<<bs) != 0)
 		cdf := e.cdf.m.uvMode[cflAllowed][mode][:]
-		uvMode, c = e.pickUvMode(bx, by, bs, edgeFlags, cdf)
-		cost += c
+		uvMode, c, sk = e.pickUvMode(bx, by, bs, edgeFlags, cdf)
+		coded += c
+		skipped += sk
 		setCtx(ab.uvmode[:], bx4>>e.ssHor, (bw4+e.ssHor)>>e.ssHor, uint8(uvMode))
 		setCtx(e.l.uvmode[:], by4>>e.ssVer, (bh4+e.ssVer)>>e.ssVer, uint8(uvMode))
 	}
 
-	e.ymode[sbIdx(bx, by)] = uint8(mode)
-	e.uvmode[sbIdx(bx, by)] = uint8(uvMode)
+	skip := skipped < coded
+	if skip {
+		e.reconBlock(bx, by, bs, edgeFlags, mode, true)
+		if hasChroma {
+			e.reconChroma(bx, by, bs, edgeFlags, uvMode, true)
+		}
+		coded = skipped
+	}
+
+	i := sbIdx(bx, by)
+	e.ymode[i] = uint8(mode)
+	e.uvmode[i] = uint8(uvMode)
+	e.bskip[i] = b2u8(skip)
 
 	for i, edge := range [2]*blockContext{ab, &e.l} {
 		off, n := bx4, bw4
@@ -398,10 +415,10 @@ func (e *encoder) trialBlock(bx, by, bs, edgeFlags int) float64 {
 		}
 		setCtx(edge.mode[:], off, n, uint8(mode))
 		setCtx(edge.intra[:], off, n, 1)
-		setCtx(edge.skip[:], off, n, 0)
+		setCtx(edge.skip[:], off, n, b2u8(skip))
 	}
 
-	return cost
+	return coded
 }
 
 func (e *encoder) trialSb(bx, by, bl int, node *edgeNode) float64 {
