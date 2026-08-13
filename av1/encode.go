@@ -14,6 +14,10 @@ type encoder struct {
 	splitTo int
 	stride  int
 	recon   []uint8
+	reconC  [2][]uint8
+	cstride int
+	cw      int
+	ch      int
 	dq      [2]uint16
 	dsp     *dspContext[uint8]
 	itx     []int32
@@ -35,6 +39,14 @@ func (e *encoder) init(c *encConfig) {
 	}
 	e.stride = e.bw * 4
 	e.recon = make([]uint8, e.stride*e.bh*4)
+	if !c.Monochrome {
+		e.cw = (c.Width + 1) >> 1
+		e.ch = (c.Height + 1) >> 1
+		e.cstride = ((e.bw*4 + 1) >> 1) + 8
+		for pl := range 2 {
+			e.reconC[pl] = make([]uint8, e.cstride*((e.bh*4+1)>>1+8))
+		}
+	}
 	e.dq[0] = dqTbl[0][c.QIndex][0]
 	e.dq[1] = dqTbl[0][c.QIndex][1]
 	e.dsp = newDsp[uint8]()
@@ -95,6 +107,9 @@ func (e *encoder) writeBlock(bx, by, bs int) {
 	}
 
 	e.reconBlock(bx, by, bs)
+	if e.hasChroma(bx, by, bs) {
+		e.reconChroma(bx, by, bs)
+	}
 }
 
 func (e *encoder) hasChroma(bx, by, bs int) bool {

@@ -1,13 +1,16 @@
 package av1
 
 type encConfig struct {
-	Width      int
-	Height     int
-	BitDepth   int
-	QIndex     int
-	Monochrome bool
-	Src        []uint8
-	SrcStride  int
+	Width       int
+	Height      int
+	BitDepth    int
+	QIndex      int
+	Monochrome  bool
+	Src         []uint8
+	SrcStride   int
+	SrcU        []uint8
+	SrcV        []uint8
+	SrcUVStride int
 }
 
 func writeObu(out []byte, typ int, payload []byte) []byte {

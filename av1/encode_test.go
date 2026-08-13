@@ -61,6 +61,10 @@ func TestEncodeDav1d(t *testing.T) {
 			Src: res, SrcStride: 256},
 		{Width: 64, Height: 64, BitDepth: 8, QIndex: 255, Monochrome: true,
 			Src: res, SrcStride: 256},
+		{Width: 128, Height: 128, BitDepth: 8, QIndex: 30,
+			Src: res, SrcStride: 256, SrcU: res[1024:], SrcV: res[2048:], SrcUVStride: 128},
+		{Width: 96, Height: 64, BitDepth: 8, QIndex: 150,
+			Src: res, SrcStride: 256, SrcU: res[512:], SrcV: res[1536:], SrcUVStride: 128},
 		{Width: 64, Height: 64, BitDepth: 8, QIndex: 100},
 		{Width: 64, Height: 96, BitDepth: 8, QIndex: 60},
 		{Width: 96, Height: 64, BitDepth: 8, QIndex: 20},
@@ -127,6 +131,61 @@ func encodeRecon(t *testing.T, c *encConfig) ([]byte, []uint8, int) {
 	out = writeObu(out, obuSeqHdr, seq)
 
 	return writeObu(out, obuFrame, append(fp.bytes(), tile...)), e.recon, e.stride
+}
+
+// TestEncodeChroma checks that a 4:2:0 frame carries all three planes.
+func TestEncodeChroma(t *testing.T) {
+	const w, h = 128, 128
+	cw, ch := w/2, h/2
+	y := make([]uint8, w*h)
+	u := make([]uint8, cw*ch)
+	v := make([]uint8, cw*ch)
+	for j := range h {
+		for i := range w {
+			y[j*w+i] = uint8(max(0, min(255, int(128+90*math.Sin(float64(i)/18)*math.Cos(float64(j)/23)))))
+		}
+	}
+	for j := range ch {
+		for i := range cw {
+			u[j*cw+i] = uint8(max(0, min(255, 128+int(60*math.Sin(float64(i)/9)))))
+			v[j*cw+i] = uint8(max(0, min(255, 128+int(60*math.Cos(float64(j)/11)))))
+		}
+	}
+
+	var prev int
+	for _, q := range []int{20, 100, 200} {
+		c := encConfig{Width: w, Height: h, BitDepth: 8, QIndex: q,
+			Src: y, SrcStride: w, SrcU: u, SrcV: v, SrcUVStride: cw}
+		data, _, _ := encodeRecon(t, &c)
+
+		var d Decoder
+		pics, err := d.DecodeOBUs(data)
+		if err != nil {
+			t.Fatalf("q=%d: %v", q, err)
+		}
+		p := pics[0]
+		if p.Layout != LayoutI420 {
+			t.Fatalf("layout %v, want 4:2:0", p.Layout)
+		}
+		var su int
+		for j := range ch {
+			for i := range cw {
+				d := int(p.Data[1][j*p.Stride[1]+i]) - int(u[j*cw+i])
+				if d < 0 {
+					d = -d
+				}
+				su += d
+			}
+		}
+		if su/(cw*ch) > 8 {
+			t.Errorf("q=%d: chroma mean error %d too high", q, su/(cw*ch))
+		}
+		if prev != 0 && len(data) >= prev {
+			t.Errorf("q=%d: %d bytes, not smaller than %d", q, len(data), prev)
+		}
+		prev = len(data)
+		p.Release()
+	}
 }
 
 // TestEncodeResidual holds that the encoder reconstructs exactly what the

@@ -119,3 +119,105 @@ func (e *encoder) reconBlock(bx, by, bs int) uint8 {
 
 	return ctx
 }
+
+func (e *encoder) reconChroma(bx, by, bs int) {
+	if e.cfg.Monochrome || e.cfg.SrcU == nil {
+		return
+	}
+	tx := int(maxTxfmSizeForBs[bs][e.layout])
+	tDim := &txfmDimensions[tx]
+	tw, th := 4*int(tDim.w), 4*int(tDim.h)
+	bDim := &blockDimensions[bs]
+	cbw4 := (int(bDim[0]) + 1) >> 1
+	cbh4 := (int(bDim[1]) + 1) >> 1
+	cbx, cby := (bx&^1)>>1, (by&^1)>>1
+
+	shift := quantShift(tx)
+	cfMax := int32(1<<15 - 1)
+
+	var res [64 * 64]int32
+	var coeff [32 * 32]int32
+	var lv [32 * 32]int32
+	cf := make([]int16, 32*32)
+
+	for pl := range 2 {
+		src := e.cfg.SrcU
+		if pl == 1 {
+			src = e.cfg.SrcV
+		}
+		rec := e.reconC[pl]
+
+		for y := 0; y < cbh4; y += int(tDim.h) {
+			for x := 0; x < cbw4; x += int(tDim.w) {
+				px, py := (cbx+x)*4, (cby+y)*4
+				if px >= e.cw || py >= e.ch {
+					continue
+				}
+				off := py*e.cstride + px
+				w := min(tw, e.cw-px)
+				h := min(th, e.ch-py)
+
+				pred := dcPredict(rec, off, e.cstride, w, h, py > 0, px > 0, 128)
+				for j := range th {
+					row := off + j*e.cstride
+					for i := range tw {
+						rec[row+i] = pred
+					}
+				}
+				for j := range th {
+					for i := range tw {
+						sx := min(px+i, e.cw-1)
+						sy := min(py+j, e.ch-1)
+						res[j*tw+i] = int32(src[sy*e.cfg.SrcUVStride+sx]) - int32(pred)
+					}
+				}
+
+				fwdTxfm(coeff[:], res[:], tw, tx, dctDct)
+				sw, sh := min(tw, 32), min(th, 32)
+				for i := range sw * sh {
+					d := e.dq[1]
+					if i == 0 {
+						d = e.dq[0]
+					}
+					lv[i] = quantOne(coeff[i], uint32(d), shift)
+				}
+
+				ctx := e.writeCoefs(&coefCtx{a: e.a[bx>>5].ccoef[pl][:], l: e.l.ccoef[pl][:]},
+					(cbx+x)&31, (cby+y)&31, tx, bs, 1+pl, dcPred, lv[:], e.levels[:])
+
+				cw := min(int(tDim.w), (e.bw-bx+1)>>1-x)
+				ch := min(int(tDim.h), (e.bh-by+1)>>1-y)
+				memset(e.a[bx>>5].ccoef[pl][(cbx+x)&31:][:max(cw, 1)], ctx)
+				memset(e.l.ccoef[pl][(cby+y)&31:][:max(ch, 1)], ctx)
+
+				eob := -1
+				for i := sw*sh - 1; i >= 0; i-- {
+					if lv[scans[tx][i]] != 0 {
+						eob = i
+
+						break
+					}
+				}
+				if eob >= 0 {
+					clear(cf[:sw*sh])
+					for i := range sw * sh {
+						if lv[i] == 0 {
+							continue
+						}
+						dqv := uint32(e.dq[1])
+						if i == 0 {
+							dqv = uint32(e.dq[0])
+						}
+						d := int32(uint32(abs32(lv[i])) * dqv >> uint(shift))
+						d = min(d, cfMax)
+						if lv[i] < 0 {
+							d = -d
+						}
+						cf[i] = int16(d)
+					}
+					invTxfmAdd(e.dsp, rec, off, e.cstride, cf, e.itx[:], eob, tx, dctDct, 255)
+				}
+			}
+		}
+	}
+}
