@@ -34,8 +34,10 @@ type encoder struct {
 	edge    [257]uint8
 	levels  [64 * 66]uint8
 	ymode   [256]uint8
-	bskip   [256]uint8
 	uvmode  [256]uint8
+	yangle  [256]int8
+	uvangle [256]int8
+	bskip   [256]uint8
 	split   [nBlLevels][256]bool
 	entry   [nBlLevels]sbState
 	kept    [nBlLevels]sbState
@@ -112,12 +114,13 @@ func (e *encoder) writeBlock(bx, by, bs, edgeFlags int) {
 	if e.cfg.Src != nil {
 		mode = int(e.ymode[sbIdx(bx, by)])
 	}
+	delta := int(e.yangle[sbIdx(bx, by)])
 	e.msac.symbolAdapt(ymodeCdf, nIntraPredModes-1, uint32(mode))
-	if int(bDim[2])+int(bDim[3]) >= 2 && mode >= vertPred && mode <= vertLeftPred {
-		e.msac.symbolAdapt(e.cdf.m.angleDelta[mode-vertPred][:], 6, 3)
+	if int(bDim[2])+int(bDim[3]) >= 2 && directional(mode) {
+		e.msac.symbolAdapt(e.cdf.m.angleDelta[mode-vertPred][:], 6, uint32(delta+3))
 	}
 
-	uvMode := dcPred
+	uvMode, uvDelta := dcPred, 0
 	if hasChroma {
 		cflAllowed := b2i(cflAllowedMask&(1<<bs) != 0)
 		nSym := nUvIntraPredModes - 1 - (1 - cflAllowed)
@@ -125,16 +128,17 @@ func (e *encoder) writeBlock(bx, by, bs, edgeFlags int) {
 		if e.cfg.Src != nil {
 			uvMode = int(e.uvmode[sbIdx(bx, by)])
 		}
+		uvDelta = int(e.uvangle[sbIdx(bx, by)])
 		e.msac.symbolAdapt(cdf, nSym, uint32(uvMode))
-		if int(bDim[2])+int(bDim[3]) >= 2 && uvMode >= vertPred && uvMode <= vertLeftPred {
-			e.msac.symbolAdapt(e.cdf.m.angleDelta[uvMode-vertPred][:], 6, 3)
+		if int(bDim[2])+int(bDim[3]) >= 2 && directional(uvMode) {
+			e.msac.symbolAdapt(e.cdf.m.angleDelta[uvMode-vertPred][:], 6, uint32(uvDelta+3))
 		}
 	}
 
 	if e.cfg.Src != nil {
-		e.reconBlock(bx, by, bs, edgeFlags, mode, skip != 0)
+		e.reconBlock(bx, by, bs, edgeFlags, mode, delta, skip != 0)
 		if hasChroma {
-			e.reconChroma(bx, by, bs, edgeFlags, uvMode, skip != 0)
+			e.reconChroma(bx, by, bs, edgeFlags, uvMode, uvDelta, skip != 0)
 		}
 	}
 
@@ -378,16 +382,16 @@ func (e *encoder) trialBlock(bx, by, bs, edgeFlags int) float64 {
 	skipped := e.lambda * cdfBits(skipCdf, 1)
 
 	ymodeCdf := e.cdf.kfym[intraModeContext[ab.mode[bx4]]][intraModeContext[e.l.mode[by4]]][:]
-	mode, c, sk := e.pickMode(bx, by, bs, edgeFlags, ymodeCdf)
+	mode, delta, c, sk := e.pickMode(bx, by, bs, edgeFlags, ymodeCdf)
 	coded += c
 	skipped += sk
 
-	uvMode := dcPred
+	uvMode, uvDelta := dcPred, 0
 	hasChroma := e.hasChroma(bx, by, bs)
 	if hasChroma {
 		cflAllowed := b2i(cflAllowedMask&(1<<bs) != 0)
 		cdf := e.cdf.m.uvMode[cflAllowed][mode][:]
-		uvMode, c, sk = e.pickUvMode(bx, by, bs, edgeFlags, cdf)
+		uvMode, uvDelta, c, sk = e.pickUvMode(bx, by, bs, edgeFlags, cdf)
 		coded += c
 		skipped += sk
 		setCtx(ab.uvmode[:], bx4>>e.ssHor, (bw4+e.ssHor)>>e.ssHor, uint8(uvMode))
@@ -396,9 +400,9 @@ func (e *encoder) trialBlock(bx, by, bs, edgeFlags int) float64 {
 
 	skip := skipped < coded
 	if skip {
-		e.reconBlock(bx, by, bs, edgeFlags, mode, true)
+		e.reconBlock(bx, by, bs, edgeFlags, mode, delta, true)
 		if hasChroma {
-			e.reconChroma(bx, by, bs, edgeFlags, uvMode, true)
+			e.reconChroma(bx, by, bs, edgeFlags, uvMode, uvDelta, true)
 		}
 		coded = skipped
 	}
@@ -406,6 +410,8 @@ func (e *encoder) trialBlock(bx, by, bs, edgeFlags int) float64 {
 	i := sbIdx(bx, by)
 	e.ymode[i] = uint8(mode)
 	e.uvmode[i] = uint8(uvMode)
+	e.yangle[i] = int8(delta)
+	e.uvangle[i] = int8(uvDelta)
 	e.bskip[i] = b2u8(skip)
 
 	for i, edge := range [2]*blockContext{ab, &e.l} {

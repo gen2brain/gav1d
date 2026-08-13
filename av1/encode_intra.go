@@ -238,7 +238,10 @@ func (e *encoder) predIntra(dst []uint8, off, stride, x, y, w, h, tw, th,
 		a|smFl, maxW, maxH, 255)
 }
 
-const modeShortlist = 5
+const (
+	modeShortlist = 5
+	angleSearch   = true
+)
 
 func shortlist(cost *[nIntraPredModes]float64, out []int) []int {
 	out = out[:0]
@@ -259,16 +262,20 @@ func shortlist(cost *[nIntraPredModes]float64, out []int) []int {
 	return out
 }
 
-func (e *encoder) modeBits(mode int, cdf []uint16) float64 {
+func directional(mode int) bool {
+	return mode >= vertPred && mode <= vertLeftPred
+}
+
+func (e *encoder) modeBits(mode, delta int, cdf []uint16) float64 {
 	bits := cdfBits(cdf, mode)
-	if mode >= vertPred && mode <= vertLeftPred {
-		bits += cdfBits(e.cdf.m.angleDelta[mode-vertPred][:], 3)
+	if directional(mode) {
+		bits += cdfBits(e.cdf.m.angleDelta[mode-vertPred][:], delta+3)
 	}
 
 	return bits
 }
 
-func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, float64, float64) {
+func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int, float64, float64) {
 	bDim := &blockDimensions[bs]
 	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
 	tx := int(maxTxfmSizeForBs[bs][0])
@@ -280,11 +287,23 @@ func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, float6
 	ef := lumaTxEdge(edgeFlags, w4, h4, 0, 0, 0, 0, int(tDim.w), int(tDim.h))
 	off := 4 * (by*e.stride + bx)
 
-	trial := func(m int) (float64, float64) {
+	pred := func(m, delta int) {
 		e.predIntra(e.recon, off, e.stride, bx, by, e.bw, e.bh,
-			int(tDim.w), int(tDim.h), m, 0, ef, smFl,
+			int(tDim.w), int(tDim.h), m, delta, ef, smFl,
 			4*e.bw-4*bx, 4*e.bh-4*by)
-		bits := e.lambda * e.modeBits(m, cdf)
+	}
+
+	cheap := func(m, delta int) float64 {
+		pred(m, delta)
+		residual(e.res[:], e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
+			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tw, th)
+
+		return float64(satd(e.res[:], tw, th)) + e.lambda*e.modeBits(m, delta, cdf)
+	}
+
+	trial := func(m, delta int) (float64, float64) {
+		pred(m, delta)
+		bits := e.lambda * e.modeBits(m, delta, cdf)
 		skip := sse(e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
 			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tw, th) + bits
 
@@ -299,31 +318,41 @@ func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, float6
 
 	var pre [nIntraPredModes]float64
 	for i, m := range intraModes {
-		e.predIntra(e.recon, off, e.stride, bx, by, e.bw, e.bh,
-			int(tDim.w), int(tDim.h), m, 0, ef, smFl,
-			4*e.bw-4*bx, 4*e.bh-4*by)
-		residual(e.res[:], e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
-			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tw, th)
-		pre[i] = float64(satd(e.res[:], tw, th)) + e.lambda*e.modeBits(m, cdf)
+		pre[i] = cheap(m, 0)
 	}
 
 	var buf [nIntraPredModes]int
 	cands := shortlist(&pre, buf[:])
 
-	best, bestCost, bestSkip := dcPred, math.Inf(1), math.Inf(1)
+	best, bestDelta := dcPred, 0
+	bestCost, bestSkip := math.Inf(1), math.Inf(1)
 	for _, m := range cands {
-		if c, sk := trial(m); c < bestCost {
+		if c, sk := trial(m, 0); c < bestCost {
 			best, bestCost, bestSkip = m, c, sk
 		}
 	}
-	if best != cands[len(cands)-1] {
-		trial(best)
+
+	if angleSearch && directional(best) && int(bDim[2])+int(bDim[3]) >= 2 {
+		d, dCost := 0, math.Inf(1)
+		for delta := -3; delta <= 3; delta++ {
+			if delta == 0 {
+				continue
+			}
+			if c := cheap(best, delta); c < dCost {
+				d, dCost = delta, c
+			}
+		}
+		if c, sk := trial(best, d); c < bestCost {
+			bestDelta, bestCost, bestSkip = d, c, sk
+		}
 	}
 
-	return best, bestCost, bestSkip
+	trial(best, bestDelta)
+
+	return best, bestDelta, bestCost, bestSkip
 }
 
-func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, float64, float64) {
+func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int, float64, float64) {
 	ssHor, ssVer := e.ssHor, e.ssVer
 	bDim := &blockDimensions[bs]
 	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
@@ -338,18 +367,39 @@ func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, floa
 	ef := e.chromaTxEdge(edgeFlags, cw4, ch4, 0, 0, 0, 0, int(tDim.w), int(tDim.h))
 	off := 4 * (cby*e.cstride + cbx)
 
-	trial := func(m int) (float64, float64) {
+	plane := func(pl int) []uint8 {
+		if pl == 1 {
+			return e.cfg.SrcV
+		}
+
+		return e.cfg.SrcU
+	}
+
+	pred := func(pl, m, delta int) {
+		e.predIntra(e.reconC[pl], off, e.cstride, cbx, cby,
+			e.bw>>ssHor, e.bh>>ssVer, int(tDim.w), int(tDim.h), m, delta, ef, smFl,
+			(4*e.bw+ssHor-4*bx)>>ssHor, (4*e.bh+ssVer-4*by)>>ssVer)
+	}
+
+	cheap := func(m, delta int) float64 {
+		c := e.lambda * e.modeBits(m, delta, cdf)
+		for pl := range 2 {
+			pred(pl, m, delta)
+			residual(e.res[:], e.reconC[pl], off, e.cstride, plane(pl), e.cfg.SrcUVStride,
+				e.cw, e.ch, 4*cbx, 4*cby, tw, th)
+			c += float64(satd(e.res[:], tw, th))
+		}
+
+		return c
+	}
+
+	trial := func(m, delta int) (float64, float64) {
 		txtp := e.txtpFor(tx, 1, m)
-		c := e.lambda * e.modeBits(m, cdf)
+		c := e.lambda * e.modeBits(m, delta, cdf)
 		skip := c
 		for pl := range 2 {
-			src := e.cfg.SrcU
-			if pl == 1 {
-				src = e.cfg.SrcV
-			}
-			e.predIntra(e.reconC[pl], off, e.cstride, cbx, cby,
-				e.bw>>ssHor, e.bh>>ssVer, int(tDim.w), int(tDim.h), m, 0, ef, smFl,
-				(4*e.bw+ssHor-4*bx)>>ssHor, (4*e.bh+ssVer-4*by)>>ssVer)
+			src := plane(pl)
+			pred(pl, m, delta)
 			skip += sse(e.reconC[pl], off, e.cstride, src, e.cfg.SrcUVStride,
 				e.cw, e.ch, 4*cbx, 4*cby, tw, th)
 
@@ -366,35 +416,38 @@ func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, floa
 
 	var pre [nIntraPredModes]float64
 	for i, m := range intraModes {
-		pre[i] = e.lambda * e.modeBits(m, cdf)
-		for pl := range 2 {
-			src := e.cfg.SrcU
-			if pl == 1 {
-				src = e.cfg.SrcV
-			}
-			e.predIntra(e.reconC[pl], off, e.cstride, cbx, cby,
-				e.bw>>ssHor, e.bh>>ssVer, int(tDim.w), int(tDim.h), m, 0, ef, smFl,
-				(4*e.bw+ssHor-4*bx)>>ssHor, (4*e.bh+ssVer-4*by)>>ssVer)
-			residual(e.res[:], e.reconC[pl], off, e.cstride, src, e.cfg.SrcUVStride,
-				e.cw, e.ch, 4*cbx, 4*cby, tw, th)
-			pre[i] += float64(satd(e.res[:], tw, th))
-		}
+		pre[i] = cheap(m, 0)
 	}
 
 	var buf [nIntraPredModes]int
 	cands := shortlist(&pre, buf[:])
 
-	best, bestCost, bestSkip := dcPred, math.Inf(1), math.Inf(1)
+	best, bestDelta := dcPred, 0
+	bestCost, bestSkip := math.Inf(1), math.Inf(1)
 	for _, m := range cands {
-		if c, sk := trial(m); c < bestCost {
+		if c, sk := trial(m, 0); c < bestCost {
 			best, bestCost, bestSkip = m, c, sk
 		}
 	}
-	if best != cands[len(cands)-1] {
-		trial(best)
+
+	if angleSearch && directional(best) && int(bDim[2])+int(bDim[3]) >= 2 {
+		d, dCost := 0, math.Inf(1)
+		for delta := -3; delta <= 3; delta++ {
+			if delta == 0 {
+				continue
+			}
+			if c := cheap(best, delta); c < dCost {
+				d, dCost = delta, c
+			}
+		}
+		if c, sk := trial(best, d); c < bestCost {
+			bestDelta, bestCost, bestSkip = d, c, sk
+		}
 	}
 
-	return best, bestCost, bestSkip
+	trial(best, bestDelta)
+
+	return best, bestDelta, bestCost, bestSkip
 }
 
 func (e *encoder) quantTx(dst []uint8, off, stride int, src []uint8, sstride, sw, sh,
@@ -467,7 +520,7 @@ func (e *encoder) codeTx(dst []uint8, off, stride int, src []uint8, sstride, sw,
 	e.reconTx(dst, off, stride, tx, txtp, eob)
 }
 
-func (e *encoder) reconBlock(bx, by, bs, edgeFlags, mode int, skip bool) {
+func (e *encoder) reconBlock(bx, by, bs, edgeFlags, mode, delta int, skip bool) {
 	bDim := &blockDimensions[bs]
 	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
 	bx4, by4 := bx&31, by&31
@@ -486,7 +539,7 @@ func (e *encoder) reconBlock(bx, by, bs, edgeFlags, mode int, skip bool) {
 					off := 4 * ((by+y)*e.stride + bx + x)
 
 					e.predIntra(e.recon, off, e.stride, bx+x, by+y, e.bw, e.bh,
-						int(tDim.w), int(tDim.h), mode, 0, ef, smFl,
+						int(tDim.w), int(tDim.h), mode, delta, ef, smFl,
 						4*e.bw-4*(bx+x), 4*e.bh-4*(by+y))
 					if skip {
 						memset(cc.a[bx4+x:bx4+x+int(tDim.w)], 0x40)
@@ -504,7 +557,7 @@ func (e *encoder) reconBlock(bx, by, bs, edgeFlags, mode int, skip bool) {
 	}
 }
 
-func (e *encoder) reconChroma(bx, by, bs, edgeFlags, mode int, skip bool) {
+func (e *encoder) reconChroma(bx, by, bs, edgeFlags, mode, delta int, skip bool) {
 	ssHor, ssVer := e.ssHor, e.ssVer
 	bDim := &blockDimensions[bs]
 	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
@@ -536,7 +589,7 @@ func (e *encoder) reconChroma(bx, by, bs, edgeFlags, mode int, skip bool) {
 
 						e.predIntra(dst, off, e.cstride, cbx+x, cby+y,
 							e.bw>>ssHor, e.bh>>ssVer, int(tDim.w), int(tDim.h),
-							mode, 0, ef, smFl,
+							mode, delta, ef, smFl,
 							(4*e.bw+ssHor-4*(lx&^ssHor))>>ssHor,
 							(4*e.bh+ssVer-4*(ly&^ssVer))>>ssVer)
 						if skip {
