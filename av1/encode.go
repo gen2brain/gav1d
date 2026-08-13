@@ -66,6 +66,7 @@ func (e *encoder) init(c *encConfig, seq *sequenceHeader) {
 	e.itx = make([]int32, 64*64*2+itxDct64Scratch)
 	e.fwd = make([]int32, fwdScratch)
 	e.cdf.initStatic(uint8(c.QIndex))
+	e.msac.precarry = make([]uint16, 0, e.bw*e.bh*4)
 	e.msac.init(false)
 }
 
