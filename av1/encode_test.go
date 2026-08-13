@@ -75,6 +75,10 @@ func TestEncodeDav1d(t *testing.T) {
 			Src: res, SrcStride: 256, SrcU: res[1024:], SrcV: res[2048:], SrcUVStride: 128},
 		{Width: 122, Height: 66, BitDepth: 8, QIndex: 40,
 			Src: res, SrcStride: 256, SrcU: res[768:], SrcV: res[2560:], SrcUVStride: 128},
+		{Width: 97, Height: 33, BitDepth: 8, QIndex: 80, Monochrome: true,
+			Src: res, SrcStride: 256},
+		{Width: 33, Height: 33, BitDepth: 8, QIndex: 80,
+			Src: res, SrcStride: 256, SrcU: res[1024:], SrcV: res[2048:], SrcUVStride: 128},
 		{Width: 64, Height: 64, BitDepth: 8, QIndex: 100},
 		{Width: 64, Height: 96, BitDepth: 8, QIndex: 60},
 		{Width: 96, Height: 64, BitDepth: 8, QIndex: 20},
@@ -210,7 +214,7 @@ func TestEncodeResidual(t *testing.T) {
 		}
 	}
 
-	for _, sz := range [][2]int{{128, 96}, {122, 66}, {200, 150}} {
+	for _, sz := range [][2]int{{128, 96}, {97, 33}, {122, 66}, {200, 150}} {
 		w, h := sz[0], sz[1]
 		for _, q := range []int{20, 60, 120, 200} {
 			c := encConfig{Width: w, Height: h, BitDepth: 8, QIndex: q,

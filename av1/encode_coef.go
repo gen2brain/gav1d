@@ -121,12 +121,24 @@ func (e *encoder) writeCoefs(cc *coefCtx, aOff, lOff, tx, bs, plane int,
 
 	rc := uint32(scan[eob])
 	tok := min(abs(lv[rc]), 15)
-	if eob != 0 {
-		ctx := uint32(1 + b2i(eob > 2<<sz) + b2i(eob > 4<<sz))
-		e.msac.symbolAdapt(eobCdf[ctx][:], 2, min(tok, 3)-1)
-	} else {
+	if eob == 0 {
 		e.msac.symbolAdapt(eobCdf[0][:], 2, min(tok, 3)-1)
+		if tok >= 3 {
+			e.msac.hiTok(&hiCdf[0], tok-3)
+		}
+		sign := b2u(lv[0] < 0)
+		dcSignCtx := getDcSignCtx(tx, cc.a, aOff, cc.l, lOff)
+		e.msac.boolAdapt(e.cdf.coef.dcSign[chroma][dcSignCtx][:], sign)
+		full := abs(lv[0])
+		if tok == 15 {
+			e.msac.golomb(full - 15)
+		}
+
+		return uint8(min(full, 63)) | uint8((sign-1)&(2<<6))
 	}
+
+	ctx := uint32(1 + b2i(eob > 2<<sz) + b2i(eob > 4<<sz))
+	e.msac.symbolAdapt(eobCdf[ctx][:], 2, min(tok, 3)-1)
 	if tok >= 3 {
 		x, y := rc>>uint(slh+2), rc&uint32(4<<slh-1)
 		c := uint32(7)
@@ -163,16 +175,14 @@ func (e *encoder) writeCoefs(cc *coefCtx, aOff, lOff, tx, bs, plane int,
 	}
 
 	dcTok := min(abs(lv[0]), 15)
-	if eob != 0 {
-		e.msac.symbolAdapt(loCdf[0][:], 3, min(dcTok, 3))
-		if dcTok >= 3 {
-			mag := (uint32(levels[1]) + uint32(levels[stride]) + uint32(levels[stride+1])) & 63
-			ctx := uint32(6)
-			if mag <= 12 {
-				ctx = (mag + 1) >> 1
-			}
-			e.msac.hiTok(&hiCdf[ctx], dcTok-3)
+	e.msac.symbolAdapt(loCdf[0][:], 3, min(dcTok, 3))
+	if dcTok >= 3 {
+		mag := (uint32(levels[1]) + uint32(levels[stride]) + uint32(levels[stride+1])) & 63
+		dctx := uint32(6)
+		if mag <= 12 {
+			dctx = (mag + 1) >> 1
 		}
+		e.msac.hiTok(&hiCdf[dctx], dcTok-3)
 	}
 
 	culLevel := uint32(0)
