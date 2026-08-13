@@ -40,6 +40,32 @@ func TestEncodeDecode(t *testing.T) {
 	}
 }
 
+func TestEncodeConfig(t *testing.T) {
+	src := make([]uint8, 64*64)
+	ok := encConfig{Width: 64, Height: 64, BitDepth: 8, QIndex: 100,
+		Monochrome: true, Src: src, SrcStride: 64}
+	if Encode(ok) == nil {
+		t.Fatal("valid config rejected")
+	}
+
+	for name, c := range map[string]encConfig{
+		"qindex 0 is lossless, which needs the 4x4 WHT": {Width: 64, Height: 64,
+			BitDepth: 8, QIndex: 0, Monochrome: true, Src: src, SrcStride: 64},
+		"qindex past the dequant table": {Width: 64, Height: 64, BitDepth: 8,
+			QIndex: 256, Monochrome: true, Src: src, SrcStride: 64},
+		"zero width": {Width: 0, Height: 64, BitDepth: 8, QIndex: 100},
+		"ten bit":    {Width: 64, Height: 64, BitDepth: 10, QIndex: 100},
+		"stride below width": {Width: 64, Height: 64, BitDepth: 8, QIndex: 100,
+			Monochrome: true, Src: src, SrcStride: 32},
+		"colour without chroma planes": {Width: 64, Height: 64, BitDepth: 8,
+			QIndex: 100, Src: src, SrcStride: 64},
+	} {
+		if Encode(c) != nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
 func TestEncodeDav1d(t *testing.T) {
 	if dav1dBin == "" {
 		t.Skip("dav1d not found (set DAV1D_BIN)")

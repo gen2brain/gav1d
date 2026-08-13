@@ -238,7 +238,28 @@ func (e *encoder) writeTile() []byte {
 	return e.msac.done()
 }
 
+func encConfigValid(c *encConfig) bool {
+	if c.Width < 1 || c.Height < 1 || c.BitDepth != 8 {
+		return false
+	}
+	if c.QIndex < 1 || c.QIndex > 255 {
+		return false
+	}
+	if c.Src != nil && c.SrcStride < c.Width {
+		return false
+	}
+	if !c.Monochrome && c.SrcU != nil && c.SrcUVStride < (c.Width+1)>>1 {
+		return false
+	}
+
+	return c.Monochrome || c.Src == nil || (c.SrcU != nil && c.SrcV != nil)
+}
+
 func Encode(c encConfig) []byte {
+	if !encConfigValid(&c) {
+		return nil
+	}
+
 	seq := writeSeqHdr(&c)
 	var sh sequenceHeader
 	var gb getBits
