@@ -584,51 +584,6 @@ func ipredZ2[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,
 
 // z2LeftRun fills the columns that read the left edge, where the position
 // steps by dy so both the sample and the fraction move with the column.
-var z2Left8Asm func(dst *uint8, edge *uint8, n int, ypos, dy int32)
-
-func z2LeftRun[P pixel](dst []P, dstOff int, edge []P, edgeOff, n, ypos, dy int) int {
-	var z P
-	if unsafe.Sizeof(z) == 1 && z2Left8Asm != nil {
-		if n8 := n &^ 7; n8 > 0 {
-			z2Left8Asm((*uint8)(unsafe.Pointer(&dst[dstOff])),
-				(*uint8)(unsafe.Pointer(&edge[edgeOff])), n8, int32(ypos), int32(dy))
-
-			return n8
-		}
-	}
-
-	return 0
-}
-
-// z2TopRun fills the columns that read the top edge, where the fraction is
-// constant across the row, and reports how many it took.
-var (
-	z2Top8Asm  func(dst *uint8, edge *uint8, n int, frac int32)
-	z2Top16Asm func(dst *uint16, edge *uint16, n int, frac int32)
-)
-
-func z2TopRun[P pixel](dst []P, dstOff int, edge []P, edgeOff, n int, frac int32) int {
-	var z P
-	if unsafe.Sizeof(z) == 1 && z2Top8Asm != nil {
-		if n16 := n &^ 15; n16 > 0 {
-			z2Top8Asm((*uint8)(unsafe.Pointer(&dst[dstOff])),
-				(*uint8)(unsafe.Pointer(&edge[edgeOff])), n16, frac)
-
-			return n16
-		}
-	}
-	if unsafe.Sizeof(z) == 2 && z2Top16Asm != nil {
-		if n8 := n &^ 7; n8 > 0 {
-			z2Top16Asm((*uint16)(unsafe.Pointer(&dst[dstOff])),
-				(*uint16)(unsafe.Pointer(&edge[edgeOff])), n8, frac)
-
-			return n8
-		}
-	}
-
-	return 0
-}
-
 func ipredZ3[P pixel](dst []P, dstOff, stride int, tlIn []P, tlInOff,
 	width, height, angle, maxWidth, maxHeight int, bitdepthMax int32,
 ) {

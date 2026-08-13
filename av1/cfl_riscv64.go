@@ -2,6 +2,8 @@
 
 package av1
 
+import "unsafe"
+
 //go:noescape
 func cflAcNormRVV(ac *int16, n int, log2sz int)
 
@@ -25,6 +27,32 @@ func init() {
 	cflAcMain8Asm = cflAcMain8RVV
 	cflPredict8Asm = cflPredict8RVV
 	cflPredict16Asm = cflPredict16RVV
-	z2Top8Asm = z2Top8RVV
-	z2Top16Asm = z2Top16RVV
+}
+
+func z2LeftRun[P pixel](dst []P, dstOff int, edge []P, edgeOff, n, ypos, dy int) int {
+	return 0
+}
+
+// z2TopRun fills the columns that read the top edge, where the fraction is
+// constant across the row, and reports how many it took.
+func z2TopRun[P pixel](dst []P, dstOff int, edge []P, edgeOff, n int, frac int32) int {
+	var z P
+	if unsafe.Sizeof(z) == 1 {
+		if n16 := n &^ 15; n16 > 0 {
+			z2Top8RVV((*uint8)(unsafe.Pointer(&dst[dstOff])),
+				(*uint8)(unsafe.Pointer(&edge[edgeOff])), n16, frac)
+
+			return n16
+		}
+	}
+	if unsafe.Sizeof(z) == 2 {
+		if n8 := n &^ 7; n8 > 0 {
+			z2Top16RVV((*uint16)(unsafe.Pointer(&dst[dstOff])),
+				(*uint16)(unsafe.Pointer(&edge[edgeOff])), n8, frac)
+
+			return n8
+		}
+	}
+
+	return 0
 }

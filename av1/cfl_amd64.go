@@ -2,6 +2,8 @@
 
 package av1
 
+import "unsafe"
+
 //go:noescape
 func cflPredict8AVX2(dst *uint8, stride, w, h int, dc int32, ac *int16, alpha, max int32)
 
@@ -32,7 +34,42 @@ func init() {
 	cflPredict16Asm = cflPredict16AVX2
 	cflAcNorm = cflAcNormAVX2
 	cflAcMain8Asm = cflAcMain8AVX2
-	z2Left8Asm = z2Left8AVX2
-	z2Top8Asm = z2Top8AVX2
-	z2Top16Asm = z2Top16AVX2
+}
+
+func z2LeftRun[P pixel](dst []P, dstOff int, edge []P, edgeOff, n, ypos, dy int) int {
+	var z P
+	if unsafe.Sizeof(z) == 1 && hasAVX2 {
+		if n8 := n &^ 7; n8 > 0 {
+			z2Left8AVX2((*uint8)(unsafe.Pointer(&dst[dstOff])),
+				(*uint8)(unsafe.Pointer(&edge[edgeOff])), n8, int32(ypos), int32(dy))
+
+			return n8
+		}
+	}
+
+	return 0
+}
+
+// z2TopRun fills the columns that read the top edge, where the fraction is
+// constant across the row, and reports how many it took.
+func z2TopRun[P pixel](dst []P, dstOff int, edge []P, edgeOff, n int, frac int32) int {
+	var z P
+	if unsafe.Sizeof(z) == 1 && hasAVX2 {
+		if n16 := n &^ 15; n16 > 0 {
+			z2Top8AVX2((*uint8)(unsafe.Pointer(&dst[dstOff])),
+				(*uint8)(unsafe.Pointer(&edge[edgeOff])), n16, frac)
+
+			return n16
+		}
+	}
+	if unsafe.Sizeof(z) == 2 && hasAVX2 {
+		if n8 := n &^ 7; n8 > 0 {
+			z2Top16AVX2((*uint16)(unsafe.Pointer(&dst[dstOff])),
+				(*uint16)(unsafe.Pointer(&edge[edgeOff])), n8, frac)
+
+			return n8
+		}
+	}
+
+	return 0
 }
