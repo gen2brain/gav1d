@@ -1,6 +1,148 @@
 package av1
 
+import "math"
+
 const encEdgeOff = 128
+
+var intraModes = [nIntraPredModes]int{
+	dcPred, vertPred, horPred, diagDownLeftPred, diagDownRightPred,
+	vertRightPred, horDownPred, horUpPred, vertLeftPred,
+	smoothPred, smoothVPred, smoothHPred, paethPred,
+}
+
+func cdfBits(cdf []uint16, val int) float64 {
+	hi := float64(1 << 15)
+	if val > 0 {
+		hi = float64(cdf[val-1])
+	}
+	p := (hi - float64(cdf[val])) / (1 << 15)
+	if p <= 0 {
+		return 24
+	}
+
+	return -math.Log2(p)
+}
+
+var levelBits [16]float64
+
+func init() {
+	for i := range levelBits {
+		levelBits[i] = 3 + 2*math.Log2(float64(i)+1)
+	}
+}
+
+func rateBits(lv []int32, scan []uint16, eob int) float64 {
+	if eob < 0 {
+		return 1
+	}
+	bits := 4 + 0.3*float64(eob)
+	for i := 0; i <= eob; i++ {
+		l := abs32(lv[scan[i]])
+		if l == 0 {
+			continue
+		}
+		if int(l) < len(levelBits) {
+			bits += levelBits[l]
+
+			continue
+		}
+		bits += 3 + 2*math.Log2(float64(l)+1)
+	}
+
+	return bits
+}
+
+func sse(dst []uint8, off, stride int, src []uint8, sstride, sw, sh, px, py, w, h int) float64 {
+	var s float64
+	for j := range h {
+		sy := min(py+j, sh-1)
+		for i := range w {
+			d := float64(src[sy*sstride+min(px+i, sw-1)]) - float64(dst[off+j*stride+i])
+			s += d * d
+		}
+	}
+
+	return s
+}
+
+func residual(res []int32, dst []uint8, off, stride int, src []uint8, sstride,
+	sw, sh, px, py, w, h int,
+) {
+	for j := range h {
+		sy := min(py+j, sh-1)
+		row := j * w
+		for i := range w {
+			res[row+i] = int32(src[sy*sstride+min(px+i, sw-1)]) - int32(dst[off+j*stride+i])
+		}
+	}
+}
+
+func txEdge(sbHasTr, sbHasBl, initX, initY, x, y, tw4, th4, subW4, subH4 int) int {
+	ef := 0
+	if !((y > initY || sbHasTr == 0) && x+tw4 >= subW4) {
+		ef |= edgeI444TopHasRight
+	}
+	if !(x > initX || (sbHasBl == 0 && y+th4 >= subH4)) {
+		ef |= edgeI444LeftHasBottom
+	}
+
+	return ef
+}
+
+func lumaTxEdge(edgeFlags, w4, h4, initX, initY, x, y, tw4, th4 int) int {
+	sbHasTr := 0
+	switch {
+	case initX+16 < w4:
+		sbHasTr = 1
+	case initY != 0:
+	default:
+		sbHasTr = edgeFlags & edgeI444TopHasRight
+	}
+	sbHasBl := 0
+	switch {
+	case initX != 0:
+	case initY+16 < h4:
+		sbHasBl = 1
+	default:
+		sbHasBl = edgeFlags & edgeI444LeftHasBottom
+	}
+
+	return txEdge(sbHasTr, sbHasBl, initX, initY, x, y, tw4, th4,
+		min(w4, initX+16), min(h4, initY+16))
+}
+
+func (e *encoder) chromaTxEdge(edgeFlags, cw4, ch4, initX, initY, x, y, tw4, th4 int) int {
+	ssHor, ssVer := e.ssHor, e.ssVer
+
+	sbHasTr := 0
+	switch {
+	case (initX+16)>>ssHor < cw4:
+		sbHasTr = 1
+	case initY != 0:
+	default:
+		sbHasTr = edgeFlags & (edgeI420TopHasRight >> (e.layout - 1))
+	}
+	sbHasBl := 0
+	switch {
+	case initX != 0:
+	case (initY+16)>>ssVer < ch4:
+		sbHasBl = 1
+	default:
+		sbHasBl = edgeFlags & (edgeI420LeftHasBottom >> (e.layout - 1))
+	}
+
+	return txEdge(sbHasTr, sbHasBl, initX>>ssHor, initY>>ssVer, x, y, tw4, th4,
+		min(cw4, (initX+16)>>ssHor), min(ch4, (initY+16)>>ssVer))
+}
+
+func (e *encoder) txtpFor(tx, plane, mode int) int {
+	tDim := &txfmDimensions[tx]
+	if plane == 0 || int(tDim.max)+1 >= tx64x64 {
+		return dctDct
+	}
+
+	return int(txtpFromUvmode[mode])
+}
 
 func (e *encoder) predIntra(dst []uint8, off, stride, x, y, w, h, tw, th,
 	mode, angle, edgeFlags, smFl, maxW, maxH int,
@@ -13,23 +155,98 @@ func (e *encoder) predIntra(dst []uint8, off, stride, x, y, w, h, tw, th,
 		a|smFl, maxW, maxH, 255)
 }
 
-func (e *encoder) codeTx(dst []uint8, off, stride int, src []uint8, sstride, sw, sh,
-	px, py, tx, bs, plane, mode int, cc *coefCtx, aOff, lOff, aw, lh int,
-) {
+func (e *encoder) modeBits(mode int, cdf []uint16) float64 {
+	bits := cdfBits(cdf, mode)
+	if mode >= vertPred && mode <= vertLeftPred {
+		bits += cdfBits(e.cdf.m.angleDelta[mode-vertPred][:], 3)
+	}
+
+	return bits
+}
+
+func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) int {
+	bDim := &blockDimensions[bs]
+	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
+	tx := int(maxTxfmSizeForBs[bs][0])
+	tDim := &txfmDimensions[tx]
+	tw, th := 4*int(tDim.w), 4*int(tDim.h)
+	bx4, by4 := bx&31, by&31
+	ab := &e.a[bx>>5]
+	smFl := smFlag(ab, bx4) | smFlag(&e.l, by4) | int(e.seq.intraEdgeFilter)<<10
+	ef := lumaTxEdge(edgeFlags, w4, h4, 0, 0, 0, 0, int(tDim.w), int(tDim.h))
+	off := 4 * (by*e.stride + bx)
+
+	best, bestCost := dcPred, math.Inf(1)
+	for _, m := range intraModes {
+		e.predIntra(e.recon, off, e.stride, bx, by, e.bw, e.bh,
+			int(tDim.w), int(tDim.h), m, 0, ef, smFl,
+			4*e.bw-4*bx, 4*e.bh-4*by)
+		eob := e.quantTx(e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
+			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tx, dctDct)
+		e.reconTx(e.recon, off, e.stride, tx, dctDct, eob)
+		c := sse(e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
+			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tw, th) +
+			e.lambda*(rateBits(e.lv[:], scans[tx], eob)+e.modeBits(m, cdf))
+		if c < bestCost {
+			best, bestCost = m, c
+		}
+	}
+
+	return best
+}
+
+func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) int {
+	ssHor, ssVer := e.ssHor, e.ssVer
+	bDim := &blockDimensions[bs]
+	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
+	cw4, ch4 := (w4+ssHor)>>ssHor, (h4+ssVer)>>ssVer
+	cbx4, cby4 := (bx&31)>>ssHor, (by&31)>>ssVer
+	cbx, cby := bx>>ssHor, by>>ssVer
+	tx := int(maxTxfmSizeForBs[bs][e.layout])
+	tDim := &txfmDimensions[tx]
+	tw, th := 4*int(tDim.w), 4*int(tDim.h)
+	ab := &e.a[bx>>5]
+	smFl := smUvFlag(ab, cbx4) | smUvFlag(&e.l, cby4) | angleUseEdgeFilterFlag
+	ef := e.chromaTxEdge(edgeFlags, cw4, ch4, 0, 0, 0, 0, int(tDim.w), int(tDim.h))
+	off := 4 * (cby*e.cstride + cbx)
+
+	best, bestCost := dcPred, math.Inf(1)
+	for _, m := range intraModes {
+		txtp := e.txtpFor(tx, 1, m)
+		c := e.lambda * e.modeBits(m, cdf)
+		for pl := range 2 {
+			src := e.cfg.SrcU
+			if pl == 1 {
+				src = e.cfg.SrcV
+			}
+			e.predIntra(e.reconC[pl], off, e.cstride, cbx, cby,
+				e.bw>>ssHor, e.bh>>ssVer, int(tDim.w), int(tDim.h), m, 0, ef, smFl,
+				(4*e.bw+ssHor-4*bx)>>ssHor, (4*e.bh+ssVer-4*by)>>ssVer)
+			eob := e.quantTx(e.reconC[pl], off, e.cstride, src, e.cfg.SrcUVStride,
+				e.cw, e.ch, 4*cbx, 4*cby, tx, txtp)
+			e.reconTx(e.reconC[pl], off, e.cstride, tx, txtp, eob)
+			c += sse(e.reconC[pl], off, e.cstride, src, e.cfg.SrcUVStride,
+				e.cw, e.ch, 4*cbx, 4*cby, tw, th) +
+				e.lambda*rateBits(e.lv[:], scans[tx], eob)
+		}
+		if c < bestCost {
+			best, bestCost = m, c
+		}
+	}
+
+	return best
+}
+
+func (e *encoder) quantTx(dst []uint8, off, stride int, src []uint8, sstride, sw, sh,
+	px, py, tx, txtp int,
+) int {
 	tDim := &txfmDimensions[tx]
 	tw, th := 4*int(tDim.w), 4*int(tDim.h)
 	shift := quantShift(tx)
 
-	for j := range th {
-		sy := min(py+j, sh-1)
-		row := j * tw
-		for i := range tw {
-			sx := min(px+i, sw-1)
-			e.res[row+i] = int32(src[sy*sstride+sx]) - int32(dst[off+j*stride+i])
-		}
-	}
+	residual(e.res[:], dst, off, stride, src, sstride, sw, sh, px, py, tw, th)
+	fwdTxfm(e.coeff[:], e.res[:], tw, tx, txtp)
 
-	fwdTxfm(e.coeff[:], e.res[:], tw, tx, dctDct)
 	cw, ch := min(tw, 32), min(th, 32)
 	for i := range cw * ch {
 		d := e.dq[1]
@@ -39,25 +256,26 @@ func (e *encoder) codeTx(dst []uint8, off, stride int, src []uint8, sstride, sw,
 		e.lv[i] = quantOne(e.coeff[i], uint32(d), shift)
 	}
 
-	ctx := e.writeCoefs(cc, aOff, lOff, tx, bs, plane, uint8(mode), e.lv[:], e.levels[:])
-	memset(cc.a[aOff:aOff+aw], ctx)
-	memset(cc.l[lOff:lOff+lh], ctx)
-
-	eob := -1
 	scan := scans[tx]
 	for i := cw*ch - 1; i >= 0; i-- {
 		if e.lv[scan[i]] != 0 {
-			eob = i
-
-			break
+			return i
 		}
 	}
+
+	return -1
+}
+
+func (e *encoder) reconTx(dst []uint8, off, stride, tx, txtp, eob int) {
 	if eob < 0 {
 		return
 	}
+	tDim := &txfmDimensions[tx]
+	shift := quantShift(tx)
+	n := min(4*int(tDim.w), 32) * min(4*int(tDim.h), 32)
 
-	clear(e.cf[:cw*ch])
-	for i := range cw * ch {
+	clear(e.cf[:n])
+	for i := range n {
 		if e.lv[i] == 0 {
 			continue
 		}
@@ -71,7 +289,20 @@ func (e *encoder) codeTx(dst []uint8, off, stride int, src []uint8, sstride, sw,
 		}
 		e.cf[i] = int16(d)
 	}
-	invTxfmAdd(e.dsp, dst, off, stride, e.cf[:], e.itx[:], eob, tx, dctDct, 255)
+	invTxfmAdd(e.dsp, dst, off, stride, e.cf[:], e.itx[:], eob, tx, txtp, 255)
+}
+
+func (e *encoder) codeTx(dst []uint8, off, stride int, src []uint8, sstride, sw, sh,
+	px, py, tx, bs, plane, mode int, cc *coefCtx, aOff, lOff, aw, lh int,
+) {
+	txtp := e.txtpFor(tx, plane, mode)
+	eob := e.quantTx(dst, off, stride, src, sstride, sw, sh, px, py, tx, txtp)
+
+	ctx := e.writeCoefs(cc, aOff, lOff, tx, bs, plane, uint8(mode), e.lv[:], e.levels[:])
+	memset(cc.a[aOff:aOff+aw], ctx)
+	memset(cc.l[lOff:lOff+lh], ctx)
+
+	e.reconTx(dst, off, stride, tx, txtp, eob)
 }
 
 func (e *encoder) reconBlock(bx, by, bs, edgeFlags, mode int) {
@@ -85,37 +316,13 @@ func (e *encoder) reconBlock(bx, by, bs, edgeFlags, mode int) {
 	smFl := smFlag(ab, bx4) | smFlag(&e.l, by4) | int(e.seq.intraEdgeFilter)<<10
 
 	for initY := 0; initY < h4; initY += 16 {
-		subH4 := min(h4, 16+initY)
 		for initX := 0; initX < w4; initX += 16 {
-			sbHasTr := 0
-			switch {
-			case initX+16 < w4:
-				sbHasTr = 1
-			case initY != 0:
-			default:
-				sbHasTr = edgeFlags & edgeI444TopHasRight
-			}
-			sbHasBl := 0
-			switch {
-			case initX != 0:
-			case initY+16 < h4:
-				sbHasBl = 1
-			default:
-				sbHasBl = edgeFlags & edgeI444LeftHasBottom
-			}
-			subW4 := min(w4, initX+16)
-
-			for y := initY; y < subH4; y += int(tDim.h) {
-				for x := initX; x < subW4; x += int(tDim.w) {
-					ef := 0
-					if !((y > initY || sbHasTr == 0) && x+int(tDim.w) >= subW4) {
-						ef |= edgeI444TopHasRight
-					}
-					if !(x > initX || (sbHasBl == 0 && y+int(tDim.h) >= subH4)) {
-						ef |= edgeI444LeftHasBottom
-					}
-
+			for y := initY; y < min(h4, initY+16); y += int(tDim.h) {
+				for x := initX; x < min(w4, initX+16); x += int(tDim.w) {
+					ef := lumaTxEdge(edgeFlags, w4, h4, initX, initY, x, y,
+						int(tDim.w), int(tDim.h))
 					off := 4 * ((by+y)*e.stride + bx + x)
+
 					e.predIntra(e.recon, off, e.stride, bx+x, by+y, e.bw, e.bh,
 						int(tDim.w), int(tDim.h), mode, 0, ef, smFl,
 						4*e.bw-4*(bx+x), 4*e.bh-4*(by+y))
@@ -142,26 +349,7 @@ func (e *encoder) reconChroma(bx, by, bs, edgeFlags, mode int) {
 	smFl := smUvFlag(ab, cbx4) | smUvFlag(&e.l, cby4) | angleUseEdgeFilterFlag
 
 	for initY := 0; initY < h4; initY += 16 {
-		subCh4 := min(ch4, (initY+16)>>ssVer)
 		for initX := 0; initX < w4; initX += 16 {
-			uvSbHasTr := 0
-			switch {
-			case (initX+16)>>ssHor < cw4:
-				uvSbHasTr = 1
-			case initY != 0:
-			default:
-				uvSbHasTr = edgeFlags & (edgeI420TopHasRight >> (e.layout - 1))
-			}
-			uvSbHasBl := 0
-			switch {
-			case initX != 0:
-			case (initY+16)>>ssVer < ch4:
-				uvSbHasBl = 1
-			default:
-				uvSbHasBl = edgeFlags & (edgeI420LeftHasBottom >> (e.layout - 1))
-			}
-			subCw4 := min(cw4, (initX+16)>>ssHor)
-
 			for pl := range 2 {
 				src := e.cfg.SrcU
 				if pl == 1 {
@@ -170,19 +358,14 @@ func (e *encoder) reconChroma(bx, by, bs, edgeFlags, mode int) {
 				dst := e.reconC[pl]
 				cc := coefCtx{a: ab.ccoef[pl][:], l: e.l.ccoef[pl][:]}
 
-				for y := initY >> ssVer; y < subCh4; y += int(tDim.h) {
-					for x := initX >> ssHor; x < subCw4; x += int(tDim.w) {
-						ef := 0
-						if !((y > initY>>ssVer || uvSbHasTr == 0) && x+int(tDim.w) >= subCw4) {
-							ef |= edgeI444TopHasRight
-						}
-						if !(x > initX>>ssHor || (uvSbHasBl == 0 && y+int(tDim.h) >= subCh4)) {
-							ef |= edgeI444LeftHasBottom
-						}
-
+				for y := initY >> ssVer; y < min(ch4, (initY+16)>>ssVer); y += int(tDim.h) {
+					for x := initX >> ssHor; x < min(cw4, (initX+16)>>ssHor); x += int(tDim.w) {
+						ef := e.chromaTxEdge(edgeFlags, cw4, ch4, initX, initY,
+							x, y, int(tDim.w), int(tDim.h))
 						lx := bx + initX + ((x - initX>>ssHor) << ssHor)
 						ly := by + initY + ((y - initY>>ssVer) << ssVer)
 						off := 4 * ((cby+y)*e.cstride + cbx + x)
+
 						e.predIntra(dst, off, e.cstride, cbx+x, cby+y,
 							e.bw>>ssHor, e.bh>>ssVer, int(tDim.w), int(tDim.h),
 							mode, 0, ef, smFl,

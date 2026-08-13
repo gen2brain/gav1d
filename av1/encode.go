@@ -3,7 +3,6 @@ package av1
 type encoder struct {
 	cfg     encConfig
 	seq     sequenceHeader
-	hdr     frameHeader
 	cdf     cdfContext
 	msac    msacEncoder
 	a       []blockContext
@@ -21,6 +20,7 @@ type encoder struct {
 	cw      int
 	ch      int
 	dq      [2]uint16
+	lambda  float64
 	dsp     *dspContext[uint8]
 	itx     []int32
 	res     [64 * 64]int32
@@ -60,6 +60,7 @@ func (e *encoder) init(c *encConfig, seq *sequenceHeader) {
 	}
 	e.dq[0] = dqTbl[0][c.QIndex][0]
 	e.dq[1] = dqTbl[0][c.QIndex][1]
+	e.lambda = float64(e.dq[1]) * float64(e.dq[1]) / 1024
 	e.dsp = newDsp[uint8]()
 	e.itx = make([]int32, 64*64*2+itxDct64Scratch)
 	e.cdf.initStatic(uint8(c.QIndex))
@@ -89,6 +90,9 @@ func (e *encoder) writeBlock(bx, by, bs, edgeFlags int) {
 
 	ymodeCdf := e.cdf.kfym[intraModeContext[ab.mode[bx4]]][intraModeContext[e.l.mode[by4]]][:]
 	mode := dcPred
+	if skip == 0 {
+		mode = e.pickMode(bx, by, bs, edgeFlags, ymodeCdf)
+	}
 	e.msac.symbolAdapt(ymodeCdf, nIntraPredModes-1, uint32(mode))
 	if int(bDim[2])+int(bDim[3]) >= 2 && mode >= vertPred && mode <= vertLeftPred {
 		e.msac.symbolAdapt(e.cdf.m.angleDelta[mode-vertPred][:], 6, 3)
@@ -97,8 +101,12 @@ func (e *encoder) writeBlock(bx, by, bs, edgeFlags int) {
 	uvMode := dcPred
 	if hasChroma {
 		cflAllowed := b2i(cflAllowedMask&(1<<bs) != 0)
+		nSym := nUvIntraPredModes - 1 - (1 - cflAllowed)
 		cdf := e.cdf.m.uvMode[cflAllowed][mode][:]
-		e.msac.symbolAdapt(cdf, nUvIntraPredModes-1-(1-cflAllowed), uint32(uvMode))
+		if skip == 0 {
+			uvMode = e.pickUvMode(bx, by, bs, edgeFlags, cdf)
+		}
+		e.msac.symbolAdapt(cdf, nSym, uint32(uvMode))
 		if int(bDim[2])+int(bDim[3]) >= 2 && uvMode >= vertPred && uvMode <= vertLeftPred {
 			e.msac.symbolAdapt(e.cdf.m.angleDelta[uvMode-vertPred][:], 6, 3)
 		}
