@@ -65,6 +65,16 @@ func TestEncodeDav1d(t *testing.T) {
 			Src: res, SrcStride: 256, SrcU: res[1024:], SrcV: res[2048:], SrcUVStride: 128},
 		{Width: 96, Height: 64, BitDepth: 8, QIndex: 150,
 			Src: res, SrcStride: 256, SrcU: res[512:], SrcV: res[1536:], SrcUVStride: 128},
+		{Width: 90, Height: 54, BitDepth: 8, QIndex: 60, Monochrome: true,
+			Src: res, SrcStride: 256},
+		{Width: 200, Height: 150, BitDepth: 8, QIndex: 120, Monochrome: true,
+			Src: res, SrcStride: 256},
+		{Width: 48, Height: 80, BitDepth: 8, QIndex: 30, Monochrome: true,
+			Src: res, SrcStride: 256},
+		{Width: 130, Height: 70, BitDepth: 8, QIndex: 80,
+			Src: res, SrcStride: 256, SrcU: res[1024:], SrcV: res[2048:], SrcUVStride: 128},
+		{Width: 122, Height: 66, BitDepth: 8, QIndex: 40,
+			Src: res, SrcStride: 256, SrcU: res[768:], SrcV: res[2560:], SrcUVStride: 128},
 		{Width: 64, Height: 64, BitDepth: 8, QIndex: 100},
 		{Width: 64, Height: 96, BitDepth: 8, QIndex: 60},
 		{Width: 96, Height: 64, BitDepth: 8, QIndex: 20},
@@ -111,8 +121,6 @@ func TestEncodeDav1d(t *testing.T) {
 func encodeRecon(t *testing.T, c *encConfig) ([]byte, []uint8, int) {
 	t.Helper()
 
-	var e encoder
-	e.init(c)
 	seq := writeSeqHdr(c)
 
 	var sh sequenceHeader
@@ -122,6 +130,8 @@ func encodeRecon(t *testing.T, c *encConfig) ([]byte, []uint8, int) {
 		t.Fatal(err)
 	}
 
+	var e encoder
+	e.init(c, &sh)
 	tile := e.writeTile()
 	var fp putBits
 	writeFrameHdr(&fp, &sh, c)
@@ -191,37 +201,40 @@ func TestEncodeChroma(t *testing.T) {
 // TestEncodeResidual holds that the encoder reconstructs exactly what the
 // decoder will, which is what stops prediction drifting.
 func TestEncodeResidual(t *testing.T) {
-	const w, h = 128, 96
-	src := make([]uint8, w*h)
-	for y := range h {
-		for x := range w {
+	const stride = 256
+	src := make([]uint8, stride*stride)
+	for y := range stride {
+		for x := range stride {
 			v := 128 + 100*math.Sin(float64(x)/25)*math.Cos(float64(y)/30)
-			src[y*w+x] = uint8(max(0, min(255, int(v))))
+			src[y*stride+x] = uint8(max(0, min(255, int(v))))
 		}
 	}
 
-	for _, q := range []int{20, 60, 120, 200} {
-		c := encConfig{Width: w, Height: h, BitDepth: 8, QIndex: q,
-			Monochrome: true, Src: src, SrcStride: w}
-		data, recon, stride := encodeRecon(t, &c)
+	for _, sz := range [][2]int{{128, 96}, {122, 66}, {200, 150}} {
+		w, h := sz[0], sz[1]
+		for _, q := range []int{20, 60, 120, 200} {
+			c := encConfig{Width: w, Height: h, BitDepth: 8, QIndex: q,
+				Monochrome: true, Src: src, SrcStride: stride}
+			data, recon, rstride := encodeRecon(t, &c)
 
-		var d Decoder
-		pics, err := d.DecodeOBUs(data)
-		if err != nil {
-			t.Fatalf("q=%d: %v", q, err)
-		}
-		if len(pics) != 1 {
-			t.Fatalf("q=%d: %d pictures", q, len(pics))
-		}
-		p := pics[0]
-		for y := range h {
-			for x := range w {
-				if got, want := p.Data[0][y*p.Stride[0]+x], recon[y*stride+x]; got != want {
-					t.Fatalf("q=%d [%d,%d]: decoded %d, encoder reconstructed %d",
-						q, x, y, got, want)
+			var d Decoder
+			pics, err := d.DecodeOBUs(data)
+			if err != nil {
+				t.Fatalf("%dx%d q=%d: %v", w, h, q, err)
+			}
+			if len(pics) != 1 {
+				t.Fatalf("%dx%d q=%d: %d pictures", w, h, q, len(pics))
+			}
+			p := pics[0]
+			for y := range h {
+				for x := range w {
+					if got, want := p.Data[0][y*p.Stride[0]+x], recon[y*rstride+x]; got != want {
+						t.Fatalf("%dx%d q=%d [%d,%d]: decoded %d, encoder reconstructed %d",
+							w, h, q, x, y, got, want)
+					}
 				}
 			}
+			p.Release()
 		}
-		p.Release()
 	}
 }

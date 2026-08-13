@@ -51,7 +51,7 @@ func writeSeqHdr(c *encConfig) []byte {
 
 	p.bit(0)
 	p.bit(0)
-	p.bit(0)
+	p.bit(1)
 
 	p.bit(0)
 	p.bit(0)

@@ -1,221 +1,199 @@
 package av1
 
-func dcPredict(recon []uint8, off, stride, w, h int, haveTop, haveLeft bool, mid uint8) uint8 {
-	switch {
-	case haveTop && haveLeft:
-		sum := 0
-		for x := range w {
-			sum += int(recon[off-stride+x])
-		}
-		for y := range h {
-			sum += int(recon[off+y*stride-1])
-		}
+const encEdgeOff = 128
 
-		return uint8((sum + (w+h)>>1) / (w + h))
-	case haveTop:
-		sum := 0
-		for x := range w {
-			sum += int(recon[off-stride+x])
-		}
-
-		return uint8((sum + w>>1) / w)
-	case haveLeft:
-		sum := 0
-		for y := range h {
-			sum += int(recon[off+y*stride-1])
-		}
-
-		return uint8((sum + h>>1) / h)
-	}
-
-	return mid
+func (e *encoder) predIntra(dst []uint8, off, stride, x, y, w, h, tw, th,
+	mode, angle, edgeFlags, smFl, maxW, maxH int,
+) {
+	a := angle
+	m := prepareIntraEdges(x, x > 0, y, y > 0, w, h, edgeFlags,
+		dst, off, stride, nil, 0, mode, &a, tw, th,
+		e.seq.intraEdgeFilter != 0, e.edge[:], encEdgeOff, 255)
+	e.dsp.ipred[m](dst, off, stride, e.edge[:], encEdgeOff, tw*4, th*4,
+		a|smFl, maxW, maxH, 255)
 }
 
-func (e *encoder) reconBlock(bx, by, bs int) uint8 {
-	tx := int(maxTxfmSizeForBs[bs][0])
+func (e *encoder) codeTx(dst []uint8, off, stride int, src []uint8, sstride, sw, sh,
+	px, py, tx, bs, plane, mode int, cc *coefCtx, aOff, lOff, aw, lh int,
+) {
 	tDim := &txfmDimensions[tx]
 	tw, th := 4*int(tDim.w), 4*int(tDim.h)
-	bDim := &blockDimensions[bs]
-	bw4, bh4 := int(bDim[0]), int(bDim[1])
-
 	shift := quantShift(tx)
-	cfMax := int32(1<<15 - 1)
 
-	var res [64 * 64]int32
-	var coeff [32 * 32]int32
-	var lv [32 * 32]int32
-	cf := make([]int16, 32*32)
-
-	ctx := uint8(0x40)
-	for y := 0; y < bh4 && by+y < e.bh; y += int(tDim.h) {
-		for x := 0; x < bw4 && bx+x < e.bw; x += int(tDim.w) {
-			px, py := (bx+x)*4, (by+y)*4
-			off := py*e.stride + px
-			w := min(tw, e.cfg.Width-px)
-			h := min(th, e.cfg.Height-py)
-
-			pred := dcPredict(e.recon, off, e.stride, w, h, py > 0, px > 0, 128)
-			for j := range th {
-				row := off + j*e.stride
-				for i := range tw {
-					e.recon[row+i] = pred
-				}
-			}
-			for j := range th {
-				for i := range tw {
-					sx := min(px+i, e.cfg.Width-1)
-					sy := min(py+j, e.cfg.Height-1)
-					res[j*tw+i] = int32(e.cfg.Src[sy*e.cfg.SrcStride+sx]) - int32(pred)
-				}
-			}
-
-			fwdTxfm(coeff[:], res[:], tw, tx, dctDct)
-			sw, sh := min(tw, 32), min(th, 32)
-			for i := range sw * sh {
-				d := e.dq[1]
-				if i == 0 {
-					d = e.dq[0]
-				}
-				lv[i] = quantOne(coeff[i], uint32(d), shift)
-			}
-
-			ctx = e.writeCoefs(&coefCtx{a: e.a[bx>>5].lcoef[:], l: e.l.lcoef[:]},
-				(bx+x)&31, (by+y)&31, tx, bs, 0, dcPred, lv[:], e.levels[:])
-
-			aw := min(int(tDim.w), e.bw-(bx+x))
-			lh := min(int(tDim.h), e.bh-(by+y))
-			memset(e.a[bx>>5].lcoef[(bx+x)&31:][:aw], ctx)
-			memset(e.l.lcoef[(by+y)&31:][:lh], ctx)
-
-			eob := -1
-			for i := sw*sh - 1; i >= 0; i-- {
-				if lv[scans[tx][i]] != 0 {
-					eob = i
-
-					break
-				}
-			}
-			if eob >= 0 {
-				clear(cf[:sw*sh])
-				for i := range sw * sh {
-					if lv[i] == 0 {
-						continue
-					}
-					dqv := uint32(e.dq[1])
-					if i == 0 {
-						dqv = uint32(e.dq[0])
-					}
-					d := int32(uint32(abs32(lv[i])) * dqv >> uint(shift))
-					d = min(d, cfMax)
-					if lv[i] < 0 {
-						d = -d
-					}
-					cf[i] = int16(d)
-				}
-				invTxfmAdd(e.dsp, e.recon, off, e.stride, cf, e.itx[:], eob, tx, dctDct, 255)
-			}
+	for j := range th {
+		sy := min(py+j, sh-1)
+		row := j * tw
+		for i := range tw {
+			sx := min(px+i, sw-1)
+			e.res[row+i] = int32(src[sy*sstride+sx]) - int32(dst[off+j*stride+i])
 		}
 	}
 
-	return ctx
-}
+	fwdTxfm(e.coeff[:], e.res[:], tw, tx, dctDct)
+	cw, ch := min(tw, 32), min(th, 32)
+	for i := range cw * ch {
+		d := e.dq[1]
+		if i == 0 {
+			d = e.dq[0]
+		}
+		e.lv[i] = quantOne(e.coeff[i], uint32(d), shift)
+	}
 
-func (e *encoder) reconChroma(bx, by, bs int) {
-	if e.cfg.Monochrome || e.cfg.SrcU == nil {
+	ctx := e.writeCoefs(cc, aOff, lOff, tx, bs, plane, uint8(mode), e.lv[:], e.levels[:])
+	memset(cc.a[aOff:aOff+aw], ctx)
+	memset(cc.l[lOff:lOff+lh], ctx)
+
+	eob := -1
+	scan := scans[tx]
+	for i := cw*ch - 1; i >= 0; i-- {
+		if e.lv[scan[i]] != 0 {
+			eob = i
+
+			break
+		}
+	}
+	if eob < 0 {
 		return
 	}
+
+	clear(e.cf[:cw*ch])
+	for i := range cw * ch {
+		if e.lv[i] == 0 {
+			continue
+		}
+		dqv := uint32(e.dq[1])
+		if i == 0 {
+			dqv = uint32(e.dq[0])
+		}
+		d := min(int32(uint32(abs32(e.lv[i]))*dqv>>uint(shift)), 1<<15-1)
+		if e.lv[i] < 0 {
+			d = -d
+		}
+		e.cf[i] = int16(d)
+	}
+	invTxfmAdd(e.dsp, dst, off, stride, e.cf[:], e.itx[:], eob, tx, dctDct, 255)
+}
+
+func (e *encoder) reconBlock(bx, by, bs, edgeFlags, mode int) {
+	bDim := &blockDimensions[bs]
+	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
+	bx4, by4 := bx&31, by&31
+	tx := int(maxTxfmSizeForBs[bs][0])
+	tDim := &txfmDimensions[tx]
+	ab := &e.a[bx>>5]
+	cc := coefCtx{a: ab.lcoef[:], l: e.l.lcoef[:]}
+	smFl := smFlag(ab, bx4) | smFlag(&e.l, by4) | int(e.seq.intraEdgeFilter)<<10
+
+	for initY := 0; initY < h4; initY += 16 {
+		subH4 := min(h4, 16+initY)
+		for initX := 0; initX < w4; initX += 16 {
+			sbHasTr := 0
+			switch {
+			case initX+16 < w4:
+				sbHasTr = 1
+			case initY != 0:
+			default:
+				sbHasTr = edgeFlags & edgeI444TopHasRight
+			}
+			sbHasBl := 0
+			switch {
+			case initX != 0:
+			case initY+16 < h4:
+				sbHasBl = 1
+			default:
+				sbHasBl = edgeFlags & edgeI444LeftHasBottom
+			}
+			subW4 := min(w4, initX+16)
+
+			for y := initY; y < subH4; y += int(tDim.h) {
+				for x := initX; x < subW4; x += int(tDim.w) {
+					ef := 0
+					if !((y > initY || sbHasTr == 0) && x+int(tDim.w) >= subW4) {
+						ef |= edgeI444TopHasRight
+					}
+					if !(x > initX || (sbHasBl == 0 && y+int(tDim.h) >= subH4)) {
+						ef |= edgeI444LeftHasBottom
+					}
+
+					off := 4 * ((by+y)*e.stride + bx + x)
+					e.predIntra(e.recon, off, e.stride, bx+x, by+y, e.bw, e.bh,
+						int(tDim.w), int(tDim.h), mode, 0, ef, smFl,
+						4*e.bw-4*(bx+x), 4*e.bh-4*(by+y))
+					e.codeTx(e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
+						e.cfg.Width, e.cfg.Height, 4*(bx+x), 4*(by+y),
+						tx, bs, 0, mode, &cc, bx4+x, by4+y,
+						min(int(tDim.w), e.bw-bx-x), min(int(tDim.h), e.bh-by-y))
+				}
+			}
+		}
+	}
+}
+
+func (e *encoder) reconChroma(bx, by, bs, edgeFlags, mode int) {
+	ssHor, ssVer := e.ssHor, e.ssVer
+	bDim := &blockDimensions[bs]
+	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
+	cw4, ch4 := (w4+ssHor)>>ssHor, (h4+ssVer)>>ssVer
+	cbx4, cby4 := (bx&31)>>ssHor, (by&31)>>ssVer
+	cbx, cby := bx>>ssHor, by>>ssVer
 	tx := int(maxTxfmSizeForBs[bs][e.layout])
 	tDim := &txfmDimensions[tx]
-	tw, th := 4*int(tDim.w), 4*int(tDim.h)
-	bDim := &blockDimensions[bs]
-	cbw4 := (int(bDim[0]) + 1) >> 1
-	cbh4 := (int(bDim[1]) + 1) >> 1
-	cbx, cby := (bx&^1)>>1, (by&^1)>>1
+	ab := &e.a[bx>>5]
+	smFl := smUvFlag(ab, cbx4) | smUvFlag(&e.l, cby4) | angleUseEdgeFilterFlag
 
-	shift := quantShift(tx)
-	cfMax := int32(1<<15 - 1)
+	for initY := 0; initY < h4; initY += 16 {
+		subCh4 := min(ch4, (initY+16)>>ssVer)
+		for initX := 0; initX < w4; initX += 16 {
+			uvSbHasTr := 0
+			switch {
+			case (initX+16)>>ssHor < cw4:
+				uvSbHasTr = 1
+			case initY != 0:
+			default:
+				uvSbHasTr = edgeFlags & (edgeI420TopHasRight >> (e.layout - 1))
+			}
+			uvSbHasBl := 0
+			switch {
+			case initX != 0:
+			case (initY+16)>>ssVer < ch4:
+				uvSbHasBl = 1
+			default:
+				uvSbHasBl = edgeFlags & (edgeI420LeftHasBottom >> (e.layout - 1))
+			}
+			subCw4 := min(cw4, (initX+16)>>ssHor)
 
-	var res [64 * 64]int32
-	var coeff [32 * 32]int32
-	var lv [32 * 32]int32
-	cf := make([]int16, 32*32)
-
-	for pl := range 2 {
-		src := e.cfg.SrcU
-		if pl == 1 {
-			src = e.cfg.SrcV
-		}
-		rec := e.reconC[pl]
-
-		for y := 0; y < cbh4; y += int(tDim.h) {
-			for x := 0; x < cbw4; x += int(tDim.w) {
-				px, py := (cbx+x)*4, (cby+y)*4
-				if px >= e.cw || py >= e.ch {
-					continue
+			for pl := range 2 {
+				src := e.cfg.SrcU
+				if pl == 1 {
+					src = e.cfg.SrcV
 				}
-				off := py*e.cstride + px
-				w := min(tw, e.cw-px)
-				h := min(th, e.ch-py)
+				dst := e.reconC[pl]
+				cc := coefCtx{a: ab.ccoef[pl][:], l: e.l.ccoef[pl][:]}
 
-				pred := dcPredict(rec, off, e.cstride, w, h, py > 0, px > 0, 128)
-				for j := range th {
-					row := off + j*e.cstride
-					for i := range tw {
-						rec[row+i] = pred
-					}
-				}
-				for j := range th {
-					for i := range tw {
-						sx := min(px+i, e.cw-1)
-						sy := min(py+j, e.ch-1)
-						res[j*tw+i] = int32(src[sy*e.cfg.SrcUVStride+sx]) - int32(pred)
-					}
-				}
-
-				fwdTxfm(coeff[:], res[:], tw, tx, dctDct)
-				sw, sh := min(tw, 32), min(th, 32)
-				for i := range sw * sh {
-					d := e.dq[1]
-					if i == 0 {
-						d = e.dq[0]
-					}
-					lv[i] = quantOne(coeff[i], uint32(d), shift)
-				}
-
-				ctx := e.writeCoefs(&coefCtx{a: e.a[bx>>5].ccoef[pl][:], l: e.l.ccoef[pl][:]},
-					(cbx+x)&31, (cby+y)&31, tx, bs, 1+pl, dcPred, lv[:], e.levels[:])
-
-				cw := min(int(tDim.w), (e.bw-bx+1)>>1-x)
-				ch := min(int(tDim.h), (e.bh-by+1)>>1-y)
-				memset(e.a[bx>>5].ccoef[pl][(cbx+x)&31:][:max(cw, 1)], ctx)
-				memset(e.l.ccoef[pl][(cby+y)&31:][:max(ch, 1)], ctx)
-
-				eob := -1
-				for i := sw*sh - 1; i >= 0; i-- {
-					if lv[scans[tx][i]] != 0 {
-						eob = i
-
-						break
-					}
-				}
-				if eob >= 0 {
-					clear(cf[:sw*sh])
-					for i := range sw * sh {
-						if lv[i] == 0 {
-							continue
+				for y := initY >> ssVer; y < subCh4; y += int(tDim.h) {
+					for x := initX >> ssHor; x < subCw4; x += int(tDim.w) {
+						ef := 0
+						if !((y > initY>>ssVer || uvSbHasTr == 0) && x+int(tDim.w) >= subCw4) {
+							ef |= edgeI444TopHasRight
 						}
-						dqv := uint32(e.dq[1])
-						if i == 0 {
-							dqv = uint32(e.dq[0])
+						if !(x > initX>>ssHor || (uvSbHasBl == 0 && y+int(tDim.h) >= subCh4)) {
+							ef |= edgeI444LeftHasBottom
 						}
-						d := int32(uint32(abs32(lv[i])) * dqv >> uint(shift))
-						d = min(d, cfMax)
-						if lv[i] < 0 {
-							d = -d
-						}
-						cf[i] = int16(d)
+
+						lx := bx + initX + ((x - initX>>ssHor) << ssHor)
+						ly := by + initY + ((y - initY>>ssVer) << ssVer)
+						off := 4 * ((cby+y)*e.cstride + cbx + x)
+						e.predIntra(dst, off, e.cstride, cbx+x, cby+y,
+							e.bw>>ssHor, e.bh>>ssVer, int(tDim.w), int(tDim.h),
+							mode, 0, ef, smFl,
+							(4*e.bw+ssHor-4*(lx&^ssHor))>>ssHor,
+							(4*e.bh+ssVer-4*(ly&^ssVer))>>ssVer)
+						e.codeTx(dst, off, e.cstride, src, e.cfg.SrcUVStride,
+							e.cw, e.ch, 4*(cbx+x), 4*(cby+y),
+							tx, bs, 1+pl, mode, &cc, cbx4+x, cby4+y,
+							min(int(tDim.w), (e.bw-lx+ssHor)>>ssHor),
+							min(int(tDim.h), (e.bh-ly+ssVer)>>ssVer))
 					}
-					invTxfmAdd(e.dsp, rec, off, e.cstride, cf, e.itx[:], eob, tx, dctDct, 255)
 				}
 			}
 		}

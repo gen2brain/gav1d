@@ -33,60 +33,6 @@ type coefCtx struct {
 	l []uint8
 }
 
-// writeDCOnly writes one transform block carrying a single DC level.
-func (e *encoder) writeDCOnly(cc *coefCtx, aOff, lOff, tx, bs, plane int,
-	yMode uint8, level int32,
-) uint8 {
-	tDim := &txfmDimensions[tx]
-	chroma := b2i(plane != 0)
-
-	sctx := getSkipCtx(tDim, bs, cc.a, aOff, cc.l, lOff, chroma, e.layout)
-	if level == 0 {
-		e.msac.boolAdapt(e.cdf.coef.skip[tDim.ctx][sctx][:], 1)
-
-		return 0x40
-	}
-	e.msac.boolAdapt(e.cdf.coef.skip[tDim.ctx][sctx][:], 0)
-
-	if chroma == 0 && int(tDim.max)+1 < tx64x64 && e.cfg.QIndex != 0 {
-		if tDim.min == tx16x16 {
-			e.msac.symbolAdapt(e.cdf.m.txtpIntra2[tDim.min][yMode][:], 4, 1)
-		} else {
-			e.msac.symbolAdapt(e.cdf.m.txtpIntra1[tDim.min][yMode][:], 6, 1)
-		}
-	}
-
-	slw, slh := min(int(tDim.lw), tx32x32), min(int(tDim.lh), tx32x32)
-	sz := slw + slh
-	e.writeEobPt(sz, chroma, 0)
-
-	sign := uint32(0)
-	if level < 0 {
-		sign = 1
-		level = -level
-	}
-	tok := uint32(level)
-
-	eobCdf := &e.cdf.coef.eobBaseTok[tDim.ctx][chroma]
-	hiCdf := &e.cdf.coef.brTok[min(int(tDim.ctx), 3)][chroma]
-
-	if tok < 3 {
-		e.msac.symbolAdapt(eobCdf[0][:], 2, tok-1)
-	} else {
-		e.msac.symbolAdapt(eobCdf[0][:], 2, 2)
-		e.msac.hiTok(&hiCdf[0], min(tok, 15)-3)
-	}
-
-	dcSignCtx := getDcSignCtx(tx, cc.a, aOff, cc.l, lOff)
-	e.msac.boolAdapt(e.cdf.coef.dcSign[chroma][dcSignCtx][:], sign)
-
-	if tok >= 15 {
-		e.msac.golomb(tok - 15)
-	}
-
-	return uint8(min(tok, 63)) | uint8((sign-1)&(2<<6))
-}
-
 func (e *encoder) writeEobPt(sz, chroma, pt int) {
 	c := &e.cdf.coef
 	switch sz {
