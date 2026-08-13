@@ -107,22 +107,7 @@ func (s *msacContext) symbolAdaptGo(cdf []uint16, nSymbols int) uint32 {
 	s.norm(s.dif-uint64(v)<<(ecWinSize-16), u-v)
 
 	if s.allowUpdateCdf {
-		count := uint32(cdf[nSymbols])
-		rate := 4 + count>>4
-		if nSymbols > 2 {
-			rate++
-		}
-		i := uint32(0)
-		for ; i < val; i++ {
-			cdf[i] += (32768 - cdf[i]) >> rate
-		}
-		for ; i < uint32(nSymbols); i++ {
-			cdf[i] -= cdf[i] >> rate
-		}
-		if count < 32 {
-			count++
-		}
-		cdf[nSymbols] = uint16(count)
+		cdfUpdate(cdf, nSymbols, val)
 	}
 
 	return val
@@ -132,17 +117,7 @@ func (s *msacContext) boolAdaptGo(cdf []uint16) uint32 {
 	bit := s.boolFGo(uint32(cdf[0]))
 
 	if s.allowUpdateCdf {
-		count := uint32(cdf[1])
-		rate := 4 + count>>4
-		if bit != 0 {
-			cdf[0] += (32768 - cdf[0]) >> rate
-		} else {
-			cdf[0] -= cdf[0] >> rate
-		}
-		if count < 32 {
-			count++
-		}
-		cdf[1] = uint16(count)
+		cdfUpdateBool(cdf, bit)
 	}
 
 	return bit
@@ -200,4 +175,37 @@ func (s *msacContext) subexp(ref, n int32, k uint32) int32 {
 	}
 
 	return n - 1 - int32(invRecenter(uint32(n-1-ref), v))
+}
+
+func cdfUpdate(cdf []uint16, nSymbols int, val uint32) {
+	count := uint32(cdf[nSymbols])
+	rate := 4 + count>>4
+	if nSymbols > 2 {
+		rate++
+	}
+	i := uint32(0)
+	for ; i < val; i++ {
+		cdf[i] += (32768 - cdf[i]) >> rate
+	}
+	for ; i < uint32(nSymbols); i++ {
+		cdf[i] -= cdf[i] >> rate
+	}
+	if count < 32 {
+		count++
+	}
+	cdf[nSymbols] = uint16(count)
+}
+
+func cdfUpdateBool(cdf []uint16, bit uint32) {
+	count := uint32(cdf[1])
+	rate := 4 + count>>4
+	if bit != 0 {
+		cdf[0] += (32768 - cdf[0]) >> rate
+	} else {
+		cdf[0] -= cdf[0] >> rate
+	}
+	if count < 32 {
+		count++
+	}
+	cdf[1] = uint16(count)
 }
