@@ -6,6 +6,8 @@ type encConfig struct {
 	BitDepth   int
 	QIndex     int
 	Monochrome bool
+	Src        []uint8
+	SrcStride  int
 }
 
 func writeObu(out []byte, typ int, payload []byte) []byte {
