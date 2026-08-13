@@ -16,7 +16,7 @@ func (e *msacEncoder) golomb(v uint32) {
 }
 
 func (e *msacEncoder) hiTok(cdf *[4]uint16, tok uint32) {
-	for {
+	for range 3 {
 		if tok < 3 {
 			e.symbolAdapt(cdf[:], 3, tok)
 
@@ -25,6 +25,7 @@ func (e *msacEncoder) hiTok(cdf *[4]uint16, tok uint32) {
 		e.symbolAdapt(cdf[:], 3, 3)
 		tok -= 3
 	}
+	e.symbolAdapt(cdf[:], 3, tok)
 }
 
 type coefCtx struct {

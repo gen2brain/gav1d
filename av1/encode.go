@@ -38,7 +38,7 @@ func (e *encoder) init(c *encConfig) {
 	e.dq[1] = dqTbl[0][c.QIndex][1]
 	e.dsp = newDsp[uint8]()
 	e.itx = make([]int32, 64*64*2+itxDct64Scratch)
-	e.cdf.initStatic(0)
+	e.cdf.initStatic(uint8(c.QIndex))
 	e.msac.init(false)
 }
 
