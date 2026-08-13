@@ -44,9 +44,9 @@ func (e *encoder) init(c *encConfig) {
 
 func (e *encoder) clearCtx() {
 	for i := range e.a {
-		e.a[i] = blockContext{}
+		resetContext(&e.a[i], true)
 	}
-	e.l = blockContext{}
+	resetContext(&e.l, true)
 }
 
 func (e *encoder) writeBlock(bx, by, bs int) {
@@ -163,7 +163,7 @@ func (e *encoder) writeTile() []byte {
 
 	sbStep := 16
 	for by := 0; by < e.bh; by += sbStep {
-		e.l = blockContext{}
+		resetContext(&e.l, true)
 		for bx := 0; bx < e.bw; bx += sbStep {
 			e.writeSb(bx, by, 1)
 		}

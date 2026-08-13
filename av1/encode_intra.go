@@ -75,8 +75,10 @@ func (e *encoder) reconBlock(bx, by, bs int) uint8 {
 			ctx = e.writeDCOnly(&coefCtx{a: e.a[bx>>5].lcoef[:], l: e.l.lcoef[:]},
 				(bx+x)&31, (by+y)&31, tx, bs, 0, dcPred, level)
 
-			memset(e.a[bx>>5].lcoef[(bx+x)&31:][:int(tDim.w)], ctx)
-			memset(e.l.lcoef[(by+y)&31:][:int(tDim.h)], ctx)
+			aw := min(int(tDim.w), e.bw-(bx+x))
+			lh := min(int(tDim.h), e.bh-(by+y))
+			memset(e.a[bx>>5].lcoef[(bx+x)&31:][:aw], ctx)
+			memset(e.l.lcoef[(by+y)&31:][:lh], ctx)
 
 			if level != 0 {
 				clear(cf[:tw*th])
