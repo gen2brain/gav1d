@@ -164,7 +164,7 @@ func (e *encoder) modeBits(mode int, cdf []uint16) float64 {
 	return bits
 }
 
-func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) int {
+func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, float64) {
 	bDim := &blockDimensions[bs]
 	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
 	tx := int(maxTxfmSizeForBs[bs][0])
@@ -176,26 +176,33 @@ func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) int {
 	ef := lumaTxEdge(edgeFlags, w4, h4, 0, 0, 0, 0, int(tDim.w), int(tDim.h))
 	off := 4 * (by*e.stride + bx)
 
-	best, bestCost := dcPred, math.Inf(1)
-	for _, m := range intraModes {
+	trial := func(m int) float64 {
 		e.predIntra(e.recon, off, e.stride, bx, by, e.bw, e.bh,
 			int(tDim.w), int(tDim.h), m, 0, ef, smFl,
 			4*e.bw-4*bx, 4*e.bh-4*by)
 		eob := e.quantTx(e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
 			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tx, dctDct)
 		e.reconTx(e.recon, off, e.stride, tx, dctDct, eob)
-		c := sse(e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
+
+		return sse(e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
 			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tw, th) +
 			e.lambda*(rateBits(e.lv[:], scans[tx], eob)+e.modeBits(m, cdf))
-		if c < bestCost {
+	}
+
+	best, bestCost := dcPred, math.Inf(1)
+	for _, m := range intraModes {
+		if c := trial(m); c < bestCost {
 			best, bestCost = m, c
 		}
 	}
+	if best != intraModes[len(intraModes)-1] {
+		trial(best)
+	}
 
-	return best
+	return best, bestCost
 }
 
-func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) int {
+func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, float64) {
 	ssHor, ssVer := e.ssHor, e.ssVer
 	bDim := &blockDimensions[bs]
 	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
@@ -210,8 +217,7 @@ func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) int {
 	ef := e.chromaTxEdge(edgeFlags, cw4, ch4, 0, 0, 0, 0, int(tDim.w), int(tDim.h))
 	off := 4 * (cby*e.cstride + cbx)
 
-	best, bestCost := dcPred, math.Inf(1)
-	for _, m := range intraModes {
+	trial := func(m int) float64 {
 		txtp := e.txtpFor(tx, 1, m)
 		c := e.lambda * e.modeBits(m, cdf)
 		for pl := range 2 {
@@ -229,12 +235,21 @@ func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) int {
 				e.cw, e.ch, 4*cbx, 4*cby, tw, th) +
 				e.lambda*rateBits(e.lv[:], scans[tx], eob)
 		}
-		if c < bestCost {
+
+		return c
+	}
+
+	best, bestCost := dcPred, math.Inf(1)
+	for _, m := range intraModes {
+		if c := trial(m); c < bestCost {
 			best, bestCost = m, c
 		}
 	}
+	if best != intraModes[len(intraModes)-1] {
+		trial(best)
+	}
 
-	return best
+	return best, bestCost
 }
 
 func (e *encoder) quantTx(dst []uint8, off, stride int, src []uint8, sstride, sw, sh,
