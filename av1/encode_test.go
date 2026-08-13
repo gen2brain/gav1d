@@ -122,7 +122,7 @@ func TestEncodeDav1d(t *testing.T) {
 	}
 }
 
-func encodeRecon(t *testing.T, c *encConfig) ([]byte, []uint8, int) {
+func encodeRecon(t *testing.T, c *encConfig) ([]byte, *encoder) {
 	t.Helper()
 
 	seq := writeSeqHdr(c)
@@ -144,7 +144,7 @@ func encodeRecon(t *testing.T, c *encConfig) ([]byte, []uint8, int) {
 	out := writeObu(nil, obuTd, nil)
 	out = writeObu(out, obuSeqHdr, seq)
 
-	return writeObu(out, obuFrame, append(fp.bytes(), tile...)), e.recon, e.stride
+	return writeObu(out, obuFrame, append(fp.bytes(), tile...)), &e
 }
 
 // TestEncodeChroma checks that a 4:2:0 frame carries all three planes.
@@ -170,7 +170,7 @@ func TestEncodeChroma(t *testing.T) {
 	for _, q := range []int{20, 100, 200} {
 		c := encConfig{Width: w, Height: h, BitDepth: 8, QIndex: q,
 			Src: y, SrcStride: w, SrcU: u, SrcV: v, SrcUVStride: cw}
-		data, _, _ := encodeRecon(t, &c)
+		data, _ := encodeRecon(t, &c)
 
 		var d Decoder
 		pics, err := d.DecodeOBUs(data)
@@ -216,29 +216,49 @@ func TestEncodeResidual(t *testing.T) {
 
 	for _, sz := range [][2]int{{128, 96}, {97, 33}, {122, 66}, {200, 150}} {
 		w, h := sz[0], sz[1]
-		for _, q := range []int{20, 60, 120, 200} {
-			c := encConfig{Width: w, Height: h, BitDepth: 8, QIndex: q,
-				Monochrome: true, Src: src, SrcStride: stride}
-			data, recon, rstride := encodeRecon(t, &c)
+		for _, mono := range []bool{true, false} {
+			for _, q := range []int{20, 60, 120, 200} {
+				c := encConfig{Width: w, Height: h, BitDepth: 8, QIndex: q,
+					Monochrome: mono, Src: src, SrcStride: stride}
+				if !mono {
+					c.SrcU, c.SrcV, c.SrcUVStride = src[stride:], src[3*stride:], stride
+				}
+				data, e := encodeRecon(t, &c)
 
-			var d Decoder
-			pics, err := d.DecodeOBUs(data)
-			if err != nil {
-				t.Fatalf("%dx%d q=%d: %v", w, h, q, err)
-			}
-			if len(pics) != 1 {
-				t.Fatalf("%dx%d q=%d: %d pictures", w, h, q, len(pics))
-			}
-			p := pics[0]
-			for y := range h {
-				for x := range w {
-					if got, want := p.Data[0][y*p.Stride[0]+x], recon[y*rstride+x]; got != want {
-						t.Fatalf("%dx%d q=%d [%d,%d]: decoded %d, encoder reconstructed %d",
-							w, h, q, x, y, got, want)
+				var d Decoder
+				pics, err := d.DecodeOBUs(data)
+				if err != nil {
+					t.Fatalf("%dx%d q=%d: %v", w, h, q, err)
+				}
+				if len(pics) != 1 {
+					t.Fatalf("%dx%d q=%d: %d pictures", w, h, q, len(pics))
+				}
+				p := pics[0]
+				for y := range h {
+					for x := range w {
+						if got, want := p.Data[0][y*p.Stride[0]+x], e.recon[y*e.stride+x]; got != want {
+							t.Fatalf("%dx%d q=%d luma [%d,%d]: decoded %d, encoder reconstructed %d",
+								w, h, q, x, y, got, want)
+						}
 					}
 				}
+				for pl := range 2 {
+					if mono {
+						break
+					}
+					for y := range e.ch {
+						for x := range e.cw {
+							got := p.Data[1+pl][y*p.Stride[1]+x]
+							want := e.reconC[pl][y*e.cstride+x]
+							if got != want {
+								t.Fatalf("%dx%d q=%d plane %d [%d,%d]: decoded %d, encoder reconstructed %d",
+									w, h, q, 1+pl, x, y, got, want)
+							}
+						}
+					}
+				}
+				p.Release()
 			}
-			p.Release()
 		}
 	}
 }
