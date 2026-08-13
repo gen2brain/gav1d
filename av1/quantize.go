@@ -4,12 +4,14 @@ func quantShift(tx int) int {
 	return max(0, int(txfmDimensions[tx].ctx)-2)
 }
 
+const quantRound = 6
+
 func quantOne(c int32, dq uint32, shift int) int32 {
 	neg := c < 0
 	if neg {
 		c = -c
 	}
-	v := (uint32(c)<<uint(shift) + dq/2) / dq
+	v := (uint32(c)<<uint(shift) + dq*uint32(quantRound)/16) / dq
 	if v > 0xfffff {
 		v = 0xfffff
 	}
