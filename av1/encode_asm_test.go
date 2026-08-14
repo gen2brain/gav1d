@@ -2,6 +2,37 @@ package av1
 
 import "testing"
 
+func TestSatd8Asm(t *testing.T) {
+	if !hasAsmResidual() {
+		t.Skip("no assembly")
+	}
+
+	g := uint32(3)
+	next := func(m int32) int32 {
+		g = g*1664525 + 1013904223
+
+		return int32(g>>16)%(2*m+1) - m
+	}
+	for _, stride := range []int{8, 16, 32} {
+		for _, mag := range []int32{1, 16, 255, 4095} {
+			res := make([]int32, stride*8+8)
+			for i := range res {
+				res[i] = next(mag)
+			}
+			for _, off := range []int{0, 8} {
+				if off+7*stride+8 > len(res) {
+					continue
+				}
+				want := satd8(res, off, stride)
+				if got := satd8Kernel(res, off, stride); got != want {
+					t.Fatalf("stride=%d mag=%d off=%d: got %d, want %d",
+						stride, mag, off, got, want)
+				}
+			}
+		}
+	}
+}
+
 func TestResidualAsm(t *testing.T) {
 	if !hasAsmResidual() {
 		t.Skip("no assembly")

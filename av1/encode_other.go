@@ -2,6 +2,10 @@
 
 package av1
 
+func satd8Kernel(res []int32, off, stride int) int32 {
+	return satd8(res, off, stride)
+}
+
 func residualKernel(res []int32, dst []uint8, off, stride int, src []uint8,
 	sstride, w, h int,
 ) int64 {

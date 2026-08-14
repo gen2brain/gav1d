@@ -132,7 +132,7 @@ func satd(res []int32, w, h int) int32 {
 	if w >= 8 && h >= 8 {
 		for y := 0; y < h; y += 8 {
 			for x := 0; x < w; x += 8 {
-				sum += satd8(res, y*w+x, w)
+				sum += satd8Kernel(res, y*w+x, w)
 			}
 		}
 
