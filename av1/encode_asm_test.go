@@ -99,6 +99,38 @@ func TestFwdTxfm4x4Asm(t *testing.T) {
 	}
 }
 
+func TestFwdTxfm8x8Asm(t *testing.T) {
+	g := uint32(23)
+	next := func() int32 {
+		g = g*1664525 + 1013904223
+
+		return int32(g>>16%511) - 255
+	}
+	tmp := make([]int32, fwdScratch)
+	for _, stride := range []int{8, 16, 40} {
+		src := make([]int32, stride*8)
+		for round := range 32 {
+			for i := range src {
+				src[i] = next()
+				if round == 0 {
+					src[i] = 255
+				}
+			}
+			want := make([]int32, 64)
+			got := make([]int32, 64)
+			fwdTxfmGo(want, src, stride, tx8x8, dctDct, tmp)
+			if !fwdTxfm8x8(got, src, stride, dctDct) {
+				t.Skip("no 8x8 transform kernel")
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("stride=%d [%d]: got %d, want %d", stride, i, got[i], want[i])
+				}
+			}
+		}
+	}
+}
+
 func TestSatd8Asm(t *testing.T) {
 	if !hasAsmSatd8() {
 		t.Skip("no assembly")

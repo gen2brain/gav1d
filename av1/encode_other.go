@@ -14,6 +14,10 @@ func satd4Kernel(res []int32, off, stride int) int32 {
 	return satd4(res, off, stride)
 }
 
+func fwdTxfm8x8(coeff []int32, src []int32, srcStride, txtp int) bool {
+	return false
+}
+
 func satd8Kernel(res []int32, off, stride int) int32 {
 	return satd8(res, off, stride)
 }

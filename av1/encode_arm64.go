@@ -28,6 +28,10 @@ func satd4Kernel(res []int32, off, stride int) int32 {
 //go:noescape
 func satd8NEON(res *int32, stride int) int32
 
+func fwdTxfm8x8(coeff []int32, src []int32, srcStride, txtp int) bool {
+	return false
+}
+
 func satd8Kernel(res []int32, off, stride int) int32 {
 	return satd8NEON(&res[off], stride)
 }

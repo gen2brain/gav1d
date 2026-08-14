@@ -214,6 +214,9 @@ func fwdTxfm(coeff []int32, src []int32, srcStride, tx, txtp int, tmp []int32) {
 	if tx == tx4x4 && fwdTxfm4x4(coeff, src, srcStride, txtp) {
 		return
 	}
+	if tx == tx8x8 && fwdTxfm8x8(coeff, src, srcStride, txtp) {
+		return
+	}
 	fwdTxfmGo(coeff, src, srcStride, tx, txtp, tmp)
 }
 
