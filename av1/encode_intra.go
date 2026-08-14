@@ -51,17 +51,35 @@ func init() {
 	}
 }
 
+func sseGo(dst []uint8, off, stride int, src []uint8, sstride, w, h int) int64 {
+	var ssd int64
+	for j := range h {
+		s := src[j*sstride:][:w]
+		d := dst[off+j*stride:][:w]
+		for i := range d {
+			v := int64(s[i]) - int64(d[i])
+			ssd += v * v
+		}
+	}
+
+	return ssd
+}
+
 func sse(dst []uint8, off, stride int, src []uint8, sstride, sw, sh, px, py, w, h int) float64 {
-	var s float64
+	if px+w <= sw && py+h <= sh {
+		return float64(sseKernel(dst, off, stride, src[py*sstride+px:], sstride, w, h))
+	}
+
+	var s int64
 	for j := range h {
 		sy := min(py+j, sh-1)
 		for i := range w {
-			d := float64(src[sy*sstride+min(px+i, sw-1)]) - float64(dst[off+j*stride+i])
+			d := int64(src[sy*sstride+min(px+i, sw-1)]) - int64(dst[off+j*stride+i])
 			s += d * d
 		}
 	}
 
-	return s
+	return float64(s)
 }
 
 func had8(v *[8]int32) {
@@ -140,7 +158,7 @@ func satd(res []int32, w, h int) int32 {
 	}
 	for y := 0; y < h; y += 4 {
 		for x := 0; x < w; x += 4 {
-			sum += satd4(res, y*w+x, w)
+			sum += satd4Kernel(res, y*w+x, w)
 		}
 	}
 

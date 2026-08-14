@@ -2,6 +2,64 @@ package av1
 
 import "testing"
 
+func TestSseAsm(t *testing.T) {
+	if !hasAsmResidual() {
+		t.Skip("no assembly")
+	}
+
+	const stride, sstride = 96, 80
+	dst := make([]uint8, stride*40)
+	src := make([]uint8, sstride*40)
+	g := uint32(5)
+	for i := range dst {
+		g = g*1664525 + 1013904223
+		dst[i] = uint8(g >> 16)
+	}
+	for i := range src {
+		g = g*1664525 + 1013904223
+		src[i] = uint8(g >> 16)
+	}
+
+	for _, w := range []int{4, 8, 16, 32} {
+		for _, h := range []int{4, 8, 16, 32} {
+			for _, off := range []int{0, 7, 64} {
+				want := sseGo(dst, off, stride, src, sstride, w, h)
+				if got := sseKernel(dst, off, stride, src, sstride, w, h); got != want {
+					t.Fatalf("%dx%d off=%d: got %d, want %d", w, h, off, got, want)
+				}
+			}
+		}
+	}
+}
+
+func TestSatd4Asm(t *testing.T) {
+	if !hasAsmResidual() {
+		t.Skip("no assembly")
+	}
+
+	g := uint32(17)
+	next := func(m int32) int32 {
+		g = g*1664525 + 1013904223
+
+		return int32(g>>16)%(2*m+1) - m
+	}
+	for _, stride := range []int{4, 16, 32} {
+		for _, mag := range []int32{1, 16, 255, 4095} {
+			res := make([]int32, stride*4+8)
+			for i := range res {
+				res[i] = next(mag)
+			}
+			for _, off := range []int{0, 4} {
+				want := satd4(res, off, stride)
+				if got := satd4Kernel(res, off, stride); got != want {
+					t.Fatalf("stride=%d mag=%d off=%d: got %d, want %d",
+						stride, mag, off, got, want)
+				}
+			}
+		}
+	}
+}
+
 func TestFwdTxfm4x4Asm(t *testing.T) {
 	if !hasAsmResidual() {
 		t.Skip("no assembly")

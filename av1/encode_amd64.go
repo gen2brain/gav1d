@@ -6,6 +6,12 @@ package av1
 func fwdTxfm4x4AVX2(res *int32, src *int32, srcStride int, colAdst, rowAdst int)
 
 //go:noescape
+func sseAVX2(dst *uint8, stride int, src *uint8, sstride, w, h int) int64
+
+//go:noescape
+func satd4AVX2(res *int32, stride int) int32
+
+//go:noescape
 func satd8AVX2(res *int32, stride int) int32
 
 //go:noescape
@@ -20,6 +26,22 @@ func fwdTxfm4x4(coeff []int32, src []int32, srcStride, txtp int) bool {
 	fwdTxfm4x4AVX2(&coeff[0], &src[0], srcStride, col, row)
 
 	return true
+}
+
+func sseKernel(dst []uint8, off, stride int, src []uint8, sstride, w, h int) int64 {
+	if hasAVX2 {
+		return sseAVX2(&dst[off], stride, &src[0], sstride, w, h)
+	}
+
+	return sseGo(dst, off, stride, src, sstride, w, h)
+}
+
+func satd4Kernel(res []int32, off, stride int) int32 {
+	if hasAVX2 {
+		return satd4AVX2(&res[off], stride)
+	}
+
+	return satd4(res, off, stride)
 }
 
 func satd8Kernel(res []int32, off, stride int) int32 {

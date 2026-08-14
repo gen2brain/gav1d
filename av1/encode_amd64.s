@@ -353,3 +353,136 @@ store:
 	VMOVDQU X3, 48(DI)
 	VZEROUPPER
 	RET
+
+// sseAVX2 is the sum of squared differences, packing whole rows into one
+// register at the narrow shapes the way residualAVX2 does.
+TEXT ·sseAVX2(SB), NOSPLIT, $0-56
+	MOVQ  dst+0(FP), SI
+	MOVQ  stride+8(FP), R8
+	MOVQ  src+16(FP), DX
+	MOVQ  sstride+24(FP), R9
+	MOVQ  w+32(FP), CX
+	MOVQ  h+40(FP), BX
+	VPXOR Y7, Y7, Y7
+
+	CMPQ CX, $4
+	JE   s4loop
+	CMPQ CX, $8
+	JE   s8loop
+	JMP  srowloop
+
+s4loop:
+	LEAQ      (DX)(R9*2), R10
+	VMOVD     (DX), X0
+	VPINSRD   $1, (DX)(R9*1), X0, X0
+	VPINSRD   $2, (R10), X0, X0
+	VPINSRD   $3, (R10)(R9*1), X0, X0
+	LEAQ      (SI)(R8*2), R11
+	VMOVD     (SI), X1
+	VPINSRD   $1, (SI)(R8*1), X1, X1
+	VPINSRD   $2, (R11), X1, X1
+	VPINSRD   $3, (R11)(R8*1), X1, X1
+	VPMOVZXBW X0, Y0
+	VPMOVZXBW X1, Y1
+	VPSUBW    Y1, Y0, Y2
+	VPMADDWD  Y2, Y2, Y6
+	VPADDD    Y6, Y7, Y7
+	LEAQ      (DX)(R9*4), DX
+	LEAQ      (SI)(R8*4), SI
+	SUBQ      $4, BX
+	JNZ       s4loop
+	JMP       sdone
+
+s8loop:
+	VMOVQ     (DX), X0
+	VPINSRQ   $1, (DX)(R9*1), X0, X0
+	VMOVQ     (SI), X1
+	VPINSRQ   $1, (SI)(R8*1), X1, X1
+	VPMOVZXBW X0, Y0
+	VPMOVZXBW X1, Y1
+	VPSUBW    Y1, Y0, Y2
+	VPMADDWD  Y2, Y2, Y6
+	VPADDD    Y6, Y7, Y7
+	LEAQ      (DX)(R9*2), DX
+	LEAQ      (SI)(R8*2), SI
+	SUBQ      $2, BX
+	JNZ       s8loop
+	JMP       sdone
+
+srowloop:
+	MOVQ CX, R11
+	MOVQ DX, R12
+	MOVQ SI, R13
+
+scolloop:
+	VPMOVZXBW (R12), Y0
+	VPMOVZXBW (R13), Y1
+	VPSUBW    Y1, Y0, Y2
+	VPMADDWD  Y2, Y2, Y6
+	VPADDD    Y6, Y7, Y7
+	ADDQ      $16, R12
+	ADDQ      $16, R13
+	SUBQ      $16, R11
+	JNZ       scolloop
+
+	ADDQ R9, DX
+	ADDQ R8, SI
+	DECQ BX
+	JNZ  srowloop
+
+sdone:
+	VEXTRACTI128 $1, Y7, X0
+	VPADDD       X0, X7, X7
+	VPSHUFD      $0x0e, X7, X0
+	VPADDD       X0, X7, X7
+	VPSHUFD      $0x01, X7, X0
+	VPADDD       X0, X7, X7
+	VMOVD        X7, AX
+	MOVLQZX      AX, AX
+	MOVQ         AX, ret+48(FP)
+	VZEROUPPER
+	RET
+
+#define HAD4(i0, i1, i2, i3, o0, o1, o2, o3) \
+	VPADDD i2, i0, X4 \
+	VPADDD i3, i1, X5 \
+	VPSUBD i2, i0, X6 \
+	VPSUBD i3, i1, X7 \
+	VPADDD X5, X4, o0 \
+	VPSUBD X5, X4, o1 \
+	VPADDD X7, X6, o2 \
+	VPSUBD X7, X6, o3
+
+// satd4AVX2 is the sum of absolute 4x4 Hadamard coefficients.
+TEXT ·satd4AVX2(SB), NOSPLIT, $0-24
+	MOVQ res+0(FP), SI
+	MOVQ stride+8(FP), DX
+	SHLQ $2, DX
+
+	VMOVDQU (SI), X0
+	VMOVDQU (SI)(DX*1), X1
+	LEAQ    (SI)(DX*2), AX
+	VMOVDQU (AX), X2
+	VMOVDQU (AX)(DX*1), X3
+
+	HAD4(X0, X1, X2, X3, X8, X9, X10, X11)
+	T4(X8, X9, X10, X11, X0, X1, X2, X3)
+	HAD4(X0, X1, X2, X3, X8, X9, X10, X11)
+
+	VPABSD  X8, X8
+	VPABSD  X9, X9
+	VPABSD  X10, X10
+	VPABSD  X11, X11
+	VPADDD  X9, X8, X8
+	VPADDD  X11, X10, X10
+	VPADDD  X10, X8, X8
+	VPSHUFD $0x0e, X8, X0
+	VPADDD  X0, X8, X8
+	VPSHUFD $0x01, X8, X0
+	VPADDD  X0, X8, X8
+	VMOVD   X8, AX
+	ADDL    $2, AX
+	SARL    $2, AX
+	MOVL    AX, ret+16(FP)
+	VZEROUPPER
+	RET
