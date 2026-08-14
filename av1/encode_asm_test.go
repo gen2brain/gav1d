@@ -116,15 +116,18 @@ func TestFwdTxfm8x8Asm(t *testing.T) {
 					src[i] = 255
 				}
 			}
-			want := make([]int32, 64)
-			got := make([]int32, 64)
-			fwdTxfmGo(want, src, stride, tx8x8, dctDct, tmp)
-			if !fwdTxfm8x8(got, src, stride, dctDct) {
-				t.Skip("no 8x8 transform kernel")
-			}
-			for i := range want {
-				if got[i] != want[i] {
-					t.Fatalf("stride=%d [%d]: got %d, want %d", stride, i, got[i], want[i])
+			for _, txtp := range []int{dctDct, adstDct, dctAdst, adstAdst} {
+				want := make([]int32, 64)
+				got := make([]int32, 64)
+				fwdTxfmGo(want, src, stride, tx8x8, txtp, tmp)
+				if !fwdTxfm8x8(got, src, stride, txtp) {
+					t.Skip("no 8x8 transform kernel")
+				}
+				for i := range want {
+					if got[i] != want[i] {
+						t.Fatalf("txtp=%d stride=%d [%d]: got %d, want %d",
+							txtp, stride, i, got[i], want[i])
+					}
 				}
 			}
 		}
@@ -223,6 +226,9 @@ func TestFwdTxfmRectAsm(t *testing.T) {
 		{rtx8x16, 8, 16, fwdTxfm8x16},
 		{rtx16x8, 16, 8, fwdTxfm16x8},
 		{tx16x16, 16, 16, fwdTxfm16x16},
+		{tx32x32, 32, 32, fwdTxfm32x32},
+		{rtx16x32, 16, 32, fwdTxfm16x32},
+		{rtx32x16, 32, 16, fwdTxfm32x16},
 	} {
 		probe := make([]int32, c.w*c.h)
 		if !c.kernel(probe, make([]int32, 40*c.h), 40, dctDct) {
@@ -242,14 +248,18 @@ func TestFwdTxfmRectAsm(t *testing.T) {
 						src[i] = -255
 					}
 				}
-				want := make([]int32, c.w*c.h)
-				got := make([]int32, c.w*c.h)
-				fwdTxfmGo(want, src, stride, c.tx, dctDct, tmp)
-				c.kernel(got, src, stride, dctDct)
-				for i := range want {
-					if got[i] != want[i] {
-						t.Fatalf("%dx%d stride=%d round=%d [%d]: got %d, want %d",
-							c.w, c.h, stride, round, i, got[i], want[i])
+				for _, txtp := range []int{dctDct, adstDct, dctAdst, adstAdst} {
+					want := make([]int32, c.w*c.h)
+					got := make([]int32, c.w*c.h)
+					fwdTxfmGo(want, src, stride, c.tx, txtp, tmp)
+					if !c.kernel(got, src, stride, txtp) {
+						continue
+					}
+					for i := range want {
+						if got[i] != want[i] {
+							t.Fatalf("%dx%d txtp=%d stride=%d round=%d [%d]: got %d, want %d",
+								c.w, c.h, txtp, stride, round, i, got[i], want[i])
+						}
 					}
 				}
 			}

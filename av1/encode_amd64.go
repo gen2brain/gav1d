@@ -3,22 +3,31 @@
 package av1
 
 //go:noescape
-func fwdTxfm8x8AVX512(res *int32, src *int32, srcStride int)
+func fwdTxfm8x8AVX512(res *int32, src *int32, srcStride, colAdst, rowAdst int)
 
 //go:noescape
-func fwdTxfm16x16AVX512(res *int32, src *int32, srcStride int)
+func fwdTxfm16x32AVX512(res *int32, src *int32, srcStride int)
 
 //go:noescape
-func fwdTxfm16x8AVX512(res *int32, src *int32, srcStride int)
+func fwdTxfm32x16AVX512(res *int32, src *int32, srcStride int)
 
 //go:noescape
-func fwdTxfm8x16AVX512(res *int32, src *int32, srcStride int)
+func fwdTxfm32x32AVX512(res *int32, src *int32, srcStride int)
 
 //go:noescape
-func fwdTxfm4x8AVX512(res *int32, src *int32, srcStride int)
+func fwdTxfm16x16AVX512(res *int32, src *int32, srcStride, colAdst, rowAdst int)
 
 //go:noescape
-func fwdTxfm8x4AVX512(res *int32, src *int32, srcStride int)
+func fwdTxfm16x8AVX512(res *int32, src *int32, srcStride, colAdst, rowAdst int)
+
+//go:noescape
+func fwdTxfm8x16AVX512(res *int32, src *int32, srcStride, colAdst, rowAdst int)
+
+//go:noescape
+func fwdTxfm4x8AVX512(res *int32, src *int32, srcStride, colAdst, rowAdst int)
+
+//go:noescape
+func fwdTxfm8x4AVX512(res *int32, src *int32, srcStride, colAdst, rowAdst int)
 
 //go:noescape
 func fwdTxfm4x4AVX2(res *int32, src *int32, srcStride int, colAdst, rowAdst int)
@@ -63,55 +72,94 @@ func satd4Kernel(res []int32, off, stride int) int32 {
 }
 
 func fwdTxfm8x8(coeff []int32, src []int32, srcStride, txtp int) bool {
-	if !hasAVX512 || txtp != dctDct {
+	if !hasAVX512 || txtp > adstAdst {
 		return false
 	}
-	fwdTxfm8x8AVX512(&coeff[0], &src[0], srcStride)
+	col := b2i(tx1dTypes[txtp][0] == tx1dAdst)
+	row := b2i(tx1dTypes[txtp][1] == tx1dAdst)
+	fwdTxfm8x8AVX512(&coeff[0], &src[0], srcStride, col, row)
 
 	return true
 }
 
 func fwdTxfm4x8(coeff []int32, src []int32, srcStride, txtp int) bool {
-	if !hasAVX512 || txtp != dctDct {
+	if !hasAVX512 || txtp > adstAdst {
 		return false
 	}
-	fwdTxfm4x8AVX512(&coeff[0], &src[0], srcStride)
+	col := b2i(tx1dTypes[txtp][0] == tx1dAdst)
+	row := b2i(tx1dTypes[txtp][1] == tx1dAdst)
+	fwdTxfm4x8AVX512(&coeff[0], &src[0], srcStride, col, row)
 
 	return true
 }
 
 func fwdTxfm8x4(coeff []int32, src []int32, srcStride, txtp int) bool {
-	if !hasAVX512 || txtp != dctDct {
+	if !hasAVX512 || txtp > adstAdst {
 		return false
 	}
-	fwdTxfm8x4AVX512(&coeff[0], &src[0], srcStride)
+	col := b2i(tx1dTypes[txtp][0] == tx1dAdst)
+	row := b2i(tx1dTypes[txtp][1] == tx1dAdst)
+	fwdTxfm8x4AVX512(&coeff[0], &src[0], srcStride, col, row)
 
 	return true
 }
 
 func fwdTxfm8x16(coeff []int32, src []int32, srcStride, txtp int) bool {
-	if !hasAVX512 || txtp != dctDct {
+	if !hasAVX512 || txtp > adstAdst {
 		return false
 	}
-	fwdTxfm8x16AVX512(&coeff[0], &src[0], srcStride)
+	col := b2i(tx1dTypes[txtp][0] == tx1dAdst)
+	row := b2i(tx1dTypes[txtp][1] == tx1dAdst)
+	fwdTxfm8x16AVX512(&coeff[0], &src[0], srcStride, col, row)
 
 	return true
 }
 
 func fwdTxfm16x8(coeff []int32, src []int32, srcStride, txtp int) bool {
-	if !hasAVX512 || txtp != dctDct {
+	if !hasAVX512 || txtp > adstAdst {
 		return false
 	}
-	fwdTxfm16x8AVX512(&coeff[0], &src[0], srcStride)
+	col := b2i(tx1dTypes[txtp][0] == tx1dAdst)
+	row := b2i(tx1dTypes[txtp][1] == tx1dAdst)
+	fwdTxfm16x8AVX512(&coeff[0], &src[0], srcStride, col, row)
 
 	return true
 }
 
 func fwdTxfm16x16(coeff []int32, src []int32, srcStride, txtp int) bool {
+	if !hasAVX512 || txtp > adstAdst {
+		return false
+	}
+	col := b2i(tx1dTypes[txtp][0] == tx1dAdst)
+	row := b2i(tx1dTypes[txtp][1] == tx1dAdst)
+	fwdTxfm16x16AVX512(&coeff[0], &src[0], srcStride, col, row)
+
+	return true
+}
+
+func fwdTxfm32x32(coeff []int32, src []int32, srcStride, txtp int) bool {
 	if !hasAVX512 || txtp != dctDct {
 		return false
 	}
-	fwdTxfm16x16AVX512(&coeff[0], &src[0], srcStride)
+	fwdTxfm32x32AVX512(&coeff[0], &src[0], srcStride)
+
+	return true
+}
+
+func fwdTxfm16x32(coeff []int32, src []int32, srcStride, txtp int) bool {
+	if !hasAVX512 || txtp != dctDct {
+		return false
+	}
+	fwdTxfm16x32AVX512(&coeff[0], &src[0], srcStride)
+
+	return true
+}
+
+func fwdTxfm32x16(coeff []int32, src []int32, srcStride, txtp int) bool {
+	if !hasAVX512 || txtp != dctDct {
+		return false
+	}
+	fwdTxfm32x16AVX512(&coeff[0], &src[0], srcStride)
 
 	return true
 }

@@ -240,6 +240,18 @@ func fwdTxfm(coeff []int32, src []int32, srcStride, tx, txtp int, tmp []int32) {
 		if fwdTxfm16x16(coeff, src, srcStride, txtp) {
 			return
 		}
+	case tx32x32:
+		if fwdTxfm32x32(coeff, src, srcStride, txtp) {
+			return
+		}
+	case rtx16x32:
+		if fwdTxfm16x32(coeff, src, srcStride, txtp) {
+			return
+		}
+	case rtx32x16:
+		if fwdTxfm32x16(coeff, src, srcStride, txtp) {
+			return
+		}
 	}
 	fwdTxfmGo(coeff, src, srcStride, tx, txtp, tmp)
 }
