@@ -18,7 +18,12 @@ func sseKernel(dst []uint8, off, stride int, src []uint8, sstride, w, h int) int
 	return sseRVV(&dst[off], stride, &src[0], sstride, w, h)
 }
 
-func satd4Kernel(res []int32, off, stride int) int32 { return satd4(res, off, stride) }
+//go:noescape
+func satd4RVV(res *int32, stride int) int32
+
+func satd4Kernel(res []int32, off, stride int) int32 {
+	return satd4RVV(&res[off], stride)
+}
 
 func satd8Kernel(res []int32, off, stride int) int32 { return satd8(res, off, stride) }
 

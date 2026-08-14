@@ -95,3 +95,75 @@ sstrip:
 
 	MOV X17, ret+48(FP)
 	RET
+
+// ABSV replaces the absolute value RVV does not have: with mask = v >> 31,
+// |v| is (v ^ mask) - mask.
+#define ABSV(v, m) \
+	VSRAVI $31, v, m; \
+	VXORVV m, v, v;   \
+	VSUBVV m, v, v
+
+#define HAD4R(i0, i1, i2, i3, t0, t1, t2, t3) \
+	VADDVV i2, i0, t0; \
+	VADDVV i3, i1, t1; \
+	VSUBVV i2, i0, t2; \
+	VSUBVV i3, i1, t3; \
+	VADDVV t1, t0, i0; \
+	VSUBVV t1, t0, i1; \
+	VADDVV t3, t2, i2; \
+	VSUBVV t3, t2, i3
+
+// satd4RVV is the sum of absolute 4x4 Hadamard coefficients. RVV has no lane
+// shuffle, so the transpose between the two passes is a contiguous store
+// followed by four strided loads.
+TEXT ·satd4RVV(SB), NOSPLIT, $64-20
+	MOV res+0(FP), X10
+	MOV stride+8(FP), X11
+	SLLI $2, X11, X11
+	MOV $4, X12
+	VSETVLI X12, E32, M1, TA, MA, X5
+
+	VLE32V (X10), V0
+	ADD    X11, X10, X13
+	VLE32V (X13), V1
+	ADD    X11, X13, X13
+	VLE32V (X13), V2
+	ADD    X11, X13, X13
+	VLE32V (X13), V3
+
+	HAD4R(V0, V1, V2, V3, V4, V5, V6, V7)
+
+	MOV    $scratch-64(SP), X14
+	VSE32V V0, (X14)
+	ADD    $16, X14, X15
+	VSE32V V1, (X15)
+	ADD    $16, X15, X15
+	VSE32V V2, (X15)
+	ADD    $16, X15, X15
+	VSE32V V3, (X15)
+
+	MOV     $16, X16
+	VLSE32V (X14), X16, V0
+	ADD     $4, X14, X15
+	VLSE32V (X15), X16, V1
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V2
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V3
+
+	HAD4R(V0, V1, V2, V3, V4, V5, V6, V7)
+
+	ABSV(V0, V8)
+	ABSV(V1, V8)
+	ABSV(V2, V8)
+	ABSV(V3, V8)
+	VADDVV    V1, V0, V0
+	VADDVV    V3, V2, V2
+	VADDVV    V2, V0, V0
+	VMVVI     $0, V4
+	VREDSUMVS V4, V0, V4
+	VMVXS     V4, X6
+	ADDW      $2, X6, X6
+	SRAW      $2, X6, X6
+	MOVW      X6, ret+16(FP)
+	RET
