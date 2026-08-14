@@ -259,6 +259,7 @@ func (e *encoder) predIntra(dst []uint8, off, stride, x, y, w, h, tw, th,
 const (
 	modeShortlist = 5
 	angleSearch   = true
+	extraShapes   = false
 )
 
 func shortlist(cost *[nIntraPredModes]float64, out []int) []int {

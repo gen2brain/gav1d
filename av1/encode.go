@@ -43,7 +43,7 @@ type encoder struct {
 	uvangle  [256]int8
 	bskip    [256]uint8
 	part     [nBlLevels][256]uint8
-	rect     [4]int
+	rect     [10]int
 	entry    [nBlLevels]sbState
 	kept     [nBlLevels]sbState
 	dentry   [nBlLevels]decState
@@ -80,7 +80,12 @@ func (e *encoder) init(c *encConfig, seq *sequenceHeader) {
 	e.lossless = c.QIndex == 0
 	e.ssHor = b2i(e.layout != pixelLayoutI444)
 	e.ssVer = b2i(e.layout == pixelLayoutI420)
-	e.rect = [4]int{partitionNone, partitionH, partitionV, partitionSplit}
+	e.rect = [10]int{
+		partitionNone, partitionH, partitionV, partitionSplit,
+		partitionTTopSplit, partitionTBottomSplit,
+		partitionTLeftSplit, partitionTRightSplit,
+		partitionH4, partitionV4,
+	}
 	e.maxBl, e.minBl = bl64x64, bl64x64
 	if c.Src != nil {
 		e.maxBl, e.minBl = bl32x32, bl8x8
@@ -279,6 +284,42 @@ func (e *encoder) writeSb(bx, by, bl int, node *edgeNode) {
 		e.writeBlock(bx, by, bs, int(node.v[0]))
 		if haveH {
 			e.writeBlock(bx+hsz, by, bs, int(node.v[1]))
+		}
+	case partitionTTopSplit:
+		b := &blockSizes[bl][bp]
+		e.writeBlock(bx, by, int(b[0]), edgeAllTrAndBl)
+		e.writeBlock(bx+hsz, by, int(b[0]), int(node.v[1]))
+		e.writeBlock(bx, by+hsz, int(b[1]), int(node.h[1]))
+	case partitionTBottomSplit:
+		b := &blockSizes[bl][bp]
+		e.writeBlock(bx, by, int(b[0]), int(node.h[0]))
+		e.writeBlock(bx, by+hsz, int(b[1]), int(node.v[0]))
+		e.writeBlock(bx+hsz, by+hsz, int(b[1]), 0)
+	case partitionTLeftSplit:
+		b := &blockSizes[bl][bp]
+		e.writeBlock(bx, by, int(b[0]), edgeAllTrAndBl)
+		e.writeBlock(bx, by+hsz, int(b[0]), int(node.h[1]))
+		e.writeBlock(bx+hsz, by, int(b[1]), int(node.v[1]))
+	case partitionTRightSplit:
+		b := &blockSizes[bl][bp]
+		e.writeBlock(bx, by, int(b[0]), int(node.v[0]))
+		e.writeBlock(bx+hsz, by, int(b[1]), int(node.h[0]))
+		e.writeBlock(bx+hsz, by+hsz, int(b[1]), 0)
+	case partitionH4:
+		bs := int(blockSizes[bl][bp][0])
+		e.writeBlock(bx, by, bs, int(node.h[0]))
+		e.writeBlock(bx, by+hsz>>1, bs, int(node.h4))
+		e.writeBlock(bx, by+hsz, bs, edgeAllLeftHasBottom)
+		if by+hsz*3>>1 < e.bh {
+			e.writeBlock(bx, by+hsz*3>>1, bs, int(node.h[1]))
+		}
+	case partitionV4:
+		bs := int(blockSizes[bl][bp][0])
+		e.writeBlock(bx, by, bs, int(node.v[0]))
+		e.writeBlock(bx+hsz>>1, by, bs, int(node.v4))
+		e.writeBlock(bx+hsz, by, bs, edgeAllTopHasRight)
+		if bx+hsz*3>>1 < e.bw {
+			e.writeBlock(bx+hsz*3>>1, by, bs, int(node.v[1]))
 		}
 	default:
 		e.writeBlock(bx, by, int(blockSizes[bl][partitionNone][0]), int(node.o))
@@ -525,6 +566,42 @@ func (e *encoder) trialSb(bx, by, bl int, node *edgeNode) float64 {
 			if haveH {
 				c += e.trialBlock(bx+hsz, by, bs, int(node.v[1]))
 			}
+		case partitionTTopSplit:
+			b := &blockSizes[bl][bp]
+			c += e.trialBlock(bx, by, int(b[0]), edgeAllTrAndBl)
+			c += e.trialBlock(bx+hsz, by, int(b[0]), int(node.v[1]))
+			c += e.trialBlock(bx, by+hsz, int(b[1]), int(node.h[1]))
+		case partitionTBottomSplit:
+			b := &blockSizes[bl][bp]
+			c += e.trialBlock(bx, by, int(b[0]), int(node.h[0]))
+			c += e.trialBlock(bx, by+hsz, int(b[1]), int(node.v[0]))
+			c += e.trialBlock(bx+hsz, by+hsz, int(b[1]), 0)
+		case partitionTLeftSplit:
+			b := &blockSizes[bl][bp]
+			c += e.trialBlock(bx, by, int(b[0]), edgeAllTrAndBl)
+			c += e.trialBlock(bx, by+hsz, int(b[0]), int(node.h[1]))
+			c += e.trialBlock(bx+hsz, by, int(b[1]), int(node.v[1]))
+		case partitionTRightSplit:
+			b := &blockSizes[bl][bp]
+			c += e.trialBlock(bx, by, int(b[0]), int(node.v[0]))
+			c += e.trialBlock(bx+hsz, by, int(b[1]), int(node.h[0]))
+			c += e.trialBlock(bx+hsz, by+hsz, int(b[1]), 0)
+		case partitionH4:
+			bs := int(blockSizes[bl][bp][0])
+			c += e.trialBlock(bx, by, bs, int(node.h[0]))
+			c += e.trialBlock(bx, by+hsz>>1, bs, int(node.h4))
+			c += e.trialBlock(bx, by+hsz, bs, edgeAllLeftHasBottom)
+			if by+hsz*3>>1 < e.bh {
+				c += e.trialBlock(bx, by+hsz*3>>1, bs, int(node.h[1]))
+			}
+		case partitionV4:
+			bs := int(blockSizes[bl][bp][0])
+			c += e.trialBlock(bx, by, bs, int(node.v[0]))
+			c += e.trialBlock(bx+hsz>>1, by, bs, int(node.v4))
+			c += e.trialBlock(bx+hsz, by, bs, edgeAllTopHasRight)
+			if bx+hsz*3>>1 < e.bw {
+				c += e.trialBlock(bx+hsz*3>>1, by, bs, int(node.v[1]))
+			}
 		default:
 			c += e.trialBlock(bx, by, int(blockSizes[bl][partitionNone][0]), int(node.o))
 		}
@@ -537,15 +614,17 @@ func (e *encoder) trialSb(bx, by, bl int, node *edgeNode) float64 {
 	var cands []int
 	switch {
 	case bl < e.maxBl:
-		cands = e.rect[3:]
+		cands = e.rect[3:4]
 	case !haveH:
 		cands = e.rect[2:3]
 	case !haveV:
 		cands = e.rect[1:2]
 	case bl >= e.minBl:
 		cands = e.rect[:3]
-	default:
+	case extraShapes && int(partitionTypeCount[bl]) >= partitionV4:
 		cands = e.rect[:]
+	default:
+		cands = e.rect[:4]
 	}
 
 	if len(cands) == 1 {
