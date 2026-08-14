@@ -371,6 +371,157 @@ func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int, f
 	return best, bestDelta, bestCost, bestSkip
 }
 
+func cflSignBits(cdf *cdfModeContext, u, v int) float64 {
+	su, sv := cflSign(u), cflSign(v)
+	bits := cdfBits(cdf.cflSign[:], su*3+sv-1)
+	if su != 0 {
+		bits += cdfBits(cdf.cflAlpha[b2i(su == 2)*3+sv][:], abs(u)-1)
+	}
+	if sv != 0 {
+		bits += cdfBits(cdf.cflAlpha[b2i(sv == 2)*3+su][:], abs(v)-1)
+	}
+
+	return bits
+}
+
+func cflSign(a int) int {
+	switch {
+	case a < 0:
+		return 1
+	case a > 0:
+		return 2
+	}
+
+	return 0
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+
+	return v
+}
+
+func (e *encoder) cflAcFor(bx, by, bs int) {
+	ssHor, ssVer := e.ssHor, e.ssVer
+	bDim := &blockDimensions[bs]
+	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
+	cw4, ch4 := (w4+ssHor)>>ssHor, (h4+ssVer)>>ssVer
+	cbw4 := (int(bDim[0]) + ssHor) >> ssHor
+	cbh4 := (int(bDim[1]) + ssVer) >> ssVer
+	tDim := &txfmDimensions[e.txOf(bs, 1)]
+
+	furthestR := ((cw4 << ssHor) + int(tDim.w) - 1) &^ (int(tDim.w) - 1)
+	furthestB := ((ch4 << ssVer) + int(tDim.h) - 1) &^ (int(tDim.h) - 1)
+	off := 4*(bx&^ssHor) + 4*(by&^ssVer)*e.stride
+
+	cflAc(e.ac[:], e.recon, off, e.stride,
+		cbw4-(furthestR>>ssHor), cbh4-(furthestB>>ssVer),
+		cbw4*4, cbh4*4, ssHor, ssVer)
+}
+
+func (e *encoder) predCfl(pl, off, cbx, cby, tw4, th4, alpha, maxW, maxH int) {
+	angle := 0
+	m := prepareIntraEdges(cbx, cbx > 0, cby, cby > 0,
+		e.bw>>e.ssHor, e.bh>>e.ssVer, 0, e.reconC[pl], off, e.cstride, nil, 0,
+		dcPred, &angle, tw4, th4, false, e.edge[:], encEdgeOff, 255)
+	e.dsp.cflPred[m](e.reconC[pl], off, e.cstride, e.edge[:], encEdgeOff,
+		tw4*4, th4*4, e.ac[:], int32(alpha), 255)
+}
+
+func (e *encoder) pickAlpha(pl, off, cbx, cby, tw4, th4 int, src []uint8,
+	px, py, w, h, maxW, maxH int,
+) int {
+	e.predCfl(pl, off, cbx, cby, tw4, th4, 0, maxW, maxH)
+
+	var num, den float64
+	for j := range h {
+		sy := min(py+j, e.ch-1)
+		for i := range w {
+			a := float64(e.ac[j*w+i])
+			d := float64(src[sy*e.cfg.SrcUVStride+min(px+i, e.cw-1)]) -
+				float64(e.reconC[pl][off+j*e.cstride+i])
+			num += a * d
+			den += a * a
+		}
+	}
+	if den == 0 {
+		return 0
+	}
+
+	want := int(math.Round(64 * num / den))
+	best, bestSSE := 0, math.Inf(1)
+	for _, a := range [3]int{want - 1, want, want + 1} {
+		if a < -16 || a > 16 {
+			continue
+		}
+		e.predCfl(pl, off, cbx, cby, tw4, th4, a, maxW, maxH)
+		if d := sse(e.reconC[pl], off, e.cstride, src, e.cfg.SrcUVStride,
+			e.cw, e.ch, px, py, w, h); d < bestSSE {
+			best, bestSSE = a, d
+		}
+	}
+
+	return best
+}
+
+func (e *encoder) applyCfl(bs, off, cbx, cby, tw4, th4 int, alpha [2]int8, maxW, maxH int) {
+	for pl := range 2 {
+		if alpha[pl] == 0 {
+			e.predIntra(e.reconC[pl], off, e.cstride, cbx, cby,
+				e.bw>>e.ssHor, e.bh>>e.ssVer, tw4, th4, dcPred, 0, 0,
+				angleUseEdgeFilterFlag, maxW, maxH)
+
+			continue
+		}
+		e.predCfl(pl, off, cbx, cby, tw4, th4, int(alpha[pl]), maxW, maxH)
+	}
+}
+
+func (e *encoder) reconCfl(bs, off, cbx, cby, cbx4, cby4, tx int, alpha [2]int8) {
+	for pl := range 2 {
+		src := e.cfg.SrcU
+		if pl == 1 {
+			src = e.cfg.SrcV
+		}
+		txtp := e.txtpFor(tx, 1, cflPred)
+		eob := e.quantTx(e.reconC[pl], off, e.cstride, src, e.cfg.SrcUVStride,
+			e.cw, e.ch, 4*cbx, 4*cby, tx, txtp)
+		e.reconTx(e.reconC[pl], off, e.cstride, tx, txtp, eob)
+	}
+}
+
+func (e *encoder) trialCfl(bs, off, cbx, cby, tw4, th4, cbx4, cby4, tx int,
+	alpha [2]int8, maxW, maxH int, cdf []uint16,
+) (float64, float64) {
+	tDim := &txfmDimensions[tx]
+	tw, th := 4*int(tDim.w), 4*int(tDim.h)
+	ab := &e.a[cbx<<e.ssHor>>5]
+	c := e.lambda * (cdfBits(cdf, cflPred) +
+		cflSignBits(&e.cdf.m, int(alpha[0]), int(alpha[1])))
+	skip := c
+
+	e.applyCfl(bs, off, cbx, cby, tw4, th4, alpha, maxW, maxH)
+	for pl := range 2 {
+		src := e.cfg.SrcU
+		if pl == 1 {
+			src = e.cfg.SrcV
+		}
+		cc := coefCtx{a: ab.ccoef[pl][:], l: e.l.ccoef[pl][:]}
+		txtp := e.txtpFor(tx, 1, cflPred)
+		eob := e.quantTx(e.reconC[pl], off, e.cstride, src, e.cfg.SrcUVStride,
+			e.cw, e.ch, 4*cbx, 4*cby, tx, txtp)
+		skip += e.predSSE
+		rate := e.coefBits(&cc, cbx4, cby4, tx, bs, 1+pl, cflPred)
+		e.reconTx(e.reconC[pl], off, e.cstride, tx, txtp, eob)
+		c += sse(e.reconC[pl], off, e.cstride, src, e.cfg.SrcUVStride,
+			e.cw, e.ch, 4*cbx, 4*cby, tw, th) + e.lambda*rate
+	}
+
+	return c, skip
+}
+
 func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int, float64, float64) {
 	ssHor, ssVer := e.ssHor, e.ssVer
 	bDim := &blockDimensions[bs]
@@ -462,6 +613,31 @@ func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int,
 		if c, sk := trial(best, d); c < bestCost {
 			bestDelta, bestCost, bestSkip = d, c, sk
 		}
+	}
+
+	maxW := (4*e.bw + ssHor - 4*bx) >> ssHor
+	maxH := (4*e.bh + ssVer - 4*by) >> ssVer
+	alpha := [2]int8{}
+	if e.cflAllowed(bs) != 0 {
+		e.cflAcFor(bx, by, bs)
+		for pl := range 2 {
+			alpha[pl] = int8(e.pickAlpha(pl, off, cbx, cby, int(tDim.w), int(tDim.h),
+				plane(pl), 4*cbx, 4*cby, tw, th, maxW, maxH))
+		}
+		if alpha[0] != 0 || alpha[1] != 0 {
+			if c, sk := e.trialCfl(bs, off, cbx, cby, int(tDim.w), int(tDim.h),
+				cbx4, cby4, tx, alpha, maxW, maxH, cdf); c < bestCost {
+				best, bestDelta, bestCost, bestSkip = cflPred, 0, c, sk
+			}
+		}
+	}
+	e.cfla[sbIdx(bx, by)] = alpha
+
+	if best == cflPred {
+		e.applyCfl(bs, off, cbx, cby, int(tDim.w), int(tDim.h), alpha, maxW, maxH)
+		e.reconCfl(bs, off, cbx, cby, cbx4, cby4, tx, alpha)
+
+		return best, 0, bestCost, bestSkip
 	}
 
 	trial(best, bestDelta)
@@ -587,6 +763,10 @@ func (e *encoder) reconBlock(bx, by, bs, edgeFlags, mode, delta int, skip bool) 
 
 func (e *encoder) reconChroma(bx, by, bs, edgeFlags, mode, delta int, skip bool) {
 	ssHor, ssVer := e.ssHor, e.ssVer
+	alpha := e.cfla[sbIdx(bx, by)]
+	if mode == cflPred {
+		e.cflAcFor(bx, by, bs)
+	}
 	bDim := &blockDimensions[bs]
 	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
 	cw4, ch4 := (w4+ssHor)>>ssHor, (h4+ssVer)>>ssVer
@@ -615,11 +795,20 @@ func (e *encoder) reconChroma(bx, by, bs, edgeFlags, mode, delta int, skip bool)
 						ly := by + initY + ((y - initY>>ssVer) << ssVer)
 						off := 4 * ((cby+y)*e.cstride + cbx + x)
 
-						e.predIntra(dst, off, e.cstride, cbx+x, cby+y,
-							e.bw>>ssHor, e.bh>>ssVer, int(tDim.w), int(tDim.h),
-							mode, delta, ef, smFl,
-							(4*e.bw+ssHor-4*(lx&^ssHor))>>ssHor,
-							(4*e.bh+ssVer-4*(ly&^ssVer))>>ssVer)
+						maxW := (4*e.bw + ssHor - 4*(lx&^ssHor)) >> ssHor
+						maxH := (4*e.bh + ssVer - 4*(ly&^ssVer)) >> ssVer
+						if mode == cflPred && alpha[pl] != 0 {
+							e.predCfl(pl, off, cbx+x, cby+y, int(tDim.w), int(tDim.h),
+								int(alpha[pl]), maxW, maxH)
+						} else {
+							um := mode
+							if um == cflPred {
+								um = dcPred
+							}
+							e.predIntra(dst, off, e.cstride, cbx+x, cby+y,
+								e.bw>>ssHor, e.bh>>ssVer, int(tDim.w), int(tDim.h),
+								um, delta, ef, smFl, maxW, maxH)
+						}
 						if skip {
 							memset(cc.a[cbx4+x:cbx4+x+int(tDim.w)], 0x40)
 							memset(cc.l[cby4+y:cby4+y+int(tDim.h)], 0x40)

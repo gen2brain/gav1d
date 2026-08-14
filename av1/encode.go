@@ -33,6 +33,8 @@ type encoder struct {
 	coeff    [32 * 32]int32
 	lv       [32 * 32]int32
 	cf       [32 * 32]int16
+	ac       [32 * 32]int16
+	cfla     [256][2]int8
 	edge     [257]uint8
 	levels   [64 * 66]uint8
 	ymode    [256]uint8
@@ -61,6 +63,7 @@ type decState struct {
 	yangle  [256]int8
 	uvangle [256]int8
 	bskip   [256]uint8
+	cfla    [256][2]int8
 	part    [nBlLevels][256]uint8
 }
 
@@ -146,7 +149,19 @@ func (e *encoder) writeBlock(bx, by, bs, edgeFlags int) {
 		}
 		uvDelta = int(e.uvangle[sbIdx(bx, by)])
 		e.msac.symbolAdapt(cdf, nSym, uint32(uvMode))
-		if int(bDim[2])+int(bDim[3]) >= 2 && directional(uvMode) {
+		if uvMode == cflPred {
+			a := e.cfla[sbIdx(bx, by)]
+			su, sv := cflSign(int(a[0])), cflSign(int(a[1]))
+			e.msac.symbolAdapt(e.cdf.m.cflSign[:], 7, uint32(su*3+sv-1))
+			if su != 0 {
+				e.msac.symbolAdapt(e.cdf.m.cflAlpha[b2i(su == 2)*3+sv][:], 15,
+					uint32(abs(int(a[0]))-1))
+			}
+			if sv != 0 {
+				e.msac.symbolAdapt(e.cdf.m.cflAlpha[b2i(sv == 2)*3+su][:], 15,
+					uint32(abs(int(a[1]))-1))
+			}
+		} else if int(bDim[2])+int(bDim[3]) >= 2 && directional(uvMode) {
 			e.msac.symbolAdapt(e.cdf.m.angleDelta[uvMode-vertPred][:], 6, uint32(uvDelta+3))
 		}
 	}
@@ -360,12 +375,12 @@ func (e *encoder) saveState(bx, by, bl int, s *sbState) {
 }
 
 func (e *encoder) saveDec(d *decState) {
-	d.ymode, d.uvmode, d.bskip = e.ymode, e.uvmode, e.bskip
+	d.ymode, d.uvmode, d.bskip, d.cfla = e.ymode, e.uvmode, e.bskip, e.cfla
 	d.yangle, d.uvangle, d.part = e.yangle, e.uvangle, e.part
 }
 
 func (e *encoder) restoreDec(d *decState) {
-	e.ymode, e.uvmode, e.bskip = d.ymode, d.uvmode, d.bskip
+	e.ymode, e.uvmode, e.bskip, e.cfla = d.ymode, d.uvmode, d.bskip, d.cfla
 	e.yangle, e.uvangle, e.part = d.yangle, d.uvangle, d.part
 }
 
