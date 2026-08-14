@@ -81,3 +81,68 @@ done:
 	MOVWU R10, R10
 	MOVD R10, ret+56(FP)
 	RET
+
+// sseNEON is the sum of squared differences, eight pixels a step.
+TEXT ·sseNEON(SB), NOSPLIT, $0-56
+	MOVD dst+0(FP), R1
+	MOVD stride+8(FP), R2
+	MOVD src+16(FP), R3
+	MOVD sstride+24(FP), R4
+	MOVD w+32(FP), R5
+	MOVD h+40(FP), R6
+	VEOR V7.B16, V7.B16, V7.B16
+
+	CMP $4, R5
+	BEQ snarrow
+
+swide:
+	MOVD R5, R7
+	MOVD R3, R8
+	MOVD R1, R9
+
+swcol:
+	MOVD   (R8), R10
+	VMOV   R10, V0.D[0]
+	MOVD   (R9), R11
+	VMOV   R11, V1.D[0]
+	VUSHLL $0, V0.B8, V2.H8
+	VUSHLL $0, V1.B8, V3.H8
+	VSUB   V3.H8, V2.H8, V4.H8
+	SMLAL(4, 4, 7)
+	SMLAL2(4, 4, 7)
+	ADD    $8, R8
+	ADD    $8, R9
+	SUB    $8, R7
+	CBNZ   R7, swcol
+
+	ADD  R4, R3
+	ADD  R2, R1
+	SUB  $1, R6
+	CBNZ R6, swide
+	B    sdone
+
+snarrow:
+	MOVWU  (R3), R10
+	MOVWU  (R3)(R4), R11
+	ORR    R11<<32, R10, R10
+	VMOV   R10, V0.D[0]
+	MOVWU  (R1), R12
+	MOVWU  (R1)(R2), R13
+	ORR    R13<<32, R12, R12
+	VMOV   R12, V1.D[0]
+	VUSHLL $0, V0.B8, V2.H8
+	VUSHLL $0, V1.B8, V3.H8
+	VSUB   V3.H8, V2.H8, V4.H8
+	SMLAL(4, 4, 7)
+	SMLAL2(4, 4, 7)
+	ADD    R4<<1, R3
+	ADD    R2<<1, R1
+	SUB    $2, R6
+	CBNZ   R6, snarrow
+
+sdone:
+	ADDV4S(7, 0)
+	VMOV  V0.S[0], R10
+	MOVWU R10, R10
+	MOVD  R10, ret+48(FP)
+	RET
