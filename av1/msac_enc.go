@@ -6,6 +6,8 @@ type msacEncoder struct {
 	cnt            int
 	precarry       []uint16
 	allowUpdateCdf bool
+	count          bool
+	bits           float64
 }
 
 func (e *msacEncoder) init(disableCdfUpdate bool) {
@@ -42,6 +44,11 @@ func (e *msacEncoder) renorm(lowIncr, rng uint32) {
 }
 
 func (e *msacEncoder) boolEqui(bit uint32) {
+	if e.count {
+		e.bits++
+
+		return
+	}
 	r := e.rng
 	v := (r>>8)<<7 + ecMinProb
 	if bit != 0 {
@@ -53,6 +60,11 @@ func (e *msacEncoder) boolEqui(bit uint32) {
 }
 
 func (e *msacEncoder) boolF(bit, f uint32) {
+	if e.count {
+		e.bits += boolFBits(f, bit)
+
+		return
+	}
 	r := e.rng
 	v := (r>>8)*(f>>ecProbShift)>>(7-ecProbShift) + ecMinProb
 	if bit != 0 {
@@ -65,12 +77,20 @@ func (e *msacEncoder) boolF(bit, f uint32) {
 
 func (e *msacEncoder) boolAdapt(cdf []uint16, bit uint32) {
 	e.boolF(bit, uint32(cdf[0]))
+	if e.count {
+		return
+	}
 	if e.allowUpdateCdf {
 		cdfUpdateBool(cdf, bit)
 	}
 }
 
 func (e *msacEncoder) symbolAdapt(cdf []uint16, nSymbols int, val uint32) {
+	if e.count {
+		e.bits += cdfBits(cdf, int(val))
+
+		return
+	}
 	r := e.rng >> 8
 	n := uint32(nSymbols)
 

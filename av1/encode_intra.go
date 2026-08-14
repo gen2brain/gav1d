@@ -10,17 +10,37 @@ var intraModes = [nIntraPredModes]int{
 	smoothPred, smoothVPred, smoothHPred, paethPred,
 }
 
-func cdfBits(cdf []uint16, val int) float64 {
-	hi := float64(1 << 15)
-	if val > 0 {
-		hi = float64(cdf[val-1])
+var log2Tab [1<<15 + 1]float32
+
+func init() {
+	for i := 1; i < len(log2Tab); i++ {
+		log2Tab[i] = float32(15 - math.Log2(float64(i)))
 	}
-	p := (hi - float64(cdf[val])) / (1 << 15)
-	if p <= 0 {
+	log2Tab[0] = 24
+}
+
+func boolFBits(f, bit uint32) float64 {
+	if bit == 0 {
+		f = 1<<15 - f
+	}
+	if f > 1<<15 {
 		return 24
 	}
 
-	return -math.Log2(p)
+	return float64(log2Tab[f])
+}
+
+func cdfBits(cdf []uint16, val int) float64 {
+	hi := uint32(1 << 15)
+	if val > 0 {
+		hi = uint32(cdf[val-1])
+	}
+	lo := uint32(cdf[val])
+	if lo >= hi {
+		return 24
+	}
+
+	return float64(log2Tab[hi-lo])
 }
 
 var levelBits [16]float64
@@ -29,27 +49,6 @@ func init() {
 	for i := range levelBits {
 		levelBits[i] = 3 + 2*math.Log2(float64(i)+1)
 	}
-}
-
-func rateBits(lv []int32, scan []uint16, eob int) float64 {
-	if eob < 0 {
-		return 1
-	}
-	bits := 4 + 0.3*float64(eob)
-	for i := 0; i <= eob; i++ {
-		l := abs32(lv[scan[i]])
-		if l == 0 {
-			continue
-		}
-		if int(l) < len(levelBits) {
-			bits += levelBits[l]
-
-			continue
-		}
-		bits += 3 + 2*math.Log2(float64(l)+1)
-	}
-
-	return bits
 }
 
 func sse(dst []uint8, off, stride int, src []uint8, sstride, sw, sh, px, py, w, h int) float64 {
@@ -150,14 +149,19 @@ func satd(res []int32, w, h int) int32 {
 
 func residual(res []int32, dst []uint8, off, stride int, src []uint8, sstride,
 	sw, sh, px, py, w, h int,
-) {
+) float64 {
+	var ssd int64
 	for j := range h {
 		sy := min(py+j, sh-1)
 		row := j * w
 		for i := range w {
-			res[row+i] = int32(src[sy*sstride+min(px+i, sw-1)]) - int32(dst[off+j*stride+i])
+			d := int32(src[sy*sstride+min(px+i, sw-1)]) - int32(dst[off+j*stride+i])
+			res[row+i] = d
+			ssd += int64(d) * int64(d)
 		}
 	}
+
+	return float64(ssd)
 }
 
 func txEdge(sbHasTr, sbHasBl, initX, initY, x, y, tw4, th4, subW4, subH4 int) int {
@@ -301,19 +305,20 @@ func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int, f
 		return float64(satd(e.res[:], tw, th)) + e.lambda*e.modeBits(m, delta, cdf)
 	}
 
+	cc := coefCtx{a: ab.lcoef[:], l: e.l.lcoef[:]}
 	trial := func(m, delta int) (float64, float64) {
 		pred(m, delta)
 		bits := e.lambda * e.modeBits(m, delta, cdf)
-		skip := sse(e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
-			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tw, th) + bits
 
 		eob := e.quantTx(e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
 			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tx, dctDct)
+		skip := e.predSSE + bits
+		rate := e.coefBits(&cc, bx4, by4, tx, bs, 0, m)
 		e.reconTx(e.recon, off, e.stride, tx, dctDct, eob)
 
 		return sse(e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
 			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tw, th) +
-			bits + e.lambda*rateBits(e.lv[:], scans[tx], eob), skip
+			bits + e.lambda*rate, skip
 	}
 
 	var pre [nIntraPredModes]float64
@@ -399,16 +404,16 @@ func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int,
 		skip := c
 		for pl := range 2 {
 			src := plane(pl)
+			cc := coefCtx{a: ab.ccoef[pl][:], l: e.l.ccoef[pl][:]}
 			pred(pl, m, delta)
-			skip += sse(e.reconC[pl], off, e.cstride, src, e.cfg.SrcUVStride,
-				e.cw, e.ch, 4*cbx, 4*cby, tw, th)
-
 			eob := e.quantTx(e.reconC[pl], off, e.cstride, src, e.cfg.SrcUVStride,
 				e.cw, e.ch, 4*cbx, 4*cby, tx, txtp)
+			skip += e.predSSE
+			rate := e.coefBits(&cc, cbx4, cby4, tx, bs, 1+pl, m)
 			e.reconTx(e.reconC[pl], off, e.cstride, tx, txtp, eob)
 			c += sse(e.reconC[pl], off, e.cstride, src, e.cfg.SrcUVStride,
 				e.cw, e.ch, 4*cbx, 4*cby, tw, th) +
-				e.lambda*rateBits(e.lv[:], scans[tx], eob)
+				e.lambda*rate
 		}
 
 		return c, skip
@@ -450,6 +455,15 @@ func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int,
 	return best, bestDelta, bestCost, bestSkip
 }
 
+func (e *encoder) coefBits(cc *coefCtx, aOff, lOff, tx, bs, plane, mode int) float64 {
+	e.msac.count = true
+	e.msac.bits = 0
+	e.writeCoefs(cc, aOff, lOff, tx, bs, plane, uint8(mode), e.lv[:], e.levels[:])
+	e.msac.count = false
+
+	return e.msac.bits
+}
+
 func (e *encoder) quantTx(dst []uint8, off, stride int, src []uint8, sstride, sw, sh,
 	px, py, tx, txtp int,
 ) int {
@@ -457,7 +471,7 @@ func (e *encoder) quantTx(dst []uint8, off, stride int, src []uint8, sstride, sw
 	tw, th := 4*int(tDim.w), 4*int(tDim.h)
 	shift := quantShift(tx)
 
-	residual(e.res[:], dst, off, stride, src, sstride, sw, sh, px, py, tw, th)
+	e.predSSE = residual(e.res[:], dst, off, stride, src, sstride, sw, sh, px, py, tw, th)
 	fwdTxfm(e.coeff[:], e.res[:], tw, tx, txtp, e.fwd)
 
 	cw, ch := min(tw, 32), min(th, 32)

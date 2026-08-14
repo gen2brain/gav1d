@@ -24,6 +24,7 @@ type encoder struct {
 	ch      int
 	dq      [2]uint16
 	lambda  float64
+	predSSE float64
 	dsp     *dspContext[uint8]
 	itx     []int32
 	fwd     []int32
@@ -38,9 +39,12 @@ type encoder struct {
 	yangle  [256]int8
 	uvangle [256]int8
 	bskip   [256]uint8
-	split   [nBlLevels][256]bool
+	part    [nBlLevels][256]uint8
+	rect    [4]int
 	entry   [nBlLevels]sbState
 	kept    [nBlLevels]sbState
+	dentry  [nBlLevels]decState
+	dkept   [nBlLevels]decState
 }
 
 type sbState struct {
@@ -48,6 +52,15 @@ type sbState struct {
 	chr  [2][32 * 32]uint8
 	a    blockContext
 	l    blockContext
+}
+
+type decState struct {
+	ymode   [256]uint8
+	uvmode  [256]uint8
+	yangle  [256]int8
+	uvangle [256]int8
+	bskip   [256]uint8
+	part    [nBlLevels][256]uint8
 }
 
 func (e *encoder) init(c *encConfig, seq *sequenceHeader) {
@@ -62,6 +75,7 @@ func (e *encoder) init(c *encConfig, seq *sequenceHeader) {
 	}
 	e.ssHor = b2i(e.layout != pixelLayoutI444)
 	e.ssVer = b2i(e.layout == pixelLayoutI420)
+	e.rect = [4]int{partitionNone, partitionH, partitionV, partitionSplit}
 	e.maxBl, e.minBl = bl64x64, bl64x64
 	if c.Src != nil {
 		e.maxBl, e.minBl = bl32x32, bl8x8
@@ -191,53 +205,58 @@ func (e *encoder) writeSb(bx, by, bl int, node *edgeNode) {
 
 	bx8, by8 := (bx&31)>>1, (by&31)>>1
 	ab := &e.a[bx>>5]
-	ctx := getPartitionCtx(ab, &e.l, bl, by8, bx8)
-	pc := e.cdf.m.partition[bl][ctx][:]
-	split := e.split[bl][sbIdx(bx, by)]
+	pc := e.cdf.m.partition[bl][getPartitionCtx(ab, &e.l, bl, by8, bx8)][:]
+	bp := int(e.part[bl][sbIdx(bx, by)])
+	if bp != partitionSplit && !(haveH && haveV) {
+		bp = partitionV
+		if haveH {
+			bp = partitionH
+		}
+	}
 	n := 1 << ulog2(uint32(hsz))
 
-	if split {
+	switch {
+	case haveH && haveV:
+		e.msac.symbolAdapt(pc, int(partitionTypeCount[bl]), uint32(bp))
+	case haveH:
+		e.msac.boolF(b2u(bp == partitionSplit), gatherTopPartitionProb(pc, bl))
+	default:
+		e.msac.boolF(b2u(bp == partitionSplit), gatherLeftPartitionProb(pc, bl))
+	}
+
+	switch bp {
+	case partitionSplit:
 		switch {
 		case haveH && haveV:
-			e.msac.symbolAdapt(pc, int(partitionTypeCount[bl]), partitionSplit)
 			e.writeSb(bx, by, bl+1, node.kids[0])
 			e.writeSb(bx+hsz, by, bl+1, node.kids[1])
 			e.writeSb(bx, by+hsz, bl+1, node.kids[2])
 			e.writeSb(bx+hsz, by+hsz, bl+1, node.kids[3])
 		case haveH:
-			e.msac.boolF(1, gatherTopPartitionProb(pc, bl))
 			e.writeSb(bx, by, bl+1, node.kids[0])
 			e.writeSb(bx+hsz, by, bl+1, node.kids[1])
 		default:
-			e.msac.boolF(1, gatherLeftPartitionProb(pc, bl))
 			e.writeSb(bx, by, bl+1, node.kids[0])
 			e.writeSb(bx, by+hsz, bl+1, node.kids[2])
 		}
-
-		if bl == bl8x8 {
-			setCtx(ab.partition[:], bx8, n, alPartCtx[0][bl][partitionSplit])
-			setCtx(e.l.partition[:], by8, n, alPartCtx[1][bl][partitionSplit])
+		if bl != bl8x8 {
+			return
 		}
-
-		return
-	}
-
-	bp := partitionNone
-	edgeFlags := int(node.o)
-	switch {
-	case haveH && haveV:
-		e.msac.symbolAdapt(pc, int(partitionTypeCount[bl]), partitionNone)
-	case haveH:
-		bp = partitionH
-		edgeFlags = int(node.h[0])
-		e.msac.boolF(0, gatherTopPartitionProb(pc, bl))
+	case partitionH:
+		bs := int(blockSizes[bl][partitionH][0])
+		e.writeBlock(bx, by, bs, int(node.h[0]))
+		if haveV {
+			e.writeBlock(bx, by+hsz, bs, int(node.h[1]))
+		}
+	case partitionV:
+		bs := int(blockSizes[bl][partitionV][0])
+		e.writeBlock(bx, by, bs, int(node.v[0]))
+		if haveH {
+			e.writeBlock(bx+hsz, by, bs, int(node.v[1]))
+		}
 	default:
-		bp = partitionV
-		edgeFlags = int(node.v[0])
-		e.msac.boolF(0, gatherLeftPartitionProb(pc, bl))
+		e.writeBlock(bx, by, int(blockSizes[bl][partitionNone][0]), int(node.o))
 	}
-
-	e.writeBlock(bx, by, int(blockSizes[bl][bp][0]), edgeFlags)
 
 	setCtx(ab.partition[:], bx8, n, alPartCtx[0][bl][bp])
 	setCtx(e.l.partition[:], by8, n, alPartCtx[1][bl][bp])
@@ -329,6 +348,16 @@ func (e *encoder) saveState(bx, by, bl int, s *sbState) {
 	s.l = e.l
 }
 
+func (e *encoder) saveDec(d *decState) {
+	d.ymode, d.uvmode, d.bskip = e.ymode, e.uvmode, e.bskip
+	d.yangle, d.uvangle, d.part = e.yangle, e.uvangle, e.part
+}
+
+func (e *encoder) restoreDec(d *decState) {
+	e.ymode, e.uvmode, e.bskip = d.ymode, d.uvmode, d.bskip
+	e.yangle, e.uvangle, e.part = d.yangle, d.uvangle, d.part
+}
+
 func (e *encoder) restoreState(bx, by, bl int, s *sbState) {
 	n := (32 >> bl) * 4
 	for y := range n {
@@ -346,13 +375,9 @@ func (e *encoder) restoreState(bx, by, bl int, s *sbState) {
 	e.l = s.l
 }
 
-func partitionBits(pc []uint16, bl int, haveH, haveV, split bool) float64 {
+func partitionBits(pc []uint16, bl int, haveH, haveV bool, bp int) float64 {
 	if haveH && haveV {
-		if split {
-			return cdfBits(pc, partitionSplit)
-		}
-
-		return cdfBits(pc, partitionNone)
+		return cdfBits(pc, bp)
 	}
 
 	f := float64(gatherLeftPartitionProb(pc, bl))
@@ -360,7 +385,7 @@ func partitionBits(pc []uint16, bl int, haveH, haveV, split bool) float64 {
 		f = float64(gatherTopPartitionProb(pc, bl))
 	}
 	p := f / (1 << 15)
-	if !split {
+	if bp != partitionSplit {
 		p = 1 - p
 	}
 	if p <= 0 {
@@ -440,67 +465,90 @@ func (e *encoder) trialSb(bx, by, bl int, node *edgeNode) float64 {
 	ab := &e.a[bx>>5]
 	pc := e.cdf.m.partition[bl][getPartitionCtx(ab, &e.l, bl, by8, bx8)][:]
 	n := 1 << ulog2(uint32(hsz))
+	idx := sbIdx(bx, by)
 
-	splitKids := func() float64 {
-		c := 0.0
-		switch {
-		case haveH && haveV:
-			c += e.trialSb(bx, by, bl+1, node.kids[0])
-			c += e.trialSb(bx+hsz, by, bl+1, node.kids[1])
-			c += e.trialSb(bx, by+hsz, bl+1, node.kids[2])
-			c += e.trialSb(bx+hsz, by+hsz, bl+1, node.kids[3])
-		case haveH:
-			c += e.trialSb(bx, by, bl+1, node.kids[0])
-			c += e.trialSb(bx+hsz, by, bl+1, node.kids[1])
+	run := func(bp int) float64 {
+		c := e.lambda * partitionBits(pc, bl, haveH, haveV, bp)
+		switch bp {
+		case partitionSplit:
+			switch {
+			case haveH && haveV:
+				c += e.trialSb(bx, by, bl+1, node.kids[0])
+				c += e.trialSb(bx+hsz, by, bl+1, node.kids[1])
+				c += e.trialSb(bx, by+hsz, bl+1, node.kids[2])
+				c += e.trialSb(bx+hsz, by+hsz, bl+1, node.kids[3])
+			case haveH:
+				c += e.trialSb(bx, by, bl+1, node.kids[0])
+				c += e.trialSb(bx+hsz, by, bl+1, node.kids[1])
+			default:
+				c += e.trialSb(bx, by, bl+1, node.kids[0])
+				c += e.trialSb(bx, by+hsz, bl+1, node.kids[2])
+			}
+			if bl != bl8x8 {
+				return c
+			}
+		case partitionH:
+			bs := int(blockSizes[bl][partitionH][0])
+			c += e.trialBlock(bx, by, bs, int(node.h[0]))
+			if haveV {
+				c += e.trialBlock(bx, by+hsz, bs, int(node.h[1]))
+			}
+		case partitionV:
+			bs := int(blockSizes[bl][partitionV][0])
+			c += e.trialBlock(bx, by, bs, int(node.v[0]))
+			if haveH {
+				c += e.trialBlock(bx+hsz, by, bs, int(node.v[1]))
+			}
 		default:
-			c += e.trialSb(bx, by, bl+1, node.kids[0])
-			c += e.trialSb(bx, by+hsz, bl+1, node.kids[2])
+			c += e.trialBlock(bx, by, int(blockSizes[bl][partitionNone][0]), int(node.o))
 		}
-
-		return c
-	}
-
-	leaf := func() float64 {
-		bp, ef := partitionNone, int(node.o)
-		switch {
-		case haveH && haveV:
-		case haveH:
-			bp, ef = partitionH, int(node.h[0])
-		default:
-			bp, ef = partitionV, int(node.v[0])
-		}
-		c := e.trialBlock(bx, by, int(blockSizes[bl][bp][0]), ef)
 		setCtx(ab.partition[:], bx8, n, alPartCtx[0][bl][bp])
 		setCtx(e.l.partition[:], by8, n, alPartCtx[1][bl][bp])
 
 		return c
 	}
 
-	if bl < e.maxBl {
-		e.split[bl][sbIdx(bx, by)] = true
-
-		return e.lambda*partitionBits(pc, bl, haveH, haveV, true) + splitKids()
+	var cands []int
+	switch {
+	case bl < e.maxBl:
+		cands = e.rect[3:]
+	case !haveH:
+		cands = e.rect[2:3]
+	case !haveV:
+		cands = e.rect[1:2]
+	case bl >= e.minBl:
+		cands = e.rect[:3]
+	default:
+		cands = e.rect[:]
 	}
-	if bl >= e.minBl {
-		e.split[bl][sbIdx(bx, by)] = false
 
-		return e.lambda*partitionBits(pc, bl, haveH, haveV, false) + leaf()
+	if len(cands) == 1 {
+		e.part[bl][idx] = uint8(cands[0])
+
+		return run(cands[0])
 	}
 
 	e.saveState(bx, by, bl, &e.entry[bl])
-	splitCost := e.lambda*partitionBits(pc, bl, haveH, haveV, true) + splitKids()
-	e.saveState(bx, by, bl, &e.kept[bl])
-	e.restoreState(bx, by, bl, &e.entry[bl])
-
-	noneCost := e.lambda*partitionBits(pc, bl, haveH, haveV, false) + leaf()
-	if noneCost <= splitCost {
-		e.split[bl][sbIdx(bx, by)] = false
-
-		return noneCost
+	e.saveDec(&e.dentry[bl])
+	bestCost, bestPart := math.Inf(1), cands[0]
+	for i, bp := range cands {
+		if i > 0 {
+			e.restoreState(bx, by, bl, &e.entry[bl])
+			e.restoreDec(&e.dentry[bl])
+		}
+		if c := run(bp); c < bestCost {
+			bestCost, bestPart = c, bp
+			if i < len(cands)-1 {
+				e.saveState(bx, by, bl, &e.kept[bl])
+				e.saveDec(&e.dkept[bl])
+			}
+		}
 	}
+	if bestPart != cands[len(cands)-1] {
+		e.restoreState(bx, by, bl, &e.kept[bl])
+		e.restoreDec(&e.dkept[bl])
+	}
+	e.part[bl][idx] = uint8(bestPart)
 
-	e.restoreState(bx, by, bl, &e.kept[bl])
-	e.split[bl][sbIdx(bx, by)] = true
-
-	return splitCost
+	return bestCost
 }
