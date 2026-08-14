@@ -49,8 +49,6 @@ func TestEncodeConfig(t *testing.T) {
 	}
 
 	for name, c := range map[string]encConfig{
-		"qindex 0 is lossless, which needs the 4x4 WHT": {Width: 64, Height: 64,
-			BitDepth: 8, QIndex: 0, Monochrome: true, Src: src, SrcStride: 64},
 		"qindex past the dequant table": {Width: 64, Height: 64, BitDepth: 8,
 			QIndex: 256, Monochrome: true, Src: src, SrcStride: 64},
 		"zero width": {Width: 0, Height: 64, BitDepth: 8, QIndex: 100},
@@ -103,6 +101,10 @@ func TestEncodeDav1d(t *testing.T) {
 			Src: res, SrcStride: 256, SrcU: res[768:], SrcV: res[2560:], SrcUVStride: 128},
 		{Width: 97, Height: 33, BitDepth: 8, QIndex: 80, Monochrome: true,
 			Src: res, SrcStride: 256},
+		{Width: 64, Height: 64, BitDepth: 8, QIndex: 0, Monochrome: true,
+			Src: res, SrcStride: 256},
+		{Width: 96, Height: 64, BitDepth: 8, QIndex: 0,
+			Src: res, SrcStride: 256, SrcU: res[512:], SrcV: res[1536:], SrcUVStride: 128},
 		{Width: 33, Height: 33, BitDepth: 8, QIndex: 80,
 			Src: res, SrcStride: 256, SrcU: res[1024:], SrcV: res[2048:], SrcUVStride: 128},
 		{Width: 64, Height: 64, BitDepth: 8, QIndex: 100},
@@ -145,6 +147,64 @@ func TestEncodeDav1d(t *testing.T) {
 		}
 		t.Logf("%dx%d q=%d: %d bytes, gav1d and dav1d agree (%s)",
 			c.Width, c.Height, c.QIndex, len(data), got[:16])
+	}
+}
+
+// TestEncodeLossless holds that qindex 0 reproduces the source exactly.
+func TestEncodeLossless(t *testing.T) {
+	const stride = 96
+	src := make([]uint8, stride*stride)
+	for i := range src {
+		src[i] = uint8((i*7 + i/stride*3) & 0xff)
+	}
+
+	for _, sz := range [][2]int{{64, 64}, {96, 48}, {33, 17}} {
+		w, h := sz[0], sz[1]
+		for _, mono := range []bool{true, false} {
+			c := encConfig{Width: w, Height: h, BitDepth: 8, QIndex: 0,
+				Monochrome: mono, Src: src, SrcStride: stride}
+			if !mono {
+				c.SrcU, c.SrcV, c.SrcUVStride = src[stride:], src[3*stride:], stride
+			}
+			data := Encode(c)
+			if data == nil {
+				t.Fatalf("%dx%d mono=%v: encode returned nil", w, h, mono)
+			}
+
+			var d Decoder
+			pics, err := d.DecodeOBUs(data)
+			if err != nil {
+				t.Fatalf("%dx%d mono=%v: %v", w, h, mono, err)
+			}
+			p := pics[0]
+			for y := range h {
+				for x := range w {
+					if got, want := p.Data[0][y*p.Stride[0]+x], src[y*stride+x]; got != want {
+						t.Fatalf("%dx%d mono=%v [%d,%d]: got %d, want %d",
+							w, h, mono, x, y, got, want)
+					}
+				}
+			}
+			if !mono {
+				for pl := range 2 {
+					s := c.SrcU
+					if pl == 1 {
+						s = c.SrcV
+					}
+					for y := range (h + 1) / 2 {
+						for x := range (w + 1) / 2 {
+							got := p.Data[1+pl][y*p.Stride[1]+x]
+							if want := s[y*stride+x]; got != want {
+								t.Fatalf("%dx%d plane %d [%d,%d]: got %d, want %d",
+									w, h, 1+pl, x, y, got, want)
+							}
+						}
+					}
+				}
+			}
+			t.Logf("%dx%d mono=%v: %d bytes, exact", w, h, mono, len(data))
+			p.Release()
+		}
 	}
 }
 

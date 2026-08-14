@@ -183,7 +183,35 @@ func rectLogRatio(w, h int) int {
 
 const fwdScratch = 32*32 + 64 + 64
 
+func fwdWht4x4(coeff []int32, src []int32, srcStride int) {
+	var t [16]int32
+	for i := range 4 {
+		a := src[0*srcStride+i] + src[1*srcStride+i]
+		d := src[3*srcStride+i] - src[2*srcStride+i]
+		e := (a - d) >> 1
+		b := e - src[1*srcStride+i]
+		c := e - src[2*srcStride+i]
+		t[0*4+i], t[1*4+i], t[2*4+i], t[3*4+i] = a-c, c, d+b, b
+	}
+	for i := range 4 {
+		r := t[i*4:]
+		a := r[0] + r[1]
+		d := r[3] - r[2]
+		e := (a - d) >> 1
+		b := e - r[1]
+		c := e - r[2]
+		coeff[0*4+i], coeff[1*4+i] = (a-c)*4, c*4
+		coeff[2*4+i], coeff[3*4+i] = (d+b)*4, b*4
+	}
+}
+
 func fwdTxfm(coeff []int32, src []int32, srcStride, tx, txtp int, tmp []int32) {
+	if txtp == whtWht {
+		fwdWht4x4(coeff, src, srcStride)
+
+		return
+	}
+
 	tDim := &txfmDimensions[tx]
 	w, h := 4*int(tDim.w), 4*int(tDim.h)
 	shift := &fwdShift[tx]

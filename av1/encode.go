@@ -3,48 +3,49 @@ package av1
 import "math"
 
 type encoder struct {
-	cfg     encConfig
-	seq     sequenceHeader
-	cdf     cdfContext
-	msac    msacEncoder
-	a       []blockContext
-	l       blockContext
-	bw      int
-	bh      int
-	layout  int
-	ssHor   int
-	ssVer   int
-	maxBl   int
-	minBl   int
-	stride  int
-	recon   []uint8
-	reconC  [2][]uint8
-	cstride int
-	cw      int
-	ch      int
-	dq      [2]uint16
-	lambda  float64
-	predSSE float64
-	dsp     *dspContext[uint8]
-	itx     []int32
-	fwd     []int32
-	res     [64 * 64]int32
-	coeff   [32 * 32]int32
-	lv      [32 * 32]int32
-	cf      [32 * 32]int16
-	edge    [257]uint8
-	levels  [64 * 66]uint8
-	ymode   [256]uint8
-	uvmode  [256]uint8
-	yangle  [256]int8
-	uvangle [256]int8
-	bskip   [256]uint8
-	part    [nBlLevels][256]uint8
-	rect    [4]int
-	entry   [nBlLevels]sbState
-	kept    [nBlLevels]sbState
-	dentry  [nBlLevels]decState
-	dkept   [nBlLevels]decState
+	cfg      encConfig
+	seq      sequenceHeader
+	cdf      cdfContext
+	msac     msacEncoder
+	a        []blockContext
+	l        blockContext
+	bw       int
+	bh       int
+	layout   int
+	lossless bool
+	ssHor    int
+	ssVer    int
+	maxBl    int
+	minBl    int
+	stride   int
+	recon    []uint8
+	reconC   [2][]uint8
+	cstride  int
+	cw       int
+	ch       int
+	dq       [2]uint16
+	lambda   float64
+	predSSE  float64
+	dsp      *dspContext[uint8]
+	itx      []int32
+	fwd      []int32
+	res      [64 * 64]int32
+	coeff    [32 * 32]int32
+	lv       [32 * 32]int32
+	cf       [32 * 32]int16
+	edge     [257]uint8
+	levels   [64 * 66]uint8
+	ymode    [256]uint8
+	uvmode   [256]uint8
+	yangle   [256]int8
+	uvangle  [256]int8
+	bskip    [256]uint8
+	part     [nBlLevels][256]uint8
+	rect     [4]int
+	entry    [nBlLevels]sbState
+	kept     [nBlLevels]sbState
+	dentry   [nBlLevels]decState
+	dkept    [nBlLevels]decState
 }
 
 type sbState struct {
@@ -73,6 +74,7 @@ func (e *encoder) init(c *encConfig, seq *sequenceHeader) {
 	if c.Monochrome {
 		e.layout = pixelLayoutI400
 	}
+	e.lossless = c.QIndex == 0
 	e.ssHor = b2i(e.layout != pixelLayoutI444)
 	e.ssVer = b2i(e.layout == pixelLayoutI420)
 	e.rect = [4]int{partitionNone, partitionH, partitionV, partitionSplit}
@@ -136,7 +138,7 @@ func (e *encoder) writeBlock(bx, by, bs, edgeFlags int) {
 
 	uvMode, uvDelta := dcPred, 0
 	if hasChroma {
-		cflAllowed := b2i(cflAllowedMask&(1<<bs) != 0)
+		cflAllowed := e.cflAllowed(bs)
 		nSym := nUvIntraPredModes - 1 - (1 - cflAllowed)
 		cdf := e.cdf.m.uvMode[cflAllowed][mode][:]
 		if e.cfg.Src != nil {
@@ -181,6 +183,15 @@ func (e *encoder) writeBlock(bx, by, bs, edgeFlags int) {
 			}
 		}
 	}
+}
+
+func (e *encoder) cflAllowed(bs int) int {
+	if !e.lossless {
+		return b2i(cflAllowedMask&(1<<bs) != 0)
+	}
+	bDim := &blockDimensions[bs]
+
+	return b2i((int(bDim[0])+e.ssHor)>>e.ssHor == 1 && (int(bDim[1])+e.ssVer)>>e.ssVer == 1)
 }
 
 func (e *encoder) hasChroma(bx, by, bs int) bool {
@@ -286,7 +297,7 @@ func encConfigValid(c *encConfig) bool {
 	if c.Width < 1 || c.Height < 1 || c.BitDepth != 8 {
 		return false
 	}
-	if c.QIndex < 1 || c.QIndex > 255 {
+	if c.QIndex < 0 || c.QIndex > 255 {
 		return false
 	}
 	if c.Src != nil && c.SrcStride < c.Width {
@@ -414,7 +425,7 @@ func (e *encoder) trialBlock(bx, by, bs, edgeFlags int) float64 {
 	uvMode, uvDelta := dcPred, 0
 	hasChroma := e.hasChroma(bx, by, bs)
 	if hasChroma {
-		cflAllowed := b2i(cflAllowedMask&(1<<bs) != 0)
+		cflAllowed := e.cflAllowed(bs)
 		cdf := e.cdf.m.uvMode[cflAllowed][mode][:]
 		uvMode, uvDelta, c, sk = e.pickUvMode(bx, by, bs, edgeFlags, cdf)
 		coded += c

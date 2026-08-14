@@ -222,7 +222,21 @@ func (e *encoder) chromaTxEdge(edgeFlags, cw4, ch4, initX, initY, x, y, tw4, th4
 		min(cw4, (initX+16)>>ssHor), min(ch4, (initY+16)>>ssVer))
 }
 
+func (e *encoder) txOf(bs, plane int) int {
+	if e.lossless {
+		return tx4x4
+	}
+	if plane == 0 {
+		return int(maxTxfmSizeForBs[bs][0])
+	}
+
+	return int(maxTxfmSizeForBs[bs][e.layout])
+}
+
 func (e *encoder) txtpFor(tx, plane, mode int) int {
+	if e.lossless {
+		return whtWht
+	}
 	tDim := &txfmDimensions[tx]
 	if plane == 0 || int(tDim.max)+1 >= tx64x64 {
 		return dctDct
@@ -282,7 +296,7 @@ func (e *encoder) modeBits(mode, delta int, cdf []uint16) float64 {
 func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int, float64, float64) {
 	bDim := &blockDimensions[bs]
 	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
-	tx := int(maxTxfmSizeForBs[bs][0])
+	tx := e.txOf(bs, 0)
 	tDim := &txfmDimensions[tx]
 	tw, th := 4*int(tDim.w), 4*int(tDim.h)
 	bx4, by4 := bx&31, by&31
@@ -311,10 +325,10 @@ func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int, f
 		bits := e.lambda * e.modeBits(m, delta, cdf)
 
 		eob := e.quantTx(e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
-			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tx, dctDct)
+			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tx, e.txtpFor(tx, 0, m))
 		skip := e.predSSE + bits
 		rate := e.coefBits(&cc, bx4, by4, tx, bs, 0, m)
-		e.reconTx(e.recon, off, e.stride, tx, dctDct, eob)
+		e.reconTx(e.recon, off, e.stride, tx, e.txtpFor(tx, 0, m), eob)
 
 		return sse(e.recon, off, e.stride, e.cfg.Src, e.cfg.SrcStride,
 			e.cfg.Width, e.cfg.Height, 4*bx, 4*by, tw, th) +
@@ -364,7 +378,7 @@ func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int,
 	cw4, ch4 := (w4+ssHor)>>ssHor, (h4+ssVer)>>ssVer
 	cbx4, cby4 := (bx&31)>>ssHor, (by&31)>>ssVer
 	cbx, cby := bx>>ssHor, by>>ssVer
-	tx := int(maxTxfmSizeForBs[bs][e.layout])
+	tx := e.txOf(bs, 1)
 	tDim := &txfmDimensions[tx]
 	tw, th := 4*int(tDim.w), 4*int(tDim.h)
 	ab := &e.a[bx>>5]
@@ -518,7 +532,7 @@ func (e *encoder) reconTx(dst []uint8, off, stride, tx, txtp, eob int) {
 		}
 		e.cf[rc] = int16(d)
 	}
-	invTxfmAdd(e.dsp, dst, off, stride, e.cf[:], e.itx[:], eob, tx, txtp, 255)
+	itxfmAdd(e.dsp, dst, off, stride, e.cf[:], e.itx[:], eob, tx, txtp, 255)
 }
 
 func (e *encoder) codeTx(dst []uint8, off, stride int, src []uint8, sstride, sw, sh,
@@ -538,7 +552,7 @@ func (e *encoder) reconBlock(bx, by, bs, edgeFlags, mode, delta int, skip bool) 
 	bDim := &blockDimensions[bs]
 	w4, h4 := min(int(bDim[0]), e.bw-bx), min(int(bDim[1]), e.bh-by)
 	bx4, by4 := bx&31, by&31
-	tx := int(maxTxfmSizeForBs[bs][0])
+	tx := e.txOf(bs, 0)
 	tDim := &txfmDimensions[tx]
 	ab := &e.a[bx>>5]
 	cc := coefCtx{a: ab.lcoef[:], l: e.l.lcoef[:]}
@@ -578,7 +592,7 @@ func (e *encoder) reconChroma(bx, by, bs, edgeFlags, mode, delta int, skip bool)
 	cw4, ch4 := (w4+ssHor)>>ssHor, (h4+ssVer)>>ssVer
 	cbx4, cby4 := (bx&31)>>ssHor, (by&31)>>ssVer
 	cbx, cby := bx>>ssHor, by>>ssVer
-	tx := int(maxTxfmSizeForBs[bs][e.layout])
+	tx := e.txOf(bs, 1)
 	tDim := &txfmDimensions[tx]
 	ab := &e.a[bx>>5]
 	smFl := smUvFlag(ab, cbx4) | smUvFlag(&e.l, cby4) | angleUseEdgeFilterFlag

@@ -131,14 +131,14 @@ func writeFrameHdr(p *putBits, seq *sequenceHeader, c *encConfig) {
 
 	if c.QIndex != 0 {
 		p.bit(0)
+
+		p.bits32(0, 6)
+		p.bits32(0, 6)
+		p.bits32(0, 3)
+		p.bit(0)
+
+		p.bit(0)
 	}
-
-	p.bits32(0, 6)
-	p.bits32(0, 6)
-	p.bits32(0, 3)
-	p.bit(0)
-
-	p.bit(0)
 
 	p.bit(0)
 }
