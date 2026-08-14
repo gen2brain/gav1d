@@ -147,9 +147,27 @@ func satd(res []int32, w, h int) int32 {
 	return sum
 }
 
-func residual(res []int32, dst []uint8, off, stride int, src []uint8, sstride,
+func residualGo(res []int32, dst []uint8, off, stride int, src []uint8, sstride,
+	w, h int,
+) int64 {
+	var ssd int64
+	for j := range h {
+		s := src[j*sstride:][:w]
+		d := dst[off+j*stride:][:w]
+		r := res[j*w:][:w]
+		for i := range r {
+			v := int32(s[i]) - int32(d[i])
+			r[i] = v
+			ssd += int64(v) * int64(v)
+		}
+	}
+
+	return ssd
+}
+
+func residualEdge(res []int32, dst []uint8, off, stride int, src []uint8, sstride,
 	sw, sh, px, py, w, h int,
-) float64 {
+) int64 {
 	var ssd int64
 	for j := range h {
 		sy := min(py+j, sh-1)
@@ -161,7 +179,17 @@ func residual(res []int32, dst []uint8, off, stride int, src []uint8, sstride,
 		}
 	}
 
-	return float64(ssd)
+	return ssd
+}
+
+func residual(res []int32, dst []uint8, off, stride int, src []uint8, sstride,
+	sw, sh, px, py, w, h int,
+) float64 {
+	if px+w <= sw && py+h <= sh {
+		return float64(residualKernel(res, dst, off, stride, src[py*sstride+px:], sstride, w, h))
+	}
+
+	return float64(residualEdge(res, dst, off, stride, src, sstride, sw, sh, px, py, w, h))
 }
 
 func txEdge(sbHasTr, sbHasBl, initX, initY, x, y, tw4, th4, subW4, subH4 int) int {
