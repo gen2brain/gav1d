@@ -374,6 +374,25 @@ func (f *file) decodeSequence(o Options) (*AVIF, error) {
 	if len(colors) > 0 {
 		out.Color = f.colorInfo(f.primary(), colors[0])
 	}
+	// A track can show the same picture more than once, so nothing may go back
+	// to the pool until every frame referencing it has been converted, and a
+	// picture an image still aliases may never go back at all.
+	var distinct []*av1.Picture
+	seen := map[*av1.Picture]bool{}
+	kept := map[*av1.Picture]bool{}
+	note := func(p *av1.Picture, alias bool) {
+		if p == nil {
+			return
+		}
+		if !seen[p] {
+			seen[p] = true
+			distinct = append(distinct, p)
+		}
+		if alias {
+			kept[p] = true
+		}
+	}
+
 	for i, pic := range colors {
 		var alpha *av1.Picture
 		if i < len(alphas) {
@@ -383,12 +402,9 @@ func (f *file) decodeSequence(o Options) (*AVIF, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !aliasesPicture(img) {
-			pic.Release()
-			if alpha != nil {
-				alpha.Release()
-			}
-		}
+		alias := aliasesPicture(img)
+		note(pic, alias)
+		note(alpha, alias)
 		if o.AutoRotate {
 			if img, err = f.applyTransforms(img, f.primary()); err != nil {
 				return nil, err
@@ -402,6 +418,12 @@ func (f *file) decodeSequence(o Options) (*AVIF, error) {
 		}
 		out.Delay = append(out.Delay, d)
 	}
+	for _, p := range distinct {
+		if !kept[p] {
+			p.Release()
+		}
+	}
+
 	if len(out.Image) == 0 {
 		return nil, nil
 	}
