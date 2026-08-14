@@ -138,7 +138,7 @@ done:
 // satd8AVX2 is the sum of absolute 8x8 Hadamard coefficients. The transform is
 // separable and the sum does not care about transposition, so both passes run
 // down the columns with a transpose between them.
-TEXT ·satd8AVX2(SB), NOSPLIT, $0-24
+TEXT ·satd8AVX2(SB), NOSPLIT, $0-20
 	MOVQ res+0(FP), SI
 	MOVQ stride+8(FP), DX
 	SHLQ $2, DX
@@ -454,7 +454,7 @@ sdone:
 	VPSUBD X7, X6, o3
 
 // satd4AVX2 is the sum of absolute 4x4 Hadamard coefficients.
-TEXT ·satd4AVX2(SB), NOSPLIT, $0-24
+TEXT ·satd4AVX2(SB), NOSPLIT, $0-20
 	MOVQ res+0(FP), SI
 	MOVQ stride+8(FP), DX
 	SHLQ $2, DX
