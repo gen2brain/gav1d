@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,7 +19,7 @@ import (
 	"unsafe"
 )
 
-func planeRows(pic *Picture, w *bytes.Buffer) {
+func planeRows(pic *Picture, w io.Writer) {
 	ssHor := b2i(pic.Layout != pixelLayoutI444)
 	ssVer := b2i(pic.Layout == pixelLayoutI420)
 	bpp := 1
@@ -347,6 +348,138 @@ func TestConformance(t *testing.T) {
 	for _, k := range keys {
 		t.Logf("%4d  %s", fails[k], k)
 	}
+}
+
+// TestArgon decodes the Argon Streams conformance suite against its own md5
+// references. Directories without md5_ref hold deliberately corrupt streams,
+// where the requirement is only that the decoder returns rather than crashing.
+// The large_scale_tile suites are skipped: their references come from libaom's
+// lightfield_tile_list_decoder, a tile-list mode no ordinary AV1 decoder
+// implements -- dav1d does not match them either. Set ARGON_DIR to run it, and
+// ARGON_SUITES to pick directories.
+func TestArgon(t *testing.T) {
+	dir := os.Getenv("ARGON_DIR")
+	if dir == "" {
+		t.Skip("set ARGON_DIR")
+	}
+
+	suites, err := filepath.Glob(filepath.Join(dir, "profile*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := os.Getenv("ARGON_SUITES"); want != "" {
+		var keep []string
+		for _, s := range suites {
+			for _, w := range strings.Split(want, ",") {
+				if filepath.Base(s) == w {
+					keep = append(keep, s)
+				}
+			}
+		}
+		suites = keep
+	}
+	sort.Strings(suites)
+
+	var totExact, totMiss, totErr int
+	skip := os.Getenv("ARGON_SUITES") == ""
+	for _, suite := range suites {
+		if skip && strings.Contains(filepath.Base(suite), "large_scale_tile") {
+			continue
+		}
+		streams, _ := filepath.Glob(filepath.Join(suite, "streams", "*.obu"))
+		if len(streams) == 0 {
+			continue
+		}
+		sort.Strings(streams)
+
+		var exact, mismatch, rejected int
+		fails := map[string]int{}
+		for _, p := range streams {
+			name := strings.TrimSuffix(filepath.Base(p), ".obu")
+			ref := ""
+			if b, err := os.ReadFile(filepath.Join(suite, "md5_ref", name+".md5")); err == nil {
+				ref = strings.Fields(string(b))[0]
+			}
+			res := argonOne(p, ref)
+			switch {
+			case res == "":
+				exact++
+			case ref == "" && !strings.HasPrefix(res, "panic"):
+				// No reference: a corrupt stream may be rejected, so long as
+				// the decoder returns rather than crashing.
+				rejected++
+			default:
+				mismatch++
+				key := res
+				if i := strings.IndexByte(key, '\n'); i >= 0 {
+					key = key[:i]
+				}
+				if len(key) > 80 {
+					key = key[:80]
+				}
+				fails[key]++
+				if os.Getenv("ARGON_VERBOSE") != "" || fails[key] <= 2 {
+					t.Logf("%s/%s: %s", filepath.Base(suite), name, key)
+				}
+			}
+		}
+		totExact, totMiss, totErr = totExact+exact, totMiss+mismatch, totErr+rejected
+		if hasRef := exact+mismatch > 0 && rejected == 0; hasRef {
+			t.Logf("%-32s %4d/%4d bit-exact, %4d mismatch",
+				filepath.Base(suite), exact, len(streams), mismatch)
+		} else {
+			t.Logf("%-32s %4d/%4d decoded, %4d rejected, %4d bad",
+				filepath.Base(suite), exact, len(streams), rejected, mismatch)
+		}
+		keys := make([]string, 0, len(fails))
+		for k := range fails {
+			keys = append(keys, k)
+		}
+		sort.Slice(keys, func(i, j int) bool { return fails[keys[i]] > fails[keys[j]] })
+		for _, k := range keys {
+			t.Logf("    %4d  %s", fails[k], k)
+		}
+	}
+	t.Logf("TOTAL %d bit-exact or decoded, %d mismatch, %d rejected without reference",
+		totExact, totMiss, totErr)
+}
+
+func argonOne(path, ref string) (res string) {
+	defer func() {
+		if r := recover(); r != nil {
+			res = "panic: " + firstLine(r)
+		}
+	}()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "read: " + err.Error()
+	}
+	chunks := obuChunks(data)
+	if chunks == nil {
+		return "unknown container"
+	}
+
+	// Hash as the frames arrive: a stress stream's raw output is gigabytes.
+	h := md5.New()
+	var d Decoder
+	for _, chunk := range chunks {
+		pics, err := d.DecodeOBUs(chunk)
+		if err != nil {
+			return "decode: " + err.Error()
+		}
+		for _, pic := range pics {
+			planeRows(pic, h)
+		}
+	}
+	if ref == "" {
+		return ""
+	}
+	if hex.EncodeToString(h.Sum(nil)) != ref {
+		return "md5 mismatch"
+	}
+
+	return ""
 }
 
 func uleb(data []byte) (v uint64, n int) {

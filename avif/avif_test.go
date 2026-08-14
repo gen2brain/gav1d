@@ -267,6 +267,70 @@ func avifFiles(t *testing.T, dir string) []string {
 	return out
 }
 
+// TestCorpusRobust walks a corpus laid out as valid/, invalid/ and edge-cases/.
+// Files under valid/ must decode; the rest only have to return rather than
+// crash or hang, which is the contract those groups are collected for --
+// several of the invalid files are accepted by libavif too. Set
+// AVIF_CORPUS_DIR to run it.
+func TestCorpusRobust(t *testing.T) {
+	root := os.Getenv("AVIF_CORPUS_DIR")
+	if root == "" {
+		t.Skip("set AVIF_CORPUS_DIR")
+	}
+
+	for _, group := range []string{"valid", "invalid", "edge-cases"} {
+		dir := filepath.Join(root, group)
+		if _, err := os.Stat(dir); err != nil {
+			continue
+		}
+		var ok, failed, panicked int
+		for _, path := range avifFiles(t, dir) {
+			name := strings.TrimPrefix(path, dir+"/")
+			err, panicMsg := corpusDecode(path)
+			switch {
+			case panicMsg != "":
+				panicked++
+				t.Errorf("%s/%s: %s", group, name, panicMsg)
+			case err != nil:
+				failed++
+				if group == "valid" {
+					t.Errorf("%s/%s: %v", group, name, err)
+				} else {
+					t.Logf("%s/%s: rejected: %v", group, name, err)
+				}
+			default:
+				ok++
+				if group == "invalid" {
+					t.Logf("invalid/%s: decoded rather than rejected", name)
+				}
+			}
+		}
+		t.Logf("%-11s %3d decoded, %3d rejected, %d panicked", group, ok, failed, panicked)
+	}
+}
+
+func corpusDecode(path string) (err error, panicMsg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			panicMsg = fmt.Sprintf("panic: %v", r)
+		}
+	}()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err, ""
+	}
+	f, err := parse(memSource(data))
+	if err != nil {
+		return err, ""
+	}
+	if _, _, err := f.decodePrimary(); err != nil {
+		return err, ""
+	}
+
+	return nil, ""
+}
+
 // TestConformance decodes an external AVIF corpus, comparing every plane
 // against avifdec. Set AVIF_CONFORMANCE_DIR (colon separated) to run it.
 func TestConformance(t *testing.T) {

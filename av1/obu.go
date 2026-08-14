@@ -1496,7 +1496,8 @@ func (d *Decoder) parseOBU(data []byte) (int, error) {
 		} else if !seqHdrEqual(&seqHdr, d.seqHdr) {
 			d.frameHdr = nil
 			for i := range numRefFrames {
-				d.refs[i].frameHdr = nil
+				d.setRef(i, refState{})
+				d.cdf[i] = nil
 			}
 		}
 		d.seqHdr = &seqHdr
