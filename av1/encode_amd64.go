@@ -6,6 +6,9 @@ package av1
 func fwdTxfm8x8AVX512(res *int32, src *int32, srcStride int)
 
 //go:noescape
+func fwdTxfm16x16AVX512(res *int32, src *int32, srcStride int)
+
+//go:noescape
 func fwdTxfm16x8AVX512(res *int32, src *int32, srcStride int)
 
 //go:noescape
@@ -100,6 +103,15 @@ func fwdTxfm16x8(coeff []int32, src []int32, srcStride, txtp int) bool {
 		return false
 	}
 	fwdTxfm16x8AVX512(&coeff[0], &src[0], srcStride)
+
+	return true
+}
+
+func fwdTxfm16x16(coeff []int32, src []int32, srcStride, txtp int) bool {
+	if !hasAVX512 || txtp != dctDct {
+		return false
+	}
+	fwdTxfm16x16AVX512(&coeff[0], &src[0], srcStride)
 
 	return true
 }

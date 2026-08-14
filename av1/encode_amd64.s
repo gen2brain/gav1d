@@ -1193,3 +1193,296 @@ TEXT ·fwdTxfm16x8AVX512(SB), NOSPLIT, $0-24
 	VMOVDQU Y15, 480(DI)
 	VZEROUPPER
 	RET
+
+DATA fwd12Const<>+0(SB)/4, $2896
+DATA fwd12Const<>+4(SB)/4, $1567
+DATA fwd12Const<>+8(SB)/4, $3784
+DATA fwd12Const<>+12(SB)/4, $799
+DATA fwd12Const<>+16(SB)/4, $4017
+DATA fwd12Const<>+20(SB)/4, $3406
+DATA fwd12Const<>+24(SB)/4, $2276
+DATA fwd12Const<>+28(SB)/4, $401
+DATA fwd12Const<>+32(SB)/4, $4076
+DATA fwd12Const<>+36(SB)/4, $3166
+DATA fwd12Const<>+40(SB)/4, $2598
+DATA fwd12Const<>+44(SB)/4, $1931
+DATA fwd12Const<>+48(SB)/4, $3612
+DATA fwd12Const<>+52(SB)/4, $3920
+DATA fwd12Const<>+56(SB)/4, $1189
+DATA fwd12Const<>+60(SB)/4, $2048
+GLOBL fwd12Const<>(SB), RODATA|NOPTR, $64
+
+// The 16 point transform is needed at two cos_bit values -- 13 down the columns
+// and 12 along the rows at 16x16 -- so these take the constant table and the
+// shift as parameters rather than being written twice.
+#define RSZ(T, sh, v) \
+	VPADDD.BCST T+60(SB), v, v \
+	VPSRAD      sh, v, v
+
+#define MULZ(k, a, dst) \
+	VPMULLD.BCST k, a, dst
+
+#define BTFZ(T, sh, ka, a, kb, b, t, dst) \
+	MULZ(ka, a, dst) \
+	MULZ(kb, b, t) \
+	VPADDD t, dst, dst \
+	RSZ(T, sh, dst)
+
+#define BTFNZ(T, sh, ka, a, kb, b, t, dst) \
+	MULZ(ka, a, dst) \
+	MULZ(kb, b, t) \
+	VPSUBD t, dst, dst \
+	RSZ(T, sh, dst)
+
+#define BFLYZ(lo, hi, t) \
+	VPSUBD    hi, lo, t \
+	VPADDD    hi, lo, lo \
+	VMOVDQU32 t, hi
+
+#define HALF32Z(T, sh, a, b, dlo, dhi, t0, t1) \
+	VPSUBD a, b, t0 \
+	VPADDD a, b, t1 \
+	MULZ(T+0(SB), t0, dlo) \
+	RSZ(T, sh, dlo) \
+	MULZ(T+0(SB), t1, dhi) \
+	RSZ(T, sh, dhi)
+
+#define FDCT16Z(T, sh) \
+	BFLYZ(Z0, Z15, Z16) \
+	BFLYZ(Z1, Z14, Z16) \
+	BFLYZ(Z2, Z13, Z16) \
+	BFLYZ(Z3, Z12, Z16) \
+	BFLYZ(Z4, Z11, Z16) \
+	BFLYZ(Z5, Z10, Z16) \
+	BFLYZ(Z6, Z9, Z16) \
+	BFLYZ(Z7, Z8, Z16) \
+	\
+	BFLYZ(Z0, Z7, Z16) \
+	BFLYZ(Z1, Z6, Z16) \
+	BFLYZ(Z2, Z5, Z16) \
+	BFLYZ(Z3, Z4, Z16) \
+	HALF32Z(T, sh, Z10, Z13, Z10, Z13, Z16, Z17) \
+	HALF32Z(T, sh, Z11, Z12, Z11, Z12, Z16, Z17) \
+	\
+	BFLYZ(Z0, Z3, Z16) \
+	BFLYZ(Z1, Z2, Z16) \
+	HALF32Z(T, sh, Z5, Z6, Z5, Z6, Z16, Z17) \
+	BFLYZ(Z8, Z11, Z16) \
+	BFLYZ(Z9, Z10, Z16) \
+	BFLYZ(Z15, Z12, Z16) \
+	BFLYZ(Z14, Z13, Z16) \
+	\
+	HALF32Z(T, sh, Z1, Z0, Z1, Z0, Z16, Z17) \
+	BTFZ(T, sh, T+4(SB), Z2, T+8(SB), Z3, Z18, Z16) \
+	BTFNZ(T, sh, T+4(SB), Z3, T+8(SB), Z2, Z19, Z17) \
+	VMOVDQU32 Z16, Z2 \
+	VMOVDQU32 Z17, Z3 \
+	BFLYZ(Z4, Z5, Z16) \
+	BFLYZ(Z7, Z6, Z16) \
+	BTFNZ(T, sh, T+4(SB), Z14, T+8(SB), Z9, Z18, Z16) \
+	BTFZ(T, sh, T+8(SB), Z14, T+4(SB), Z9, Z19, Z17) \
+	VMOVDQU32 Z16, Z9 \
+	VMOVDQU32 Z17, Z14 \
+	BTFNZ(T, sh, T+4(SB), Z13, T+8(SB), Z10, Z18, Z16) \
+	MULZ(T+4(SB), Z10, Z17) \
+	MULZ(T+8(SB), Z13, Z18) \
+	VPADDD Z18, Z17, Z17 \
+	VPBROADCASTD T+60(SB), Z19 \
+	VPSUBD Z17, Z19, Z17 \
+	VPSRAD sh, Z17, Z17 \
+	VMOVDQU32 Z16, Z13 \
+	VMOVDQU32 Z17, Z10 \
+	\
+	BTFZ(T, sh, T+12(SB), Z4, T+16(SB), Z7, Z20, Z16) \
+	BTFZ(T, sh, T+20(SB), Z5, T+24(SB), Z6, Z21, Z17) \
+	BTFNZ(T, sh, T+20(SB), Z6, T+24(SB), Z5, Z22, Z18) \
+	BTFNZ(T, sh, T+12(SB), Z7, T+16(SB), Z4, Z23, Z19) \
+	VMOVDQU32 Z16, Z4 \
+	VMOVDQU32 Z17, Z5 \
+	VMOVDQU32 Z18, Z6 \
+	VMOVDQU32 Z19, Z7 \
+	BFLYZ(Z8, Z9, Z16) \
+	BFLYZ(Z11, Z10, Z16) \
+	BFLYZ(Z12, Z13, Z16) \
+	BFLYZ(Z15, Z14, Z16) \
+	\
+	BTFZ(T, sh, T+28(SB), Z8, T+32(SB), Z15, Z24, Z16) \
+	BTFZ(T, sh, T+36(SB), Z9, T+40(SB), Z14, Z24, Z17) \
+	BTFZ(T, sh, T+44(SB), Z10, T+48(SB), Z13, Z24, Z18) \
+	BTFZ(T, sh, T+52(SB), Z11, T+56(SB), Z12, Z24, Z19) \
+	BTFNZ(T, sh, T+52(SB), Z12, T+56(SB), Z11, Z24, Z20) \
+	BTFNZ(T, sh, T+44(SB), Z13, T+48(SB), Z10, Z24, Z21) \
+	BTFNZ(T, sh, T+36(SB), Z14, T+40(SB), Z9, Z24, Z22) \
+	BTFNZ(T, sh, T+28(SB), Z15, T+32(SB), Z8, Z24, Z23) \
+	VMOVDQU32 Z16, Z8 \
+	VMOVDQU32 Z17, Z9 \
+	VMOVDQU32 Z18, Z10 \
+	VMOVDQU32 Z19, Z11 \
+	VMOVDQU32 Z20, Z12 \
+	VMOVDQU32 Z21, Z13 \
+	VMOVDQU32 Z22, Z14 \
+	VMOVDQU32 Z23, Z15
+
+// T16 transposes sixteen rows of sixteen, ping-ponging between Z0..Z15 and
+// Z16..Z31: dword unpacks, quadword unpacks, then two rounds of 128 bit lane
+// selects.
+#define T16(i0, i1, i2, i3, i4, i5, i6, i7, i8, i9, i10, i11, i12, i13, i14, i15) \
+	VPUNPCKLDQ i1, i0, Z16 \
+	VPUNPCKHDQ i1, i0, Z17 \
+	VPUNPCKLDQ i3, i2, Z18 \
+	VPUNPCKHDQ i3, i2, Z19 \
+	VPUNPCKLDQ i5, i4, Z20 \
+	VPUNPCKHDQ i5, i4, Z21 \
+	VPUNPCKLDQ i7, i6, Z22 \
+	VPUNPCKHDQ i7, i6, Z23 \
+	VPUNPCKLDQ i9, i8, Z24 \
+	VPUNPCKHDQ i9, i8, Z25 \
+	VPUNPCKLDQ i11, i10, Z26 \
+	VPUNPCKHDQ i11, i10, Z27 \
+	VPUNPCKLDQ i13, i12, Z28 \
+	VPUNPCKHDQ i13, i12, Z29 \
+	VPUNPCKLDQ i15, i14, Z30 \
+	VPUNPCKHDQ i15, i14, Z31 \
+	VPUNPCKLQDQ Z18, Z16, Z0 \
+	VPUNPCKHQDQ Z18, Z16, Z1 \
+	VPUNPCKLQDQ Z19, Z17, Z2 \
+	VPUNPCKHQDQ Z19, Z17, Z3 \
+	VPUNPCKLQDQ Z22, Z20, Z4 \
+	VPUNPCKHQDQ Z22, Z20, Z5 \
+	VPUNPCKLQDQ Z23, Z21, Z6 \
+	VPUNPCKHQDQ Z23, Z21, Z7 \
+	VPUNPCKLQDQ Z26, Z24, Z8 \
+	VPUNPCKHQDQ Z26, Z24, Z9 \
+	VPUNPCKLQDQ Z27, Z25, Z10 \
+	VPUNPCKHQDQ Z27, Z25, Z11 \
+	VPUNPCKLQDQ Z30, Z28, Z12 \
+	VPUNPCKHQDQ Z30, Z28, Z13 \
+	VPUNPCKLQDQ Z31, Z29, Z14 \
+	VPUNPCKHQDQ Z31, Z29, Z15 \
+	VSHUFI32X4 $0x88, Z4, Z0, Z16 \
+	VSHUFI32X4 $0x88, Z12, Z8, Z17 \
+	VSHUFI32X4 $0xdd, Z4, Z0, Z18 \
+	VSHUFI32X4 $0xdd, Z12, Z8, Z19 \
+	VSHUFI32X4 $0x88, Z17, Z16, Z0 \
+	VSHUFI32X4 $0x88, Z19, Z18, Z4 \
+	VSHUFI32X4 $0xdd, Z17, Z16, Z8 \
+	VSHUFI32X4 $0xdd, Z19, Z18, Z12 \
+	VSHUFI32X4 $0x88, Z5, Z1, Z16 \
+	VSHUFI32X4 $0x88, Z13, Z9, Z17 \
+	VSHUFI32X4 $0xdd, Z5, Z1, Z18 \
+	VSHUFI32X4 $0xdd, Z13, Z9, Z19 \
+	VSHUFI32X4 $0x88, Z17, Z16, Z1 \
+	VSHUFI32X4 $0x88, Z19, Z18, Z5 \
+	VSHUFI32X4 $0xdd, Z17, Z16, Z9 \
+	VSHUFI32X4 $0xdd, Z19, Z18, Z13 \
+	VSHUFI32X4 $0x88, Z6, Z2, Z16 \
+	VSHUFI32X4 $0x88, Z14, Z10, Z17 \
+	VSHUFI32X4 $0xdd, Z6, Z2, Z18 \
+	VSHUFI32X4 $0xdd, Z14, Z10, Z19 \
+	VSHUFI32X4 $0x88, Z17, Z16, Z2 \
+	VSHUFI32X4 $0x88, Z19, Z18, Z6 \
+	VSHUFI32X4 $0xdd, Z17, Z16, Z10 \
+	VSHUFI32X4 $0xdd, Z19, Z18, Z14 \
+	VSHUFI32X4 $0x88, Z7, Z3, Z16 \
+	VSHUFI32X4 $0x88, Z15, Z11, Z17 \
+	VSHUFI32X4 $0xdd, Z7, Z3, Z18 \
+	VSHUFI32X4 $0xdd, Z15, Z11, Z19 \
+	VSHUFI32X4 $0x88, Z17, Z16, Z3 \
+	VSHUFI32X4 $0x88, Z19, Z18, Z7 \
+	VSHUFI32X4 $0xdd, Z17, Z16, Z11 \
+	VSHUFI32X4 $0xdd, Z19, Z18, Z15
+
+#define DOWN2(v) \
+	VPADDD.BCST KTWO, v, v \
+	VPSRAD      $2, v, v
+
+// fwdTxfm16x16AVX512 is the 16x16 DCT_DCT forward transform. The row pass runs
+// at cos_bit 12, which is why the butterfly takes its table as a parameter.
+TEXT ·fwdTxfm16x16AVX512(SB), NOSPLIT, $0-24
+	MOVQ res+0(FP), DI
+	MOVQ src+8(FP), SI
+	MOVQ srcStride+16(FP), DX
+	SHLQ $2, DX
+
+	VMOVDQU32 (SI), Z0
+	VMOVDQU32 (SI)(DX*1), Z1
+	LEAQ      (SI)(DX*2), AX
+	VMOVDQU32 (AX), Z2
+	VMOVDQU32 (AX)(DX*1), Z3
+	LEAQ      (AX)(DX*2), AX
+	VMOVDQU32 (AX), Z4
+	VMOVDQU32 (AX)(DX*1), Z5
+	LEAQ      (AX)(DX*2), AX
+	VMOVDQU32 (AX), Z6
+	VMOVDQU32 (AX)(DX*1), Z7
+	LEAQ      (AX)(DX*2), AX
+	VMOVDQU32 (AX), Z8
+	VMOVDQU32 (AX)(DX*1), Z9
+	LEAQ      (AX)(DX*2), AX
+	VMOVDQU32 (AX), Z10
+	VMOVDQU32 (AX)(DX*1), Z11
+	LEAQ      (AX)(DX*2), AX
+	VMOVDQU32 (AX), Z12
+	VMOVDQU32 (AX)(DX*1), Z13
+	LEAQ      (AX)(DX*2), AX
+	VMOVDQU32 (AX), Z14
+	VMOVDQU32 (AX)(DX*1), Z15
+
+	VPSLLD $2, Z0, Z0
+	VPSLLD $2, Z1, Z1
+	VPSLLD $2, Z2, Z2
+	VPSLLD $2, Z3, Z3
+	VPSLLD $2, Z4, Z4
+	VPSLLD $2, Z5, Z5
+	VPSLLD $2, Z6, Z6
+	VPSLLD $2, Z7, Z7
+	VPSLLD $2, Z8, Z8
+	VPSLLD $2, Z9, Z9
+	VPSLLD $2, Z10, Z10
+	VPSLLD $2, Z11, Z11
+	VPSLLD $2, Z12, Z12
+	VPSLLD $2, Z13, Z13
+	VPSLLD $2, Z14, Z14
+	VPSLLD $2, Z15, Z15
+
+	FDCT16Z(fwd16Const<>, $13)
+
+	T16(Z0, Z8, Z4, Z12, Z2, Z10, Z6, Z14, Z1, Z9, Z5, Z13, Z3, Z11, Z7, Z15)
+
+	FDCT16Z(fwd12Const<>, $12)
+
+	DOWN2(Z0)
+	DOWN2(Z1)
+	DOWN2(Z2)
+	DOWN2(Z3)
+	DOWN2(Z4)
+	DOWN2(Z5)
+	DOWN2(Z6)
+	DOWN2(Z7)
+	DOWN2(Z8)
+	DOWN2(Z9)
+	DOWN2(Z10)
+	DOWN2(Z11)
+	DOWN2(Z12)
+	DOWN2(Z13)
+	DOWN2(Z14)
+	DOWN2(Z15)
+
+	VMOVDQU32 Z0, 0(DI)
+	VMOVDQU32 Z8, 64(DI)
+	VMOVDQU32 Z4, 128(DI)
+	VMOVDQU32 Z12, 192(DI)
+	VMOVDQU32 Z2, 256(DI)
+	VMOVDQU32 Z10, 320(DI)
+	VMOVDQU32 Z6, 384(DI)
+	VMOVDQU32 Z14, 448(DI)
+	VMOVDQU32 Z1, 512(DI)
+	VMOVDQU32 Z9, 576(DI)
+	VMOVDQU32 Z5, 640(DI)
+	VMOVDQU32 Z13, 704(DI)
+	VMOVDQU32 Z3, 768(DI)
+	VMOVDQU32 Z11, 832(DI)
+	VMOVDQU32 Z7, 896(DI)
+	VMOVDQU32 Z15, 960(DI)
+	VZEROUPPER
+	RET

@@ -48,6 +48,10 @@ func fwdTxfm16x8(coeff []int32, src []int32, srcStride, txtp int) bool {
 	return false
 }
 
+func fwdTxfm16x16(coeff []int32, src []int32, srcStride, txtp int) bool {
+	return false
+}
+
 func satd8Kernel(res []int32, off, stride int) int32 {
 	return satd8NEON(&res[off], stride)
 }
