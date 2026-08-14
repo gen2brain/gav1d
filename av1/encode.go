@@ -3,7 +3,7 @@ package av1
 import "math"
 
 type encoder struct {
-	cfg      encConfig
+	cfg      EncodeConfig
 	seq      sequenceHeader
 	cdf      cdfContext
 	msac     msacEncoder
@@ -68,7 +68,7 @@ type decState struct {
 	part    [nBlLevels][256]uint8
 }
 
-func (e *encoder) init(c *encConfig, seq *sequenceHeader) {
+func (e *encoder) init(c *EncodeConfig, seq *sequenceHeader) {
 	e.cfg = *c
 	e.seq = *seq
 	e.bw = ((c.Width + 7) >> 3) << 1
@@ -352,7 +352,7 @@ func (e *encoder) writeTile() []byte {
 	return e.msac.done()
 }
 
-func encConfigValid(c *encConfig) bool {
+func encodeConfigValid(c *EncodeConfig) bool {
 	if c.Width < 1 || c.Height < 1 || c.BitDepth != 8 {
 		return false
 	}
@@ -369,8 +369,11 @@ func encConfigValid(c *encConfig) bool {
 	return c.Monochrome || c.Src == nil || (c.SrcU != nil && c.SrcV != nil)
 }
 
-func Encode(c encConfig) []byte {
-	if !encConfigValid(&c) {
+// Encode writes c as one all-intra AV1 temporal unit: a temporal delimiter, a
+// sequence header and a single frame OBU. It returns nil if the configuration
+// is not one the encoder accepts.
+func Encode(c EncodeConfig) []byte {
+	if !encodeConfigValid(&c) {
 		return nil
 	}
 

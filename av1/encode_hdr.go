@@ -1,13 +1,27 @@
 package av1
 
-type encConfig struct {
-	Width       int
-	Height      int
-	BitDepth    int
-	QIndex      int
-	Monochrome  bool
-	Src         []uint8
-	SrcStride   int
+// EncodeConfig describes one all-intra key frame for [Encode]. The source
+// planes are 8-bit, with chroma at half resolution in both directions unless
+// Monochrome is set. A nil Src encodes a mid-gray frame.
+type EncodeConfig struct {
+	// Width and Height are the frame size in luma samples, at least 1.
+	Width  int
+	Height int
+	// BitDepth must be 8.
+	BitDepth int
+	// QIndex is the quantizer, 0 to 255, where 0 is lossless.
+	QIndex int
+	// Monochrome encodes luma only, leaving SrcU and SrcV unused.
+	Monochrome bool
+	// FullRange signals that the samples span 0 to 255 rather than the
+	// studio swing of 16 to 235 for luma and 16 to 240 for chroma. It only
+	// sets color_range in the sequence header; the samples are coded as given.
+	FullRange bool
+	// Src is the luma plane, SrcStride its row stride, which is at least Width.
+	Src       []uint8
+	SrcStride int
+	// SrcU and SrcV are the chroma planes, each (Width+1)/2 by (Height+1)/2
+	// samples, sharing the row stride SrcUVStride.
 	SrcU        []uint8
 	SrcV        []uint8
 	SrcUVStride int
@@ -34,7 +48,7 @@ func trailingBits(p *putBits) {
 	p.bytealign()
 }
 
-func writeSeqHdr(c *encConfig) []byte {
+func writeSeqHdr(c *EncodeConfig) []byte {
 	var p putBits
 
 	p.bits32(0, 3)
@@ -60,7 +74,7 @@ func writeSeqHdr(c *encConfig) []byte {
 	p.bit(b2u(c.BitDepth > 8))
 	p.bit(b2u(c.Monochrome))
 	p.bit(0)
-	p.bit(0)
+	p.bit(b2u(c.FullRange))
 	if !c.Monochrome {
 		p.bits32(0, 2)
 		p.bit(0)
@@ -104,7 +118,7 @@ func tileLog2Bits(seq *sequenceHeader, w, h int) (int, int) {
 	return nCols, nRows
 }
 
-func writeFrameHdr(p *putBits, seq *sequenceHeader, c *encConfig) {
+func writeFrameHdr(p *putBits, seq *sequenceHeader, c *EncodeConfig) {
 	p.bit(0)
 	p.bit(0)
 

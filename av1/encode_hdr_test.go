@@ -3,7 +3,7 @@ package av1
 import "testing"
 
 func TestSeqHdrRoundtrip(t *testing.T) {
-	for _, c := range []encConfig{
+	for _, c := range []EncodeConfig{
 		{Width: 64, Height: 64, BitDepth: 8},
 		{Width: 1920, Height: 1080, BitDepth: 10},
 		{Width: 33, Height: 17, BitDepth: 8, Monochrome: true},
@@ -35,7 +35,7 @@ func TestSeqHdrRoundtrip(t *testing.T) {
 }
 
 func TestFrameHdrRoundtrip(t *testing.T) {
-	for _, c := range []encConfig{
+	for _, c := range []EncodeConfig{
 		{Width: 64, Height: 64, BitDepth: 8, QIndex: 100},
 		{Width: 320, Height: 240, BitDepth: 8, QIndex: 40},
 		{Width: 1920, Height: 1080, BitDepth: 10, QIndex: 180},

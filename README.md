@@ -27,6 +27,16 @@ for _, tu := range temporalUnits {
 }
 ```
 
+### Encoding
+
+```go
+err := avif.Encode(w, img, avif.EncodeOptions{Quality: 70})
+```
+
+The encoder is all-intra and 8-bit, at 4:2:0 or grayscale, with alpha carried as a second
+item. It searches every intra mode, partition and angle delta by rate-distortion, so it is
+accurate rather than fast: roughly 0.9s for a 512x512 image.
+
 ### Supported
 
 8/10/12-bit, 4:2:0/4:2:2/4:4:4/monochrome, film grain, scalable streams, and in the container alpha, `grid`,

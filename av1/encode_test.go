@@ -13,7 +13,7 @@ import (
 )
 
 func TestEncodeDecode(t *testing.T) {
-	for _, c := range []encConfig{
+	for _, c := range []EncodeConfig{
 		{Width: 64, Height: 64, BitDepth: 8, QIndex: 100},
 		{Width: 64, Height: 96, BitDepth: 8, QIndex: 60},
 	} {
@@ -42,13 +42,13 @@ func TestEncodeDecode(t *testing.T) {
 
 func TestEncodeConfig(t *testing.T) {
 	src := make([]uint8, 64*64)
-	ok := encConfig{Width: 64, Height: 64, BitDepth: 8, QIndex: 100,
+	ok := EncodeConfig{Width: 64, Height: 64, BitDepth: 8, QIndex: 100,
 		Monochrome: true, Src: src, SrcStride: 64}
 	if Encode(ok) == nil {
 		t.Fatal("valid config rejected")
 	}
 
-	for name, c := range map[string]encConfig{
+	for name, c := range map[string]EncodeConfig{
 		"qindex past the dequant table": {Width: 64, Height: 64, BitDepth: 8,
 			QIndex: 256, Monochrome: true, Src: src, SrcStride: 64},
 		"zero width": {Width: 0, Height: 64, BitDepth: 8, QIndex: 100},
@@ -74,7 +74,7 @@ func TestEncodeDav1d(t *testing.T) {
 		res[i] = uint8((i*7 + i/256*3) & 0xff)
 	}
 
-	for _, c := range []encConfig{
+	for _, c := range []EncodeConfig{
 		{Width: 128, Height: 96, BitDepth: 8, QIndex: 10, Monochrome: true,
 			Src: res, SrcStride: 256},
 		{Width: 128, Height: 96, BitDepth: 8, QIndex: 40, Monochrome: true,
@@ -116,6 +116,10 @@ func TestEncodeDav1d(t *testing.T) {
 		{Width: 128, Height: 128, BitDepth: 8, QIndex: 30},
 		{Width: 320, Height: 240, BitDepth: 8, QIndex: 100},
 		{Width: 640, Height: 480, BitDepth: 8, QIndex: 150},
+		{Width: 128, Height: 96, BitDepth: 8, QIndex: 40, FullRange: true,
+			Monochrome: true, Src: res, SrcStride: 256},
+		{Width: 128, Height: 128, BitDepth: 8, QIndex: 30, FullRange: true,
+			Src: res, SrcStride: 256, SrcU: res[1024:], SrcV: res[2048:], SrcUVStride: 128},
 	} {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "out.obu")
@@ -161,7 +165,7 @@ func TestEncodeLossless(t *testing.T) {
 	for _, sz := range [][2]int{{64, 64}, {96, 48}, {33, 17}} {
 		w, h := sz[0], sz[1]
 		for _, mono := range []bool{true, false} {
-			c := encConfig{Width: w, Height: h, BitDepth: 8, QIndex: 0,
+			c := EncodeConfig{Width: w, Height: h, BitDepth: 8, QIndex: 0,
 				Monochrome: mono, Src: src, SrcStride: stride}
 			if !mono {
 				c.SrcU, c.SrcV, c.SrcUVStride = src[stride:], src[3*stride:], stride
@@ -208,7 +212,7 @@ func TestEncodeLossless(t *testing.T) {
 	}
 }
 
-func encodeRecon(t *testing.T, c *encConfig) ([]byte, *encoder) {
+func encodeRecon(t *testing.T, c *EncodeConfig) ([]byte, *encoder) {
 	t.Helper()
 
 	seq := writeSeqHdr(c)
@@ -254,7 +258,7 @@ func TestEncodeChroma(t *testing.T) {
 
 	var prev int
 	for _, q := range []int{20, 100, 200} {
-		c := encConfig{Width: w, Height: h, BitDepth: 8, QIndex: q,
+		c := EncodeConfig{Width: w, Height: h, BitDepth: 8, QIndex: q,
 			Src: y, SrcStride: w, SrcU: u, SrcV: v, SrcUVStride: cw}
 		data, _ := encodeRecon(t, &c)
 
@@ -304,7 +308,7 @@ func TestEncodeResidual(t *testing.T) {
 		w, h := sz[0], sz[1]
 		for _, mono := range []bool{true, false} {
 			for _, q := range []int{20, 60, 120, 200} {
-				c := encConfig{Width: w, Height: h, BitDepth: 8, QIndex: q,
+				c := EncodeConfig{Width: w, Height: h, BitDepth: 8, QIndex: q,
 					Monochrome: mono, Src: src, SrcStride: stride}
 				if !mono {
 					c.SrcU, c.SrcV, c.SrcUVStride = src[stride:], src[3*stride:], stride
