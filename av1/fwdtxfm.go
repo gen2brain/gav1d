@@ -211,11 +211,23 @@ func fwdTxfm(coeff []int32, src []int32, srcStride, tx, txtp int, tmp []int32) {
 
 		return
 	}
-	if tx == tx4x4 && fwdTxfm4x4(coeff, src, srcStride, txtp) {
-		return
-	}
-	if tx == tx8x8 && fwdTxfm8x8(coeff, src, srcStride, txtp) {
-		return
+	switch tx {
+	case tx4x4:
+		if fwdTxfm4x4(coeff, src, srcStride, txtp) {
+			return
+		}
+	case tx8x8:
+		if fwdTxfm8x8(coeff, src, srcStride, txtp) {
+			return
+		}
+	case rtx4x8:
+		if fwdTxfm4x8(coeff, src, srcStride, txtp) {
+			return
+		}
+	case rtx8x4:
+		if fwdTxfm8x4(coeff, src, srcStride, txtp) {
+			return
+		}
 	}
 	fwdTxfmGo(coeff, src, srcStride, tx, txtp, tmp)
 }

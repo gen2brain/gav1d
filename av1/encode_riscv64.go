@@ -32,6 +32,14 @@ func fwdTxfm8x8(coeff []int32, src []int32, srcStride, txtp int) bool {
 	return false
 }
 
+func fwdTxfm4x8(coeff []int32, src []int32, srcStride, txtp int) bool {
+	return false
+}
+
+func fwdTxfm8x4(coeff []int32, src []int32, srcStride, txtp int) bool {
+	return false
+}
+
 func satd8Kernel(res []int32, off, stride int) int32 {
 	return satd8RVV(&res[off], stride)
 }

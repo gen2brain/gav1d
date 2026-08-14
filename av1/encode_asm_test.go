@@ -204,3 +204,48 @@ func TestResidualAsm(t *testing.T) {
 		}
 	}
 }
+
+func TestFwdTxfmRectAsm(t *testing.T) {
+	g := uint32(77)
+	next := func() int32 {
+		g = g*1664525 + 1013904223
+
+		return int32(g>>16%511) - 255
+	}
+	tmp := make([]int32, fwdScratch)
+	for _, c := range []struct {
+		tx     int
+		w, h   int
+		kernel func([]int32, []int32, int, int) bool
+	}{
+		{rtx4x8, 4, 8, fwdTxfm4x8},
+		{rtx8x4, 8, 4, fwdTxfm8x4},
+	} {
+		for _, stride := range []int{c.w, c.w * 2, 40} {
+			src := make([]int32, stride*c.h)
+			for round := range 64 {
+				for i := range src {
+					src[i] = next()
+					switch round {
+					case 0:
+						src[i] = 255
+					case 1:
+						src[i] = -255
+					}
+				}
+				want := make([]int32, c.w*c.h)
+				got := make([]int32, c.w*c.h)
+				fwdTxfmGo(want, src, stride, c.tx, dctDct, tmp)
+				if !c.kernel(got, src, stride, dctDct) {
+					t.Skip("no rectangular transform kernel")
+				}
+				for i := range want {
+					if got[i] != want[i] {
+						t.Fatalf("%dx%d stride=%d round=%d [%d]: got %d, want %d",
+							c.w, c.h, stride, round, i, got[i], want[i])
+					}
+				}
+			}
+		}
+	}
+}

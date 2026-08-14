@@ -1,3 +1,5 @@
+//go:build amd64 && !noasm
+
 #include "textflag.h"
 
 // residualAVX2 subtracts the prediction from the source, stores the difference
@@ -633,5 +635,155 @@ TEXT ·fwdTxfm8x8AVX512(SB), NOSPLIT, $0-24
 	VMOVDQU Y5, 160(DI)
 	VMOVDQU Y6, 192(DI)
 	VMOVDQU Y7, 224(DI)
+	VZEROUPPER
+	RET
+
+#define T4R(i0, i1, i2, i3, t0, t1, t2, t3, o0, o1, o2, o3) \
+	VPUNPCKLDQ  i1, i0, t0 \
+	VPUNPCKHDQ  i1, i0, t1 \
+	VPUNPCKLDQ  i3, i2, t2 \
+	VPUNPCKHDQ  i3, i2, t3 \
+	VPUNPCKLQDQ t2, t0, o0 \
+	VPUNPCKHQDQ t2, t0, o1 \
+	VPUNPCKLQDQ t3, t1, o2 \
+	VPUNPCKHQDQ t3, t1, o3
+
+// FDCT4R runs a 4 point DCT across four registers, taking its temporaries as
+// parameters so the caller can keep the inputs live. Constants are the same
+// ones LOADC8 sets: Y8 cospi32, Y9 cospi48, Y10 cospi16, Y15 the rounding term.
+#define FDCT4R(i0, i1, i2, i3, a0, a1, a2, a3, t0, t1, o0, o1, o2, o3) \
+	VPADDD    i3, i0, a0 \
+	VPADDD    i2, i1, a1 \
+	VPSUBD    i2, i1, a2 \
+	VPSUBD    i3, i0, a3 \
+	VPADDD    a1, a0, t0 \
+	VPSUBD    a1, a0, t1 \
+	VPMULLD   Y8, t0, t0 \
+	RS8(t0) \
+	VPMULLD   Y8, t1, t1 \
+	RS8(t1) \
+	BTF8(Y9, a2, Y10, a3, a0, o1) \
+	BTFN8(Y9, a3, Y10, a2, a1, o3) \
+	VMOVDQU32 t0, o0 \
+	VMOVDQU32 t1, o2
+
+// RECT scales one register by the rectangular Sqrt2 correction after the row
+// pass: round shift by one, then newSqrt2 (which is cospi32) and 12 bits. Y14
+// holds one and Y13 holds 2048; both are reloaded after the last butterfly.
+#define RECT(v) \
+	VPADDD  Y14, v, v \
+	VPSRAD  $1, v, v \
+	VPMULLD Y8, v, v \
+	VPADDD  Y13, v, v \
+	VPSRAD  $12, v, v
+
+#define LOADRECT \
+	MOVL         $1, AX \
+	VMOVD        AX, X14 \
+	VPBROADCASTD X14, Y14 \
+	VPSRLD       $1, Y15, Y13
+
+// fwdTxfm4x8AVX512 is the 4x8 DCT_DCT forward transform. The column pass is
+// eight points over four lanes, so half of each register is idle; a 256 bit
+// operation costs the same as a 128 bit one, so this is free.
+TEXT ·fwdTxfm4x8AVX512(SB), NOSPLIT, $0-24
+	MOVQ res+0(FP), DI
+	MOVQ src+8(FP), SI
+	MOVQ srcStride+16(FP), DX
+	SHLQ $2, DX
+
+	VMOVDQU (SI), X0
+	VMOVDQU (SI)(DX*1), X1
+	LEAQ    (SI)(DX*2), AX
+	VMOVDQU (AX), X2
+	VMOVDQU (AX)(DX*1), X3
+	LEAQ    (AX)(DX*2), AX
+	VMOVDQU (AX), X4
+	VMOVDQU (AX)(DX*1), X5
+	LEAQ    (AX)(DX*2), AX
+	VMOVDQU (AX), X6
+	VMOVDQU (AX)(DX*1), X7
+	VPSLLD  $2, X0, X0
+	VPSLLD  $2, X1, X1
+	VPSLLD  $2, X2, X2
+	VPSLLD  $2, X3, X3
+	VPSLLD  $2, X4, X4
+	VPSLLD  $2, X5, X5
+	VPSLLD  $2, X6, X6
+	VPSLLD  $2, X7, X7
+
+	LOADC8
+	FDCT8
+
+	T4R(X0, X1, X2, X3, X24, X25, X26, X27, X16, X17, X18, X19)
+	T4R(X4, X5, X6, X7, X24, X25, X26, X27, X20, X21, X22, X23)
+	VINSERTI32X4 $1, X20, Y16, Y0
+	VINSERTI32X4 $1, X21, Y17, Y1
+	VINSERTI32X4 $1, X22, Y18, Y2
+	VINSERTI32X4 $1, X23, Y19, Y3
+
+	FDCT4R(Y0, Y1, Y2, Y3, Y16, Y17, Y18, Y19, Y20, Y21, Y0, Y1, Y2, Y3)
+
+	LOADRECT
+	RECT(Y0)
+	RECT(Y1)
+	RECT(Y2)
+	RECT(Y3)
+
+	VMOVDQU Y0, (DI)
+	VMOVDQU Y1, 32(DI)
+	VMOVDQU Y2, 64(DI)
+	VMOVDQU Y3, 96(DI)
+	VZEROUPPER
+	RET
+
+// fwdTxfm8x4AVX512 is the 8x4 DCT_DCT forward transform, the same passes as
+// fwdTxfm4x8AVX512 in the other order.
+TEXT ·fwdTxfm8x4AVX512(SB), NOSPLIT, $0-24
+	MOVQ res+0(FP), DI
+	MOVQ src+8(FP), SI
+	MOVQ srcStride+16(FP), DX
+	SHLQ $2, DX
+
+	VMOVDQU (SI), Y0
+	VMOVDQU (SI)(DX*1), Y1
+	LEAQ    (SI)(DX*2), AX
+	VMOVDQU (AX), Y2
+	VMOVDQU (AX)(DX*1), Y3
+	VPSLLD  $2, Y0, Y0
+	VPSLLD  $2, Y1, Y1
+	VPSLLD  $2, Y2, Y2
+	VPSLLD  $2, Y3, Y3
+
+	LOADC8
+	FDCT4R(Y0, Y1, Y2, Y3, Y16, Y17, Y18, Y19, Y20, Y21, Y0, Y1, Y2, Y3)
+
+	VEXTRACTI32X4 $1, Y0, X4
+	VEXTRACTI32X4 $1, Y1, X5
+	VEXTRACTI32X4 $1, Y2, X6
+	VEXTRACTI32X4 $1, Y3, X7
+	T4R(X0, X1, X2, X3, X16, X17, X18, X19, X0, X1, X2, X3)
+	T4R(X4, X5, X6, X7, X16, X17, X18, X19, X4, X5, X6, X7)
+
+	FDCT8
+
+	LOADRECT
+	RECT(Y0)
+	RECT(Y1)
+	RECT(Y2)
+	RECT(Y3)
+	RECT(Y4)
+	RECT(Y5)
+	RECT(Y6)
+	RECT(Y7)
+
+	VMOVDQU X0, (DI)
+	VMOVDQU X1, 16(DI)
+	VMOVDQU X2, 32(DI)
+	VMOVDQU X3, 48(DI)
+	VMOVDQU X4, 64(DI)
+	VMOVDQU X5, 80(DI)
+	VMOVDQU X6, 96(DI)
+	VMOVDQU X7, 112(DI)
 	VZEROUPPER
 	RET

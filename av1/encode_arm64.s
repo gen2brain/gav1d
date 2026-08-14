@@ -1,3 +1,5 @@
+//go:build arm64 && !noasm
+
 #include "textflag.h"
 
 #define SXTL(n, d)   WORD $(0x0f10a400 | ((n) << 5) | (d))
