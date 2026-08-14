@@ -289,3 +289,137 @@ TEXT ·satd8RVV(SB), NOSPLIT, $256-20
 	SRAW      $3, X6, X6
 	MOVW      X6, ret+16(FP)
 	RET
+
+#define RSR(v) \
+	VADDVX X21, v, v; \
+	VSRAVI $13, v, v
+
+#define FDCT4R(i0, i1, i2, i3) \
+	VADDVV i3, i0, V10; \
+	VADDVV i2, i1, V11; \
+	VSUBVV i2, i1, V12; \
+	VSUBVV i3, i0, V13; \
+	VADDVV V11, V10, V14; \
+	VSUBVV V11, V10, V15; \
+	VMULVX X17, V14, i0; \
+	RSR(i0); \
+	VMULVX X17, V15, i2; \
+	RSR(i2); \
+	VMULVX X18, V12, V16; \
+	VMULVX X19, V13, V17; \
+	VADDVV V17, V16, i1; \
+	RSR(i1); \
+	VMULVX X18, V13, V16; \
+	VMULVX X19, V12, V17; \
+	VSUBVV V17, V16, i3; \
+	RSR(i3)
+
+#define FADST4R(i0, i1, i2, i3) \
+	VMULVX X17, i0, V10; \
+	VMULVX X19, i1, V11; \
+	VADDVV V11, V10, V10; \
+	VMULVX X20, i3, V11; \
+	VADDVV V11, V10, V10; \
+	VMULVX X20, i0, V11; \
+	VMULVX X17, i1, V12; \
+	VSUBVV V12, V11, V11; \
+	VMULVX X19, i3, V12; \
+	VADDVV V12, V11, V11; \
+	VMULVX X18, i2, V12; \
+	VADDVV i1, i0, V13; \
+	VSUBVV i3, V13, V13; \
+	VMULVX X18, V13, V13; \
+	VADDVV V12, V10, V14; \
+	RSR(V14); \
+	RSR(V13); \
+	VSUBVV V12, V11, V15; \
+	RSR(V15); \
+	VSUBVV V10, V11, V16; \
+	VADDVV V12, V16, V16; \
+	RSR(V16); \
+	VMVVV V14, i0; \
+	VMVVV V13, i1; \
+	VMVVV V15, i2; \
+	VMVVV V16, i3
+
+// fwdTxfm4x4RVV is the 4x4 forward transform for the four non-flipping
+// DCT/ADST combinations. cos_bit is 13 at this size, so the constants are
+// scalars and every intermediate fits int32 for 8-bit input.
+TEXT ·fwdTxfm4x4RVV(SB), NOSPLIT, $64-40
+	MOV  res+0(FP), X10
+	MOV  src+8(FP), X11
+	MOV  srcStride+16(FP), X12
+	SLLI $2, X12, X12
+	MOV  $4, X13
+	VSETVLI X13, E32, M1, TA, MA, X5
+	MOV  $4096, X21
+
+	VLE32V (X11), V0
+	ADD    X12, X11, X14
+	VLE32V (X14), V1
+	ADD    X12, X14, X14
+	VLE32V (X14), V2
+	ADD    X12, X14, X14
+	VLE32V (X14), V3
+	VSLLVI $2, V0, V0
+	VSLLVI $2, V1, V1
+	VSLLVI $2, V2, V2
+	VSLLVI $2, V3, V3
+
+	MOV colAdst+24(FP), X22
+	BNEZ X22, coladstr
+	MOV $5793, X17
+	MOV $3135, X18
+	MOV $7568, X19
+	FDCT4R(V0, V1, V2, V3)
+	JMP colfinr
+
+coladstr:
+	MOV $2642, X17
+	MOV $6689, X18
+	MOV $4964, X19
+	MOV $7606, X20
+	FADST4R(V0, V1, V2, V3)
+
+colfinr:
+	MOV    $scratch-64(SP), X14
+	VSE32V V0, (X14)
+	ADD    $16, X14, X15
+	VSE32V V1, (X15)
+	ADD    $16, X15, X15
+	VSE32V V2, (X15)
+	ADD    $16, X15, X15
+	VSE32V V3, (X15)
+	MOV     $16, X16
+	VLSE32V (X14), X16, V0
+	ADD     $4, X14, X15
+	VLSE32V (X15), X16, V1
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V2
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V3
+
+	MOV rowAdst+32(FP), X22
+	BNEZ X22, rowadstr
+	MOV $5793, X17
+	MOV $3135, X18
+	MOV $7568, X19
+	FDCT4R(V0, V1, V2, V3)
+	JMP storer
+
+rowadstr:
+	MOV $2642, X17
+	MOV $6689, X18
+	MOV $4964, X19
+	MOV $7606, X20
+	FADST4R(V0, V1, V2, V3)
+
+storer:
+	VSE32V V0, (X10)
+	ADD    $16, X10, X15
+	VSE32V V1, (X15)
+	ADD    $16, X15, X15
+	VSE32V V2, (X15)
+	ADD    $16, X15, X15
+	VSE32V V3, (X15)
+	RET

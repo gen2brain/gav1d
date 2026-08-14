@@ -6,6 +6,82 @@
 #define SMLAL2(m, n, d) WORD $(0x4e608000 | ((m) << 16) | ((n) << 5) | (d))
 #define ADDV4S(n, d) WORD $(0x4eb1b800 | ((n) << 5) | (d))
 #define ABS4S(n, d)  WORD $(0x4ea0b800 | ((n) << 5) | (d))
+#define MUL4S(m, n, d)  WORD $(0x4ea09c00 | ((m) << 16) | ((n) << 5) | (d))
+#define SSHR13(n, d)    WORD $(0x4f330400 | ((n) << 5) | (d))
+
+#define RSN(v, n) \
+	VADD V19.S4, v.S4, v.S4; \
+	SSHR13(n, n)
+
+#define FDCT4N \
+	VADD V3.S4, V0.S4, V20.S4; \
+	VADD V2.S4, V1.S4, V21.S4; \
+	VSUB V2.S4, V1.S4, V22.S4; \
+	VSUB V3.S4, V0.S4, V23.S4; \
+	VADD V21.S4, V20.S4, V24.S4; \
+	VSUB V21.S4, V20.S4, V25.S4; \
+	MUL4S(16, 24, 26); \
+	RSN(V26, 26); \
+	MUL4S(16, 25, 27); \
+	RSN(V27, 27); \
+	MUL4S(17, 22, 28); \
+	MUL4S(18, 23, 29); \
+	VADD V29.S4, V28.S4, V28.S4; \
+	RSN(V28, 28); \
+	MUL4S(17, 23, 30); \
+	MUL4S(18, 22, 31); \
+	VSUB V31.S4, V30.S4, V30.S4; \
+	RSN(V30, 30); \
+	VMOV V26.B16, V0.B16; \
+	VMOV V28.B16, V1.B16; \
+	VMOV V27.B16, V2.B16; \
+	VMOV V30.B16, V3.B16
+
+#define FADST4N \
+	MUL4S(16, 0, 20); \
+	MUL4S(18, 1, 21); \
+	VADD V21.S4, V20.S4, V20.S4; \
+	MUL4S(15, 3, 21); \
+	VADD V21.S4, V20.S4, V20.S4; \
+	MUL4S(15, 0, 21); \
+	MUL4S(16, 1, 22); \
+	VSUB V22.S4, V21.S4, V21.S4; \
+	MUL4S(18, 3, 22); \
+	VADD V22.S4, V21.S4, V21.S4; \
+	MUL4S(17, 2, 22); \
+	VADD V1.S4, V0.S4, V23.S4; \
+	VSUB V3.S4, V23.S4, V23.S4; \
+	MUL4S(17, 23, 23); \
+	VADD V22.S4, V20.S4, V24.S4; \
+	RSN(V24, 24); \
+	RSN(V23, 23); \
+	VSUB V22.S4, V21.S4, V25.S4; \
+	RSN(V25, 25); \
+	VSUB V20.S4, V21.S4, V26.S4; \
+	VADD V22.S4, V26.S4, V26.S4; \
+	RSN(V26, 26); \
+	VMOV V24.B16, V0.B16; \
+	VMOV V23.B16, V1.B16; \
+	VMOV V25.B16, V2.B16; \
+	VMOV V26.B16, V3.B16
+
+#define DCTC \
+	MOVD $5793, R4; \
+	VDUP R4, V16.S4; \
+	MOVD $3135, R4; \
+	VDUP R4, V17.S4; \
+	MOVD $7568, R4; \
+	VDUP R4, V18.S4
+
+#define ADSTC \
+	MOVD $2642, R4; \
+	VDUP R4, V16.S4; \
+	MOVD $6689, R4; \
+	VDUP R4, V17.S4; \
+	MOVD $4964, R4; \
+	VDUP R4, V18.S4; \
+	MOVD $7606, R4; \
+	VDUP R4, V15.S4
 
 #define HAD4N(i0, i1, i2, i3, o0, o1, o2, o3) \
 	VADD i2.S4, i0.S4, V20.S4 \
@@ -309,4 +385,59 @@ TEXT ·satd8NEON(SB), NOSPLIT, $0-20
 	ADDW $4, R3, R3
 	ASRW $3, R3, R3
 	MOVW R3, ret+16(FP)
+	RET
+
+// fwdTxfm4x4NEON is the 4x4 forward transform for the four non-flipping
+// DCT/ADST combinations. cos_bit is 13 at this size, so the constants live in
+// V15 to V18 and the rounding term in V19.
+TEXT ·fwdTxfm4x4NEON(SB), NOSPLIT, $0-40
+	MOVD res+0(FP), R0
+	MOVD src+8(FP), R1
+	MOVD srcStride+16(FP), R2
+	LSL  $2, R2, R2
+
+	VLD1 (R1), [V0.S4]
+	ADD  R2, R1, R3
+	VLD1 (R3), [V1.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V2.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V3.S4]
+	VSHL $2, V0.S4, V0.S4
+	VSHL $2, V1.S4, V1.S4
+	VSHL $2, V2.S4, V2.S4
+	VSHL $2, V3.S4, V3.S4
+
+	MOVD $4096, R4
+	VDUP R4, V19.S4
+
+	MOVD colAdst+24(FP), R5
+	CBNZ R5, ncoladst
+	DCTC
+	FDCT4N
+	B    ncolfin
+
+ncoladst:
+	ADSTC
+	FADST4N
+
+ncolfin:
+	TT4(V0, V1, V2, V3, V4, V5, V6, V7, V20, V21, V22, V23)
+	VMOV V4.B16, V0.B16
+	VMOV V5.B16, V1.B16
+	VMOV V6.B16, V2.B16
+	VMOV V7.B16, V3.B16
+
+	MOVD rowAdst+32(FP), R5
+	CBNZ R5, nrowadst
+	DCTC
+	FDCT4N
+	B    nstore
+
+nrowadst:
+	ADSTC
+	FADST4N
+
+nstore:
+	VST1 [V0.S4, V1.S4, V2.S4, V3.S4], (R0)
 	RET

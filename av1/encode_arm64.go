@@ -32,4 +32,15 @@ func satd8Kernel(res []int32, off, stride int) int32 {
 	return satd8NEON(&res[off], stride)
 }
 
-func fwdTxfm4x4(coeff []int32, src []int32, srcStride, txtp int) bool { return false }
+//go:noescape
+func fwdTxfm4x4NEON(res *int32, src *int32, srcStride int, colAdst, rowAdst int)
+
+func fwdTxfm4x4(coeff []int32, src []int32, srcStride, txtp int) bool {
+	if txtp > adstAdst {
+		return false
+	}
+	fwdTxfm4x4NEON(&coeff[0], &src[0], srcStride,
+		b2i(tx1dTypes[txtp][0] == tx1dAdst), b2i(tx1dTypes[txtp][1] == tx1dAdst))
+
+	return true
+}
