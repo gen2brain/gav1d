@@ -75,7 +75,7 @@ var ErrFrameTooLarge = errors.New("av1: frame exceeds size limit")
 
 // DefaultFrameSizeLimit is the frame area, in pixels, accepted when
 // Decoder.FrameSizeLimit is zero.
-const DefaultFrameSizeLimit = 16384 * 16384
+const DefaultFrameSizeLimit = min(16384*16384, math.MaxInt>>6)
 
 var defaultModeRefDeltas = loopfilterModeRefDeltas{
 	modeDelta: [2]int8{0, 0},
