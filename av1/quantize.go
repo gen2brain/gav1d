@@ -1,17 +1,29 @@
 package av1
 
+import "math/bits"
+
 func quantShift(tx int) int {
 	return max(0, int(txfmDimensions[tx].ctx)-2)
 }
 
 const quantRound = 6
 
-func quantOne(c int32, dq uint32, shift int) int32 {
+type quantizer struct {
+	recip uint64
+	round uint32
+}
+
+func newQuantizer(dq uint32) quantizer {
+	return quantizer{recip: 1<<48/uint64(dq) + 1, round: dq * quantRound / 16}
+}
+
+func quantOne(c int32, q *quantizer, shift int) int32 {
 	neg := c < 0
 	if neg {
 		c = -c
 	}
-	v := (uint32(c)<<uint(shift) + dq*uint32(quantRound)/16) / dq
+	hi, lo := bits.Mul64(uint64(uint32(c)<<uint(shift)+q.round), q.recip)
+	v := uint32(hi<<16 | lo>>48)
 	if v > 0xfffff {
 		v = 0xfffff
 	}
@@ -23,13 +35,14 @@ func quantOne(c int32, dq uint32, shift int) int32 {
 }
 
 func quantBlock(levels []int32, coeff []int32, n int, dcDq, acDq uint32, shift int) int {
+	dc, ac := newQuantizer(dcDq), newQuantizer(acDq)
 	nz := 0
 	for i := range n {
-		dq := acDq
+		q := &ac
 		if i == 0 {
-			dq = dcDq
+			q = &dc
 		}
-		v := quantOne(coeff[i], dq, shift)
+		v := quantOne(coeff[i], q, shift)
 		levels[i] = v
 		if v != 0 {
 			nz = i + 1

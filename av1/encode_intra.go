@@ -712,12 +712,10 @@ func (e *encoder) quantTx(dst []uint8, off, stride int, src []uint8, sstride, sw
 	fwdTxfm(e.coeff[:], e.res[:], tw, tx, txtp, e.fwd)
 
 	cw, ch := min(tw, 32), min(th, 32)
-	for i := range cw * ch {
-		d := e.dq[1]
-		if i == 0 {
-			d = e.dq[0]
-		}
-		e.lv[i] = quantOne(e.coeff[i], uint32(d), shift)
+	n := cw * ch
+	e.lv[0] = quantOne(e.coeff[0], &e.qr[0], shift)
+	for i := 1; i < n; i++ {
+		e.lv[i] = quantOne(e.coeff[i], &e.qr[1], shift)
 	}
 
 	scan := scans[tx]

@@ -24,6 +24,7 @@ type encoder struct {
 	cw       int
 	ch       int
 	dq       [2]uint16
+	qr       [2]quantizer
 	lambda   float64
 	predSSE  float64
 	dsp      *dspContext[uint8]
@@ -103,6 +104,8 @@ func (e *encoder) init(c *encConfig, seq *sequenceHeader) {
 	}
 	e.dq[0] = dqTbl[0][c.QIndex][0]
 	e.dq[1] = dqTbl[0][c.QIndex][1]
+	e.qr[0] = newQuantizer(uint32(e.dq[0]))
+	e.qr[1] = newQuantizer(uint32(e.dq[1]))
 	e.lambda = float64(e.dq[1]) * float64(e.dq[1]) / 1024
 	e.dsp = newDsp[uint8]()
 	e.itx = make([]int32, 64*64*2+itxDct64Scratch)

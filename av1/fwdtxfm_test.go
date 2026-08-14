@@ -133,3 +133,64 @@ func TestQuantRoundtrip(t *testing.T) {
 		t.Logf("qidx=%3d dc=%4d ac=%4d worst coefficient error %d", qidx, dc, ac, worst)
 	}
 }
+
+func quantOneRef(c int32, dq uint32, shift int) int32 {
+	neg := c < 0
+	if neg {
+		c = -c
+	}
+	v := (uint32(c)<<uint(shift) + dq*uint32(quantRound)/16) / dq
+	if v > 0xfffff {
+		v = 0xfffff
+	}
+	if neg {
+		return -int32(v)
+	}
+
+	return int32(v)
+}
+
+func TestQuantReciprocal(t *testing.T) {
+	seen := map[uint16]bool{}
+	var dqs []uint16
+	for qidx := range 256 {
+		for _, d := range dqTbl[0][qidx] {
+			if !seen[d] {
+				seen[d] = true
+				dqs = append(dqs, d)
+			}
+		}
+	}
+
+	g := uint64(12345)
+	next := func() uint32 {
+		g = g*6364136223846793005 + 1442695040888963407
+
+		return uint32(g >> 32)
+	}
+
+	for _, d := range dqs {
+		q := newQuantizer(uint32(d))
+		for _, shift := range []int{0, 1, 2} {
+			var cs []int32
+			for k := range 300 {
+				n := int32(k) * int32(d)
+				cs = append(cs, n-1, n, n+1)
+			}
+			for range 20000 {
+				cs = append(cs, int32(next()>>uint(shift)))
+			}
+			cs = append(cs, 0, 1, -1, 0x7fffffff>>uint(shift), -(0x7fffffff >> uint(shift)))
+
+			for _, c := range cs {
+				for _, v := range []int32{c, -c} {
+					got, want := quantOne(v, &q, shift), quantOneRef(v, uint32(d), shift)
+					if got != want {
+						t.Fatalf("dq=%d shift=%d c=%d: got %d want %d", d, shift, v, got, want)
+					}
+				}
+			}
+		}
+	}
+	t.Logf("%d distinct dequant values verified", len(dqs))
+}
