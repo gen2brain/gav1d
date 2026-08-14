@@ -2,6 +2,7 @@ package av1
 
 import (
 	"math"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -224,7 +225,10 @@ func itxTailCase[P pixel](t *testing.T, d *dspContext[P], iter, w, h int,
 // TestItxColAsm checks the one-dimensional pass against the pure Go transforms.
 func TestItxColAsm(t *testing.T) {
 	d := newDsp[uint8]()
-	if d.itxCol == nil {
+	// itxColNone is installed when the build has no kernel: it is not nil, it
+	// just declines every shape, so checking for nil is not enough.
+	if d.itxCol == nil || reflect.ValueOf(d.itxCol).Pointer() ==
+		reflect.ValueOf(itxColNone).Pointer() {
 		t.Skip("no column kernel")
 	}
 	cases := 0

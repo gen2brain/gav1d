@@ -267,6 +267,70 @@ func avifFiles(t *testing.T, dir string) []string {
 	return out
 }
 
+// TestMalformedFiles truncates and corrupts the bundled files and requires the
+// decoder to return rather than crash. It is the in-repo stand-in for an
+// invalid-file corpus: deterministic, and it runs everywhere the tests do.
+func TestMalformedFiles(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("testdata", "*.avif"))
+	if err != nil || len(files) == 0 {
+		t.Skip("no bundled files")
+	}
+	sort.Strings(files)
+	if len(files) > 8 {
+		files = files[:8]
+	}
+
+	for _, p := range files {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := filepath.Base(p)
+
+		// Truncation reaches every box boundary sooner or later, which is what
+		// the truncated_header and truncated_data cases in a corpus are for.
+		for _, frac := range []int{1, 2, 3, 5, 7, 11, 16, 32, 48, 63} {
+			n := len(data) * frac / 64
+			if msg := avifSurvives(data[:n]); msg != "" {
+				t.Errorf("%s truncated to %d/%d: %s", name, n, len(data), msg)
+			}
+		}
+
+		// Corruption in the header region hits box sizes, types and item
+		// offsets; deeper offsets land in the payload.
+		for _, off := range []int{4, 9, 17, 41, 89, 211, 1013} {
+			if off >= len(data) {
+				continue
+			}
+			for _, bit := range []uint{0, 4, 7} {
+				bad := make([]byte, len(data))
+				copy(bad, data)
+				bad[off] ^= 1 << bit
+				if msg := avifSurvives(bad); msg != "" {
+					t.Errorf("%s bit %d of byte %d flipped: %s", name, bit, off, msg)
+				}
+			}
+		}
+	}
+}
+
+// avifSurvives reports a panic as a message, and treats any error as fine.
+func avifSurvives(data []byte) (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = fmt.Sprintf("panic: %v", r)
+		}
+	}()
+
+	opt := Options{AutoRotate: true, FrameSizeLimit: 1 << 20}
+	if _, err := Decode(bytes.NewReader(data), opt); err != nil {
+		return ""
+	}
+	_, _ = DecodeAll(bytes.NewReader(data), opt)
+
+	return ""
+}
+
 // conformanceDirs returns the corpora named by CONFORMANCE_DIR, a colon
 // separated list shared with the av1 package and the sibling codecs. Each test
 // picks the entries it recognises; the rest contribute nothing.

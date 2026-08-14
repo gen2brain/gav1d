@@ -289,6 +289,119 @@ func dav1dYUV(t *testing.T, path string) []byte {
 	return data
 }
 
+// FuzzDecodeOBUs feeds arbitrary bytes to the bitstream decoder. Nothing may
+// panic, whatever the input; an error is a fine outcome. The seeds are real
+// streams so the mutator starts from something that parses.
+func FuzzDecodeOBUs(f *testing.F) {
+	// Seed with the smallest streams. A 1080p seed costs seconds per execution
+	// and the fuzzer barely explores; the small ones still carry a sequence
+	// header, a frame header and real tile data.
+	streams, _ := filepath.Glob(filepath.Join("testdata", "streams", "*.ivf"))
+	sort.Slice(streams, func(i, j int) bool {
+		a, _ := os.Stat(streams[i])
+		b, _ := os.Stat(streams[j])
+
+		return a.Size() < b.Size()
+	})
+	for i, p := range streams {
+		if i == 12 {
+			break
+		}
+		if b, err := os.ReadFile(p); err == nil {
+			f.Add(b)
+		}
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var chunks [][]byte
+		if len(data) >= 32 && string(data[:4]) == "DKIF" {
+			chunks = ivfChunks(data)
+		} else {
+			chunks = obuChunks(data)
+		}
+
+		// A small limit keeps a mutated header from asking for a frame that
+		// costs seconds to allocate and decode.
+		d := Decoder{FrameSizeLimit: 1 << 16}
+		for _, chunk := range chunks {
+			pics, err := d.DecodeOBUs(chunk)
+			if err != nil {
+				return
+			}
+			for _, pic := range pics {
+				if pic.Width < 0 || pic.Height < 0 {
+					t.Fatalf("negative dimensions %dx%d", pic.Width, pic.Height)
+				}
+			}
+		}
+	})
+}
+
+// TestMalformedStreams truncates and corrupts the bundled streams and requires
+// the decoder to return rather than crash. It is the in-repo stand-in for an
+// invalid-file corpus: deterministic, and it runs everywhere the tests do.
+func TestMalformedStreams(t *testing.T) {
+	streams, err := filepath.Glob(filepath.Join("testdata", "streams", "*.ivf"))
+	if err != nil || len(streams) == 0 {
+		t.Skip("no bundled streams")
+	}
+	sort.Strings(streams)
+	if len(streams) > 6 {
+		streams = streams[:6]
+	}
+
+	for _, p := range streams {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := filepath.Base(p)
+
+		// Every prefix boundary the container cares about, plus a spread of
+		// arbitrary ones.
+		for _, frac := range []int{1, 2, 3, 5, 7, 11, 16, 32, 48, 63} {
+			n := len(data) * frac / 64
+			if msg := decodeSurvives(data[:n]); msg != "" {
+				t.Errorf("%s truncated to %d/%d: %s", name, n, len(data), msg)
+			}
+		}
+
+		// Corruption inside the payload, at a spread of offsets and bit
+		// positions, so header fields and coefficient data both get hit.
+		for _, off := range []int{33, 97, 401, 1013, 4099} {
+			if off >= len(data) {
+				continue
+			}
+			for _, bit := range []uint{0, 3, 7} {
+				bad := make([]byte, len(data))
+				copy(bad, data)
+				bad[off] ^= 1 << bit
+				if msg := decodeSurvives(bad); msg != "" {
+					t.Errorf("%s bit %d of byte %d flipped: %s", name, bit, off, msg)
+				}
+			}
+		}
+	}
+}
+
+// decodeSurvives reports a panic as a message, and treats any error as fine.
+func decodeSurvives(data []byte) (msg string) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg = "panic: " + firstLine(r)
+		}
+	}()
+
+	d := Decoder{FrameSizeLimit: 1 << 20}
+	for _, chunk := range ivfChunks(data) {
+		if _, err := d.DecodeOBUs(chunk); err != nil {
+			return ""
+		}
+	}
+
+	return ""
+}
+
 // conformanceDirs returns the corpora named by CONFORMANCE_DIR, a colon
 // separated list shared with the avif package and the sibling codecs. Each
 // test picks the entries it recognises; the rest contribute nothing.
