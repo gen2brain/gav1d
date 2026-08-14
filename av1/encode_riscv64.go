@@ -64,16 +64,40 @@ func fwdTxfm8x4(coeff []int32, src []int32, srcStride, txtp int) bool {
 	return true
 }
 
+//go:noescape
+func fwdTxfm8x16RVV(res *int32, src *int32, srcStride int)
+
 func fwdTxfm8x16(coeff []int32, src []int32, srcStride, txtp int) bool {
-	return false
+	if txtp != dctDct {
+		return false
+	}
+	fwdTxfm8x16RVV(&coeff[0], &src[0], srcStride)
+
+	return true
 }
+
+//go:noescape
+func fwdTxfm16x8RVV(res *int32, src *int32, srcStride int)
 
 func fwdTxfm16x8(coeff []int32, src []int32, srcStride, txtp int) bool {
-	return false
+	if txtp != dctDct {
+		return false
+	}
+	fwdTxfm16x8RVV(&coeff[0], &src[0], srcStride)
+
+	return true
 }
 
+//go:noescape
+func fwdTxfm16x16RVV(res *int32, src *int32, srcStride int)
+
 func fwdTxfm16x16(coeff []int32, src []int32, srcStride, txtp int) bool {
-	return false
+	if txtp != dctDct {
+		return false
+	}
+	fwdTxfm16x16RVV(&coeff[0], &src[0], srcStride)
+
+	return true
 }
 
 func satd8Kernel(res []int32, off, stride int) int32 {

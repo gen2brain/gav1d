@@ -773,3 +773,886 @@ TEXT ·fwdTxfm8x8RVV(SB), NOSPLIT, $256-24
 	ADD    $32, X15, X15
 	VSE32V V7, (X15)
 	RET
+
+// The sixteen point transform needs fifteen cosines and the rounding term.
+// RVV multiplies by a scalar register, so they are scalars and 16x16's row pass
+// at cos_bit 12 just reloads them -- only the shift has to be a parameter.
+#define RSS(sh, v) \
+	VADDVX X21, v, v; \
+	VSRAVI sh, v, v
+
+#define MULR(k, a, d) \
+	VMULVX k, a, d
+
+#define BTFR(sh, ka, a, kb, b, t, d) \
+	VMULVX ka, a, d; \
+	VMULVX kb, b, t; \
+	VADDVV t, d, d; \
+	RSS(sh, d)
+
+#define BTFNR(sh, ka, a, kb, b, t, d) \
+	VMULVX ka, a, d; \
+	VMULVX kb, b, t; \
+	VSUBVV t, d, d; \
+	RSS(sh, d)
+
+#define BFLYR(lo, hi, t) \
+	VSUBVV hi, lo, t; \
+	VADDVV hi, lo, lo; \
+	VMVVV t, hi
+
+#define HALF32R(sh, a, b, dlo, dhi, t0, t1) \
+	VSUBVV a, b, t0; \
+	VADDVV a, b, t1; \
+	VMULVX X20, t0, dlo; \
+	RSS(sh, dlo); \
+	VMULVX X20, t1, dhi; \
+	RSS(sh, dhi)
+
+// DCT16CR loads cos_bit 13; DCT16CR12 the cos_bit 12 set 16x16's row pass wants.
+#define DCT16CR \
+	MOV $8153, X6; \
+	MOV $8035, X7; \
+	MOV $7839, X8; \
+	MOV $7568, X9; \
+	MOV $7225, X17; \
+	MOV $6811, X18; \
+	MOV $6333, X19; \
+	MOV $5793, X20; \
+	MOV $4096, X21; \
+	MOV $5197, X22; \
+	MOV $4551, X23; \
+	MOV $3862, X24; \
+	MOV $3135, X25; \
+	MOV $2378, X28; \
+	MOV $1598, X29; \
+	MOV $803, X30
+
+#define DCT16CR12 \
+	MOV $4076, X6; \
+	MOV $4017, X7; \
+	MOV $3920, X8; \
+	MOV $3784, X9; \
+	MOV $3612, X17; \
+	MOV $3406, X18; \
+	MOV $3166, X19; \
+	MOV $2896, X20; \
+	MOV $2048, X21; \
+	MOV $2598, X22; \
+	MOV $2276, X23; \
+	MOV $1931, X24; \
+	MOV $1567, X25; \
+	MOV $1189, X28; \
+	MOV $799, X29; \
+	MOV $401, X30
+
+#define FDCT16R(sh) \
+	BFLYR(V0, V15, V16); \
+	BFLYR(V1, V14, V16); \
+	BFLYR(V2, V13, V16); \
+	BFLYR(V3, V12, V16); \
+	BFLYR(V4, V11, V16); \
+	BFLYR(V5, V10, V16); \
+	BFLYR(V6, V9, V16); \
+	BFLYR(V7, V8, V16); \
+	\
+	BFLYR(V0, V7, V16); \
+	BFLYR(V1, V6, V16); \
+	BFLYR(V2, V5, V16); \
+	BFLYR(V3, V4, V16); \
+	HALF32R(sh, V10, V13, V10, V13, V16, V17); \
+	HALF32R(sh, V11, V12, V11, V12, V16, V17); \
+	\
+	BFLYR(V0, V3, V16); \
+	BFLYR(V1, V2, V16); \
+	HALF32R(sh, V5, V6, V5, V6, V16, V17); \
+	BFLYR(V8, V11, V16); \
+	BFLYR(V9, V10, V16); \
+	BFLYR(V15, V12, V16); \
+	BFLYR(V14, V13, V16); \
+	\
+	HALF32R(sh, V1, V0, V1, V0, V16, V17); \
+	BTFR(sh, X25, V2, X9, V3, V18, V16); \
+	BTFNR(sh, X25, V3, X9, V2, V19, V17); \
+	VMVVV V16, V2; \
+	VMVVV V17, V3; \
+	BFLYR(V4, V5, V16); \
+	BFLYR(V7, V6, V16); \
+	BTFNR(sh, X25, V14, X9, V9, V18, V16); \
+	BTFR(sh, X9, V14, X25, V9, V19, V17); \
+	VMVVV V16, V9; \
+	VMVVV V17, V14; \
+	BTFNR(sh, X25, V13, X9, V10, V18, V16); \
+	MULR(X25, V10, V17); \
+	MULR(X9, V13, V18); \
+	VADDVV V18, V17, V17; \
+	VRSUBVX X21, V17, V17; \
+	VSRAVI sh, V17, V17; \
+	VMVVV V16, V13; \
+	VMVVV V17, V10; \
+	\
+	BTFR(sh, X29, V4, X7, V7, V20, V16); \
+	BTFR(sh, X18, V5, X23, V6, V21, V17); \
+	BTFNR(sh, X18, V6, X23, V5, V22, V18); \
+	BTFNR(sh, X29, V7, X7, V4, V23, V19); \
+	VMVVV V16, V4; \
+	VMVVV V17, V5; \
+	VMVVV V18, V6; \
+	VMVVV V19, V7; \
+	BFLYR(V8, V9, V16); \
+	BFLYR(V11, V10, V16); \
+	BFLYR(V12, V13, V16); \
+	BFLYR(V15, V14, V16); \
+	\
+	BTFR(sh, X30, V8, X6, V15, V24, V16); \
+	BTFR(sh, X19, V9, X22, V14, V24, V17); \
+	BTFR(sh, X24, V10, X17, V13, V24, V18); \
+	BTFR(sh, X8, V11, X28, V12, V24, V19); \
+	BTFNR(sh, X8, V12, X28, V11, V24, V20); \
+	BTFNR(sh, X24, V13, X17, V10, V24, V21); \
+	BTFNR(sh, X19, V14, X22, V9, V24, V22); \
+	BTFNR(sh, X30, V15, X6, V8, V24, V23); \
+	VMVVV V16, V8; \
+	VMVVV V17, V9; \
+	VMVVV V18, V10; \
+	VMVVV V19, V11; \
+	VMVVV V20, V12; \
+	VMVVV V21, V13; \
+	VMVVV V22, V14; \
+	VMVVV V23, V15
+
+#define RECT2R(v) \
+	VADDVX X6, v, v; \
+	VSRAVI $2, v, v; \
+	VMULVX X7, v, v; \
+	VADDVX X8, v, v; \
+	VSRAVI $12, v, v
+
+#define RECT2CR \
+	MOV $2, X6; \
+	MOV $5793, X7; \
+	MOV $2048, X8
+
+// fwdTxfm8x16RVV is the 8x16 DCT_DCT forward transform. Sixteen points down
+// the columns over eight lanes, then eight points along the rows -- run as
+// two groups of eight, because a vector holds eight int32 and the block has
+// sixteen rows.
+TEXT ·fwdTxfm8x16RVV(SB), NOSPLIT, $512-24
+	MOV  res+0(FP), X10
+	MOV  src+8(FP), X11
+	MOV  srcStride+16(FP), X12
+	SLLI $2, X12, X12
+	MOV  $8, X13
+	VSETVLI X13, E32, M1, TA, MA, X5
+
+	VLE32V (X11), V0
+	ADD    X12, X11, X14
+	VLE32V (X14), V1
+	ADD    X12, X14, X14
+	VLE32V (X14), V2
+	ADD    X12, X14, X14
+	VLE32V (X14), V3
+	ADD    X12, X14, X14
+	VLE32V (X14), V4
+	ADD    X12, X14, X14
+	VLE32V (X14), V5
+	ADD    X12, X14, X14
+	VLE32V (X14), V6
+	ADD    X12, X14, X14
+	VLE32V (X14), V7
+	ADD    X12, X14, X14
+	VLE32V (X14), V8
+	ADD    X12, X14, X14
+	VLE32V (X14), V9
+	ADD    X12, X14, X14
+	VLE32V (X14), V10
+	ADD    X12, X14, X14
+	VLE32V (X14), V11
+	ADD    X12, X14, X14
+	VLE32V (X14), V12
+	ADD    X12, X14, X14
+	VLE32V (X14), V13
+	ADD    X12, X14, X14
+	VLE32V (X14), V14
+	ADD    X12, X14, X14
+	VLE32V (X14), V15
+	VSLLVI $2, V0, V0
+	VSLLVI $2, V1, V1
+	VSLLVI $2, V2, V2
+	VSLLVI $2, V3, V3
+	VSLLVI $2, V4, V4
+	VSLLVI $2, V5, V5
+	VSLLVI $2, V6, V6
+	VSLLVI $2, V7, V7
+	VSLLVI $2, V8, V8
+	VSLLVI $2, V9, V9
+	VSLLVI $2, V10, V10
+	VSLLVI $2, V11, V11
+	VSLLVI $2, V12, V12
+	VSLLVI $2, V13, V13
+	VSLLVI $2, V14, V14
+	VSLLVI $2, V15, V15
+
+	DCT16CR
+	FDCT16R($13)
+
+	MOV    $scratch-512(SP), X14
+	VSE32V V0, (X14)
+	ADD    $32, X14, X15
+	VSE32V V8, (X15)
+	ADD    $32, X15, X15
+	VSE32V V4, (X15)
+	ADD    $32, X15, X15
+	VSE32V V12, (X15)
+	ADD    $32, X15, X15
+	VSE32V V2, (X15)
+	ADD    $32, X15, X15
+	VSE32V V10, (X15)
+	ADD    $32, X15, X15
+	VSE32V V6, (X15)
+	ADD    $32, X15, X15
+	VSE32V V14, (X15)
+	ADD    $32, X15, X15
+	VSE32V V1, (X15)
+	ADD    $32, X15, X15
+	VSE32V V9, (X15)
+	ADD    $32, X15, X15
+	VSE32V V5, (X15)
+	ADD    $32, X15, X15
+	VSE32V V13, (X15)
+	ADD    $32, X15, X15
+	VSE32V V3, (X15)
+	ADD    $32, X15, X15
+	VSE32V V11, (X15)
+	ADD    $32, X15, X15
+	VSE32V V7, (X15)
+	ADD    $32, X15, X15
+	VSE32V V15, (X15)
+
+	DCT8CR
+	MOV     $scratch-512(SP), X14
+	MOV     $32, X16
+	VLSE32V (X14), X16, V0
+	ADD     $4, X14, X15
+	VLSE32V (X15), X16, V1
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V2
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V3
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V4
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V5
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V6
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V7
+	FDCT8R(V0, V1, V2, V3, V4, V5, V6, V7)
+	RECT2CR
+	RECT2R(V0)
+	RECT2R(V1)
+	RECT2R(V2)
+	RECT2R(V3)
+	RECT2R(V4)
+	RECT2R(V5)
+	RECT2R(V6)
+	RECT2R(V7)
+	MOV    res+0(FP), X10
+	VSE32V V0, (X10)
+	ADD    $64, X10, X15
+	VSE32V V1, (X15)
+	ADD    $64, X15, X15
+	VSE32V V2, (X15)
+	ADD    $64, X15, X15
+	VSE32V V3, (X15)
+	ADD    $64, X15, X15
+	VSE32V V4, (X15)
+	ADD    $64, X15, X15
+	VSE32V V5, (X15)
+	ADD    $64, X15, X15
+	VSE32V V6, (X15)
+	ADD    $64, X15, X15
+	VSE32V V7, (X15)
+
+	MOV     $scratch-512(SP), X14
+	ADD     $256, X14, X14
+	MOV     $32, X16
+	VLSE32V (X14), X16, V0
+	ADD     $4, X14, X15
+	VLSE32V (X15), X16, V1
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V2
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V3
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V4
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V5
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V6
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V7
+	FDCT8R(V0, V1, V2, V3, V4, V5, V6, V7)
+	RECT2R(V0)
+	RECT2R(V1)
+	RECT2R(V2)
+	RECT2R(V3)
+	RECT2R(V4)
+	RECT2R(V5)
+	RECT2R(V6)
+	RECT2R(V7)
+	MOV    res+0(FP), X10
+	ADD    $32, X10, X10
+	VSE32V V0, (X10)
+	ADD    $64, X10, X15
+	VSE32V V1, (X15)
+	ADD    $64, X15, X15
+	VSE32V V2, (X15)
+	ADD    $64, X15, X15
+	VSE32V V3, (X15)
+	ADD    $64, X15, X15
+	VSE32V V4, (X15)
+	ADD    $64, X15, X15
+	VSE32V V5, (X15)
+	ADD    $64, X15, X15
+	VSE32V V6, (X15)
+	ADD    $64, X15, X15
+	VSE32V V7, (X15)
+
+	RET
+
+// fwdTxfm16x8RVV is the 16x8 DCT_DCT forward transform: eight points down
+// each half of the columns, then sixteen points along the rows.
+TEXT ·fwdTxfm16x8RVV(SB), NOSPLIT, $512-24
+	MOV  res+0(FP), X10
+	MOV  src+8(FP), X11
+	MOV  srcStride+16(FP), X12
+	SLLI $2, X12, X12
+	MOV  $8, X13
+	VSETVLI X13, E32, M1, TA, MA, X5
+
+	DCT8CR
+	MOV    X11, X14
+	VLE32V (X14), V0
+	ADD    X12, X14, X14
+	VLE32V (X14), V1
+	ADD    X12, X14, X14
+	VLE32V (X14), V2
+	ADD    X12, X14, X14
+	VLE32V (X14), V3
+	ADD    X12, X14, X14
+	VLE32V (X14), V4
+	ADD    X12, X14, X14
+	VLE32V (X14), V5
+	ADD    X12, X14, X14
+	VLE32V (X14), V6
+	ADD    X12, X14, X14
+	VLE32V (X14), V7
+	VSLLVI $2, V0, V0
+	VSLLVI $2, V1, V1
+	VSLLVI $2, V2, V2
+	VSLLVI $2, V3, V3
+	VSLLVI $2, V4, V4
+	VSLLVI $2, V5, V5
+	VSLLVI $2, V6, V6
+	VSLLVI $2, V7, V7
+	FDCT8R(V0, V1, V2, V3, V4, V5, V6, V7)
+	MOV    $scratch-512(SP), X14
+	VSE32V V0, (X14)
+	ADD    $64, X14, X15
+	VSE32V V1, (X15)
+	ADD    $64, X15, X15
+	VSE32V V2, (X15)
+	ADD    $64, X15, X15
+	VSE32V V3, (X15)
+	ADD    $64, X15, X15
+	VSE32V V4, (X15)
+	ADD    $64, X15, X15
+	VSE32V V5, (X15)
+	ADD    $64, X15, X15
+	VSE32V V6, (X15)
+	ADD    $64, X15, X15
+	VSE32V V7, (X15)
+
+	ADD    $32, X11, X14
+	VLE32V (X14), V0
+	ADD    X12, X14, X14
+	VLE32V (X14), V1
+	ADD    X12, X14, X14
+	VLE32V (X14), V2
+	ADD    X12, X14, X14
+	VLE32V (X14), V3
+	ADD    X12, X14, X14
+	VLE32V (X14), V4
+	ADD    X12, X14, X14
+	VLE32V (X14), V5
+	ADD    X12, X14, X14
+	VLE32V (X14), V6
+	ADD    X12, X14, X14
+	VLE32V (X14), V7
+	VSLLVI $2, V0, V0
+	VSLLVI $2, V1, V1
+	VSLLVI $2, V2, V2
+	VSLLVI $2, V3, V3
+	VSLLVI $2, V4, V4
+	VSLLVI $2, V5, V5
+	VSLLVI $2, V6, V6
+	VSLLVI $2, V7, V7
+	FDCT8R(V0, V1, V2, V3, V4, V5, V6, V7)
+	MOV    $scratch-512(SP), X14
+	ADD    $32, X14, X14
+	VSE32V V0, (X14)
+	ADD    $64, X14, X15
+	VSE32V V1, (X15)
+	ADD    $64, X15, X15
+	VSE32V V2, (X15)
+	ADD    $64, X15, X15
+	VSE32V V3, (X15)
+	ADD    $64, X15, X15
+	VSE32V V4, (X15)
+	ADD    $64, X15, X15
+	VSE32V V5, (X15)
+	ADD    $64, X15, X15
+	VSE32V V6, (X15)
+	ADD    $64, X15, X15
+	VSE32V V7, (X15)
+
+	DCT16CR
+	MOV     $scratch-512(SP), X14
+	MOV     $64, X16
+	VLSE32V (X14), X16, V0
+	ADD     $4, X14, X15
+	VLSE32V (X15), X16, V1
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V2
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V3
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V4
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V5
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V6
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V7
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V8
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V9
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V10
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V11
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V12
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V13
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V14
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V15
+	FDCT16R($13)
+	RECT2CR
+	RECT2R(V0)
+	RECT2R(V1)
+	RECT2R(V2)
+	RECT2R(V3)
+	RECT2R(V4)
+	RECT2R(V5)
+	RECT2R(V6)
+	RECT2R(V7)
+	RECT2R(V8)
+	RECT2R(V9)
+	RECT2R(V10)
+	RECT2R(V11)
+	RECT2R(V12)
+	RECT2R(V13)
+	RECT2R(V14)
+	RECT2R(V15)
+	MOV    res+0(FP), X10
+	VSE32V V0, (X10)
+	ADD    $32, X10, X15
+	VSE32V V8, (X15)
+	ADD    $32, X15, X15
+	VSE32V V4, (X15)
+	ADD    $32, X15, X15
+	VSE32V V12, (X15)
+	ADD    $32, X15, X15
+	VSE32V V2, (X15)
+	ADD    $32, X15, X15
+	VSE32V V10, (X15)
+	ADD    $32, X15, X15
+	VSE32V V6, (X15)
+	ADD    $32, X15, X15
+	VSE32V V14, (X15)
+	ADD    $32, X15, X15
+	VSE32V V1, (X15)
+	ADD    $32, X15, X15
+	VSE32V V9, (X15)
+	ADD    $32, X15, X15
+	VSE32V V5, (X15)
+	ADD    $32, X15, X15
+	VSE32V V13, (X15)
+	ADD    $32, X15, X15
+	VSE32V V3, (X15)
+	ADD    $32, X15, X15
+	VSE32V V11, (X15)
+	ADD    $32, X15, X15
+	VSE32V V7, (X15)
+	ADD    $32, X15, X15
+	VSE32V V15, (X15)
+	RET
+
+#define DOWN2R(v) \
+	VADDVX X16, v, v; \
+	VSRAVI $2, v, v
+
+// fwdTxfm16x16RVV is the 16x16 DCT_DCT forward transform. Both passes are
+// sixteen points and both run twice, over eight lanes each time. The row
+// pass is cos_bit 12, which is the whole reason FDCT16R takes a shift.
+TEXT ·fwdTxfm16x16RVV(SB), 0, $1024-24
+	MOV  res+0(FP), X10
+	MOV  src+8(FP), X11
+	MOV  srcStride+16(FP), X12
+	SLLI $2, X12, X12
+	MOV  $8, X13
+	VSETVLI X13, E32, M1, TA, MA, X5
+
+	DCT16CR
+	MOV    X11, X14
+	VLE32V (X14), V0
+	ADD    X12, X14, X14
+	VLE32V (X14), V1
+	ADD    X12, X14, X14
+	VLE32V (X14), V2
+	ADD    X12, X14, X14
+	VLE32V (X14), V3
+	ADD    X12, X14, X14
+	VLE32V (X14), V4
+	ADD    X12, X14, X14
+	VLE32V (X14), V5
+	ADD    X12, X14, X14
+	VLE32V (X14), V6
+	ADD    X12, X14, X14
+	VLE32V (X14), V7
+	ADD    X12, X14, X14
+	VLE32V (X14), V8
+	ADD    X12, X14, X14
+	VLE32V (X14), V9
+	ADD    X12, X14, X14
+	VLE32V (X14), V10
+	ADD    X12, X14, X14
+	VLE32V (X14), V11
+	ADD    X12, X14, X14
+	VLE32V (X14), V12
+	ADD    X12, X14, X14
+	VLE32V (X14), V13
+	ADD    X12, X14, X14
+	VLE32V (X14), V14
+	ADD    X12, X14, X14
+	VLE32V (X14), V15
+	VSLLVI $2, V0, V0
+	VSLLVI $2, V1, V1
+	VSLLVI $2, V2, V2
+	VSLLVI $2, V3, V3
+	VSLLVI $2, V4, V4
+	VSLLVI $2, V5, V5
+	VSLLVI $2, V6, V6
+	VSLLVI $2, V7, V7
+	VSLLVI $2, V8, V8
+	VSLLVI $2, V9, V9
+	VSLLVI $2, V10, V10
+	VSLLVI $2, V11, V11
+	VSLLVI $2, V12, V12
+	VSLLVI $2, V13, V13
+	VSLLVI $2, V14, V14
+	VSLLVI $2, V15, V15
+	FDCT16R($13)
+	MOV    $scratch-1024(SP), X14
+	VSE32V V0, (X14)
+	ADD    $64, X14, X15
+	VSE32V V8, (X15)
+	ADD    $64, X15, X15
+	VSE32V V4, (X15)
+	ADD    $64, X15, X15
+	VSE32V V12, (X15)
+	ADD    $64, X15, X15
+	VSE32V V2, (X15)
+	ADD    $64, X15, X15
+	VSE32V V10, (X15)
+	ADD    $64, X15, X15
+	VSE32V V6, (X15)
+	ADD    $64, X15, X15
+	VSE32V V14, (X15)
+	ADD    $64, X15, X15
+	VSE32V V1, (X15)
+	ADD    $64, X15, X15
+	VSE32V V9, (X15)
+	ADD    $64, X15, X15
+	VSE32V V5, (X15)
+	ADD    $64, X15, X15
+	VSE32V V13, (X15)
+	ADD    $64, X15, X15
+	VSE32V V3, (X15)
+	ADD    $64, X15, X15
+	VSE32V V11, (X15)
+	ADD    $64, X15, X15
+	VSE32V V7, (X15)
+	ADD    $64, X15, X15
+	VSE32V V15, (X15)
+
+	ADD    $32, X11, X14
+	VLE32V (X14), V0
+	ADD    X12, X14, X14
+	VLE32V (X14), V1
+	ADD    X12, X14, X14
+	VLE32V (X14), V2
+	ADD    X12, X14, X14
+	VLE32V (X14), V3
+	ADD    X12, X14, X14
+	VLE32V (X14), V4
+	ADD    X12, X14, X14
+	VLE32V (X14), V5
+	ADD    X12, X14, X14
+	VLE32V (X14), V6
+	ADD    X12, X14, X14
+	VLE32V (X14), V7
+	ADD    X12, X14, X14
+	VLE32V (X14), V8
+	ADD    X12, X14, X14
+	VLE32V (X14), V9
+	ADD    X12, X14, X14
+	VLE32V (X14), V10
+	ADD    X12, X14, X14
+	VLE32V (X14), V11
+	ADD    X12, X14, X14
+	VLE32V (X14), V12
+	ADD    X12, X14, X14
+	VLE32V (X14), V13
+	ADD    X12, X14, X14
+	VLE32V (X14), V14
+	ADD    X12, X14, X14
+	VLE32V (X14), V15
+	VSLLVI $2, V0, V0
+	VSLLVI $2, V1, V1
+	VSLLVI $2, V2, V2
+	VSLLVI $2, V3, V3
+	VSLLVI $2, V4, V4
+	VSLLVI $2, V5, V5
+	VSLLVI $2, V6, V6
+	VSLLVI $2, V7, V7
+	VSLLVI $2, V8, V8
+	VSLLVI $2, V9, V9
+	VSLLVI $2, V10, V10
+	VSLLVI $2, V11, V11
+	VSLLVI $2, V12, V12
+	VSLLVI $2, V13, V13
+	VSLLVI $2, V14, V14
+	VSLLVI $2, V15, V15
+	FDCT16R($13)
+	MOV    $scratch-1024(SP), X14
+	ADD    $32, X14, X14
+	VSE32V V0, (X14)
+	ADD    $64, X14, X15
+	VSE32V V8, (X15)
+	ADD    $64, X15, X15
+	VSE32V V4, (X15)
+	ADD    $64, X15, X15
+	VSE32V V12, (X15)
+	ADD    $64, X15, X15
+	VSE32V V2, (X15)
+	ADD    $64, X15, X15
+	VSE32V V10, (X15)
+	ADD    $64, X15, X15
+	VSE32V V6, (X15)
+	ADD    $64, X15, X15
+	VSE32V V14, (X15)
+	ADD    $64, X15, X15
+	VSE32V V1, (X15)
+	ADD    $64, X15, X15
+	VSE32V V9, (X15)
+	ADD    $64, X15, X15
+	VSE32V V5, (X15)
+	ADD    $64, X15, X15
+	VSE32V V13, (X15)
+	ADD    $64, X15, X15
+	VSE32V V3, (X15)
+	ADD    $64, X15, X15
+	VSE32V V11, (X15)
+	ADD    $64, X15, X15
+	VSE32V V7, (X15)
+	ADD    $64, X15, X15
+	VSE32V V15, (X15)
+
+	DCT16CR12
+	MOV     $scratch-1024(SP), X14
+	MOV     $64, X16
+	VLSE32V (X14), X16, V0
+	ADD     $4, X14, X15
+	VLSE32V (X15), X16, V1
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V2
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V3
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V4
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V5
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V6
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V7
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V8
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V9
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V10
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V11
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V12
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V13
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V14
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V15
+	MOV $2, X16
+	FDCT16R($12)
+	DOWN2R(V0)
+	DOWN2R(V1)
+	DOWN2R(V2)
+	DOWN2R(V3)
+	DOWN2R(V4)
+	DOWN2R(V5)
+	DOWN2R(V6)
+	DOWN2R(V7)
+	DOWN2R(V8)
+	DOWN2R(V9)
+	DOWN2R(V10)
+	DOWN2R(V11)
+	DOWN2R(V12)
+	DOWN2R(V13)
+	DOWN2R(V14)
+	DOWN2R(V15)
+	MOV    res+0(FP), X10
+	VSE32V V0, (X10)
+	ADD    $64, X10, X15
+	VSE32V V8, (X15)
+	ADD    $64, X15, X15
+	VSE32V V4, (X15)
+	ADD    $64, X15, X15
+	VSE32V V12, (X15)
+	ADD    $64, X15, X15
+	VSE32V V2, (X15)
+	ADD    $64, X15, X15
+	VSE32V V10, (X15)
+	ADD    $64, X15, X15
+	VSE32V V6, (X15)
+	ADD    $64, X15, X15
+	VSE32V V14, (X15)
+	ADD    $64, X15, X15
+	VSE32V V1, (X15)
+	ADD    $64, X15, X15
+	VSE32V V9, (X15)
+	ADD    $64, X15, X15
+	VSE32V V5, (X15)
+	ADD    $64, X15, X15
+	VSE32V V13, (X15)
+	ADD    $64, X15, X15
+	VSE32V V3, (X15)
+	ADD    $64, X15, X15
+	VSE32V V11, (X15)
+	ADD    $64, X15, X15
+	VSE32V V7, (X15)
+	ADD    $64, X15, X15
+	VSE32V V15, (X15)
+
+	MOV     $scratch-1024(SP), X14
+	ADD     $512, X14, X14
+	MOV     $64, X16
+	VLSE32V (X14), X16, V0
+	ADD     $4, X14, X15
+	VLSE32V (X15), X16, V1
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V2
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V3
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V4
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V5
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V6
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V7
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V8
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V9
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V10
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V11
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V12
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V13
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V14
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V15
+	MOV $2, X16
+	FDCT16R($12)
+	DOWN2R(V0)
+	DOWN2R(V1)
+	DOWN2R(V2)
+	DOWN2R(V3)
+	DOWN2R(V4)
+	DOWN2R(V5)
+	DOWN2R(V6)
+	DOWN2R(V7)
+	DOWN2R(V8)
+	DOWN2R(V9)
+	DOWN2R(V10)
+	DOWN2R(V11)
+	DOWN2R(V12)
+	DOWN2R(V13)
+	DOWN2R(V14)
+	DOWN2R(V15)
+	MOV    res+0(FP), X10
+	ADD    $32, X10, X10
+	VSE32V V0, (X10)
+	ADD    $64, X10, X15
+	VSE32V V8, (X15)
+	ADD    $64, X15, X15
+	VSE32V V4, (X15)
+	ADD    $64, X15, X15
+	VSE32V V12, (X15)
+	ADD    $64, X15, X15
+	VSE32V V2, (X15)
+	ADD    $64, X15, X15
+	VSE32V V10, (X15)
+	ADD    $64, X15, X15
+	VSE32V V6, (X15)
+	ADD    $64, X15, X15
+	VSE32V V14, (X15)
+	ADD    $64, X15, X15
+	VSE32V V1, (X15)
+	ADD    $64, X15, X15
+	VSE32V V9, (X15)
+	ADD    $64, X15, X15
+	VSE32V V5, (X15)
+	ADD    $64, X15, X15
+	VSE32V V13, (X15)
+	ADD    $64, X15, X15
+	VSE32V V3, (X15)
+	ADD    $64, X15, X15
+	VSE32V V11, (X15)
+	ADD    $64, X15, X15
+	VSE32V V7, (X15)
+	ADD    $64, X15, X15
+	VSE32V V15, (X15)
+
+	RET
