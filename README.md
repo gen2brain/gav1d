@@ -34,8 +34,8 @@ for _, tu := range temporalUnits {
 
 ### License
 
-The decoder is a port of dav1d and carries its BSD-2-Clause notice. The encoder's forward transform is a
-port of libaom and carries the Alliance for Open Media's BSD-2-Clause notice. Both are in [COPYING](COPYING).
+The decoder is a port of dav1d; the encoder's forward transform is a port of libaom. Both are BSD-2-Clause,
+and both notices are in [COPYING](COPYING).
 
 This project is an implementation of a codec. It gives you no special rights on the AV1 patents. Please read
 the [AV1 patent license](PATENTS) that applies to the AV1 specification and codec.
