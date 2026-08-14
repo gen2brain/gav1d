@@ -212,3 +212,144 @@ TEXT ·satd8AVX2(SB), NOSPLIT, $0-24
 	MOVL         AX, ret+16(FP)
 	VZEROUPPER
 	RET
+
+DATA fwd4Const<>+0(SB)/4, $5793
+DATA fwd4Const<>+4(SB)/4, $3135
+DATA fwd4Const<>+8(SB)/4, $7568
+DATA fwd4Const<>+12(SB)/4, $4096
+DATA fwd4Const<>+16(SB)/4, $2642
+DATA fwd4Const<>+20(SB)/4, $6689
+DATA fwd4Const<>+24(SB)/4, $4964
+DATA fwd4Const<>+28(SB)/4, $7606
+GLOBL fwd4Const<>(SB), RODATA|NOPTR, $32
+
+#define RS(v) \
+	VPADDD X11, v, v \
+	VPSRAD $13, v, v
+
+#define FDCT4(i0, i1, i2, i3, o0, o1, o2, o3) \
+	VPADDD  i3, i0, X4 \
+	VPADDD  i2, i1, X5 \
+	VPSUBD  i2, i1, X6 \
+	VPSUBD  i3, i0, X7 \
+	VPADDD  X5, X4, X13 \
+	VPSUBD  X5, X4, X14 \
+	VPMULLD X8, X13, X13 \
+	RS(X13) \
+	VPMULLD X8, X14, X14 \
+	RS(X14) \
+	VPMULLD X9, X6, X15 \
+	VPMULLD X10, X7, X4 \
+	VPADDD  X4, X15, X15 \
+	RS(X15) \
+	VPMULLD X9, X7, X5 \
+	VPMULLD X10, X6, X6 \
+	VPSUBD  X6, X5, X5 \
+	RS(X5) \
+	VMOVDQU X13, o0 \
+	VMOVDQU X15, o1 \
+	VMOVDQU X14, o2 \
+	VMOVDQU X5, o3
+
+#define FADST4(i0, i1, i2, i3, o0, o1, o2, o3) \
+	VPMULLD X8, i0, X4 \
+	VPMULLD X10, i1, X5 \
+	VPADDD  X5, X4, X4 \
+	VPMULLD X12, i3, X5 \
+	VPADDD  X5, X4, X4 \
+	VPMULLD X12, i0, X5 \
+	VPMULLD X8, i1, X6 \
+	VPSUBD  X6, X5, X5 \
+	VPMULLD X10, i3, X6 \
+	VPADDD  X6, X5, X5 \
+	VPMULLD X9, i2, X6 \
+	VPADDD  i1, i0, X7 \
+	VPSUBD  i3, X7, X7 \
+	VPMULLD X9, X7, X7 \
+	VPADDD  X6, X4, X13 \
+	RS(X13) \
+	RS(X7) \
+	VPSUBD  X6, X5, X14 \
+	RS(X14) \
+	VPSUBD  X4, X5, X15 \
+	VPADDD  X6, X15, X15 \
+	RS(X15) \
+	VMOVDQU X13, o0 \
+	VMOVDQU X7, o1 \
+	VMOVDQU X14, o2 \
+	VMOVDQU X15, o3
+
+#define T4(i0, i1, i2, i3, o0, o1, o2, o3) \
+	VPUNPCKLDQ  i1, i0, X4 \
+	VPUNPCKHDQ  i1, i0, X5 \
+	VPUNPCKLDQ  i3, i2, X6 \
+	VPUNPCKHDQ  i3, i2, X7 \
+	VPUNPCKLQDQ X6, X4, o0 \
+	VPUNPCKHQDQ X6, X4, o1 \
+	VPUNPCKLQDQ X7, X5, o2 \
+	VPUNPCKHQDQ X7, X5, o3
+
+#define LOADDCT \
+	VPBROADCASTD fwd4Const<>+0(SB), X8 \
+	VPBROADCASTD fwd4Const<>+4(SB), X9 \
+	VPBROADCASTD fwd4Const<>+8(SB), X10
+
+#define LOADADST \
+	VPBROADCASTD fwd4Const<>+16(SB), X8 \
+	VPBROADCASTD fwd4Const<>+20(SB), X9 \
+	VPBROADCASTD fwd4Const<>+24(SB), X10 \
+	VPBROADCASTD fwd4Const<>+28(SB), X12
+
+// fwdTxfm4x4AVX2 is the 4x4 forward transform for the four non-flipping
+// DCT/ADST combinations. cos_bit is 13 at this size, so the constants fold in,
+// and every intermediate fits int32 for 8-bit input.
+TEXT ·fwdTxfm4x4AVX2(SB), NOSPLIT, $0-40
+	MOVQ res+0(FP), DI
+	MOVQ src+8(FP), SI
+	MOVQ srcStride+16(FP), DX
+	SHLQ $2, DX
+
+	VMOVDQU (SI), X0
+	VMOVDQU (SI)(DX*1), X1
+	LEAQ    (SI)(DX*2), AX
+	VMOVDQU (AX), X2
+	VMOVDQU (AX)(DX*1), X3
+	VPSLLD  $2, X0, X0
+	VPSLLD  $2, X1, X1
+	VPSLLD  $2, X2, X2
+	VPSLLD  $2, X3, X3
+
+	VPBROADCASTD fwd4Const<>+12(SB), X11
+
+	MOVQ  colAdst+24(FP), AX
+	TESTQ AX, AX
+	JNZ   coladst
+	LOADDCT
+	FDCT4(X0, X1, X2, X3, X0, X1, X2, X3)
+	JMP   colfin
+
+coladst:
+	LOADADST
+	FADST4(X0, X1, X2, X3, X0, X1, X2, X3)
+
+colfin:
+	T4(X0, X1, X2, X3, X0, X1, X2, X3)
+
+	MOVQ  rowAdst+32(FP), AX
+	TESTQ AX, AX
+	JNZ   rowadst
+	LOADDCT
+	FDCT4(X0, X1, X2, X3, X0, X1, X2, X3)
+	JMP   store
+
+rowadst:
+	LOADADST
+	FADST4(X0, X1, X2, X3, X0, X1, X2, X3)
+
+store:
+	VMOVDQU X0, (DI)
+	VMOVDQU X1, 16(DI)
+	VMOVDQU X2, 32(DI)
+	VMOVDQU X3, 48(DI)
+	VZEROUPPER
+	RET

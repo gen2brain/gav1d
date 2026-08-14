@@ -2,6 +2,45 @@ package av1
 
 import "testing"
 
+func TestFwdTxfm4x4Asm(t *testing.T) {
+	if !hasAsmResidual() {
+		t.Skip("no assembly")
+	}
+
+	g := uint32(11)
+	next := func() int32 {
+		g = g*1664525 + 1013904223
+
+		return int32(g>>16%511) - 255
+	}
+	tmp := make([]int32, fwdScratch)
+	for _, stride := range []int{4, 16, 33} {
+		src := make([]int32, stride*4)
+		for round := range 64 {
+			for i := range src {
+				src[i] = next()
+				if round == 0 {
+					src[i] = 255
+				}
+			}
+			for _, txtp := range []int{dctDct, adstDct, dctAdst, adstAdst} {
+				want := make([]int32, 16)
+				got := make([]int32, 16)
+				fwdTxfmGo(want, src, stride, tx4x4, txtp, tmp)
+				if !fwdTxfm4x4(got, src, stride, txtp) {
+					t.Fatal("kernel declined")
+				}
+				for i := range want {
+					if got[i] != want[i] {
+						t.Fatalf("stride=%d txtp=%d [%d]: got %d, want %d",
+							stride, txtp, i, got[i], want[i])
+					}
+				}
+			}
+		}
+	}
+}
+
 func TestSatd8Asm(t *testing.T) {
 	if !hasAsmResidual() {
 		t.Skip("no assembly")

@@ -211,7 +211,13 @@ func fwdTxfm(coeff []int32, src []int32, srcStride, tx, txtp int, tmp []int32) {
 
 		return
 	}
+	if tx == tx4x4 && fwdTxfm4x4(coeff, src, srcStride, txtp) {
+		return
+	}
+	fwdTxfmGo(coeff, src, srcStride, tx, txtp, tmp)
+}
 
+func fwdTxfmGo(coeff []int32, src []int32, srcStride, tx, txtp int, tmp []int32) {
 	tDim := &txfmDimensions[tx]
 	w, h := 4*int(tDim.w), 4*int(tDim.h)
 	shift := &fwdShift[tx]
