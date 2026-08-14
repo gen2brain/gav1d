@@ -267,22 +267,41 @@ func avifFiles(t *testing.T, dir string) []string {
 	return out
 }
 
+// conformanceDirs returns the corpora named by CONFORMANCE_DIR, a colon
+// separated list shared with the av1 package and the sibling codecs. Each test
+// picks the entries it recognises; the rest contribute nothing.
+func conformanceDirs(t *testing.T) []string {
+	t.Helper()
+
+	env := os.Getenv("CONFORMANCE_DIR")
+	if env == "" {
+		t.Skip("set CONFORMANCE_DIR")
+	}
+
+	return strings.Split(env, ":")
+}
+
 // TestCorpusRobust walks a corpus laid out as valid/, invalid/ and edge-cases/.
 // Files under valid/ must decode; the rest only have to return rather than
 // crash or hang, which is the contract those groups are collected for --
 // several of the invalid files are accepted by libavif too. Set
-// AVIF_CORPUS_DIR to run it.
+// CONFORMANCE_DIR to run it.
 func TestCorpusRobust(t *testing.T) {
-	root := os.Getenv("AVIF_CORPUS_DIR")
-	if root == "" {
-		t.Skip("set AVIF_CORPUS_DIR")
+	var groups []string
+	for _, root := range conformanceDirs(t) {
+		for _, group := range []string{"valid", "invalid", "edge-cases"} {
+			if _, err := os.Stat(filepath.Join(root, group)); err == nil {
+				groups = append(groups, filepath.Join(root, group))
+			}
+		}
+	}
+	if len(groups) == 0 {
+		t.Skip("no valid/invalid/edge-cases corpus in CONFORMANCE_DIR")
 	}
 
-	for _, group := range []string{"valid", "invalid", "edge-cases"} {
-		dir := filepath.Join(root, group)
-		if _, err := os.Stat(dir); err != nil {
-			continue
-		}
+	for _, dir := range groups {
+		group := filepath.Base(dir)
+
 		var ok, failed, panicked int
 		for _, path := range avifFiles(t, dir) {
 			name := strings.TrimPrefix(path, dir+"/")
@@ -332,16 +351,12 @@ func corpusDecode(path string) (err error, panicMsg string) {
 }
 
 // TestConformance decodes an external AVIF corpus, comparing every plane
-// against avifdec. Set AVIF_CONFORMANCE_DIR (colon separated) to run it.
+// against avifdec. Set CONFORMANCE_DIR to run it.
 func TestConformance(t *testing.T) {
-	env := os.Getenv("AVIF_CONFORMANCE_DIR")
-	if env == "" {
-		t.Skip("set AVIF_CONFORMANCE_DIR")
-	}
+	dirs := conformanceDirs(t)
 	if avifdec == "" {
 		t.Skip("avifdec not found (set AVIFDEC_BIN)")
 	}
-	dirs := strings.Split(env, ":")
 
 	var exact, skipped, colorExact int
 	fails := map[string]int{}
@@ -349,7 +364,7 @@ func TestConformance(t *testing.T) {
 
 	for _, dir := range dirs {
 		if _, err := os.Stat(dir); err != nil {
-			t.Skip("conformance corpus not present")
+			continue
 		}
 		for _, path := range avifFiles(t, dir) {
 			name := strings.TrimPrefix(path, dir+"/")
@@ -1365,16 +1380,13 @@ func TestExif(t *testing.T) {
 }
 
 // TestExifFiles reads the two metadata items libavif's own tests pin the sizes
-// of. Set AVIF_CONFORMANCE_DIR to run it.
+// of. Set CONFORMANCE_DIR to run it.
 func TestExifFiles(t *testing.T) {
-	env := os.Getenv("AVIF_CONFORMANCE_DIR")
-	if env == "" {
-		t.Skip("set AVIF_CONFORMANCE_DIR")
-	}
+	dirs := conformanceDirs(t)
 
 	for _, name := range []string{"colors-animated-8bpc-alpha-exif-xmp.avif", "paris_icc_exif_xmp.avif"} {
 		var b []byte
-		for _, dir := range strings.Split(env, ":") {
+		for _, dir := range dirs {
 			if d, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
 				b = d
 
@@ -1735,12 +1747,9 @@ func TestApplyGainMapScale(t *testing.T) {
 // TestGainMapFile reads the gain maps of real files, which is the one path
 // TestParseToneMap and the ApplyGainMap tests do not reach: decoding the gain
 // map image itself, including from a grid, and the alternate rendition's color
-// property. Set AVIF_CONFORMANCE_DIR to run it.
+// property. Set CONFORMANCE_DIR to run it.
 func TestGainMapFile(t *testing.T) {
-	env := os.Getenv("AVIF_CONFORMANCE_DIR")
-	if env == "" {
-		t.Skip("set AVIF_CONFORMANCE_DIR")
-	}
+	dirs := conformanceDirs(t)
 
 	cases := []struct {
 		name            string
@@ -1772,7 +1781,7 @@ func TestGainMapFile(t *testing.T) {
 
 	for _, c := range cases {
 		var data []byte
-		for _, dir := range strings.Split(env, ":") {
+		for _, dir := range dirs {
 			if b, err := os.ReadFile(filepath.Join(dir, c.name)); err == nil {
 				data = b
 

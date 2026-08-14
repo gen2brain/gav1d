@@ -289,28 +289,63 @@ func dav1dYUV(t *testing.T, path string) []byte {
 	return data
 }
 
+// conformanceDirs returns the corpora named by CONFORMANCE_DIR, a colon
+// separated list shared with the avif package and the sibling codecs. Each
+// test picks the entries it recognises; the rest contribute nothing.
+func conformanceDirs(t *testing.T) []string {
+	t.Helper()
+
+	env := os.Getenv("CONFORMANCE_DIR")
+	if env == "" {
+		t.Skip("set CONFORMANCE_DIR")
+	}
+
+	return strings.Split(env, ":")
+}
+
+// argonRoots picks out the entries holding an Argon Streams tree: a directory
+// of profileN_* suites, each with a streams subdirectory.
+func argonRoots(dirs []string) []string {
+	var out []string
+	for _, d := range dirs {
+		if m, _ := filepath.Glob(filepath.Join(d, "profile*", "streams")); len(m) > 0 {
+			out = append(out, d)
+		}
+	}
+
+	return out
+}
+
 // TestConformance decodes the dav1d conformance suite and reports how many
 // streams are bit-exact. Set CONFORMANCE_DIR to run it.
 func TestConformance(t *testing.T) {
-	dir := os.Getenv("CONFORMANCE_DIR")
-	if dir == "" {
-		t.Skip("set CONFORMANCE_DIR")
-	}
+	dirs := conformanceDirs(t)
 	if dav1dBin == "" {
 		t.Skip("dav1d not found (set DAV1D_BIN)")
 	}
 
-	var streams []string
-	err := filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
-		if err == nil && !fi.IsDir() &&
-			(strings.HasSuffix(p, ".ivf") || strings.HasSuffix(p, ".obu")) {
-			streams = append(streams, p)
-		}
+	argon := map[string]bool{}
+	for _, d := range argonRoots(dirs) {
+		argon[d] = true
+	}
 
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
+	var streams []string
+	for _, dir := range dirs {
+		if argon[dir] {
+			// TestArgon covers these, against their own references.
+			continue
+		}
+		filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
+			if err == nil && !fi.IsDir() &&
+				(strings.HasSuffix(p, ".ivf") || strings.HasSuffix(p, ".obu")) {
+				streams = append(streams, p)
+			}
+
+			return nil
+		})
+	}
+	if len(streams) == 0 {
+		t.Skip("no AV1 streams in CONFORMANCE_DIR")
 	}
 	sort.Strings(streams)
 
@@ -318,7 +353,7 @@ func TestConformance(t *testing.T) {
 	fails := map[string]int{}
 
 	for _, p := range streams {
-		name := strings.TrimPrefix(p, dir)
+		name := filepath.Base(p)
 		res := conformanceOne(p)
 		switch res {
 		case "":
@@ -355,93 +390,85 @@ func TestConformance(t *testing.T) {
 // where the requirement is only that the decoder returns rather than crashing.
 // The large_scale_tile suites are skipped: their references come from libaom's
 // lightfield_tile_list_decoder, a tile-list mode no ordinary AV1 decoder
-// implements -- dav1d does not match them either. Set ARGON_DIR to run it, and
-// ARGON_SUITES to pick directories.
+// implements -- dav1d does not match them either.
+// Set CONFORMANCE_DIR to run it; one suite alone is -run TestArgon/profile0_core.
 func TestArgon(t *testing.T) {
-	dir := os.Getenv("ARGON_DIR")
-	if dir == "" {
-		t.Skip("set ARGON_DIR")
+	roots := argonRoots(conformanceDirs(t))
+	if len(roots) == 0 {
+		t.Skip("no Argon Streams tree in CONFORMANCE_DIR")
 	}
 
-	suites, err := filepath.Glob(filepath.Join(dir, "profile*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := os.Getenv("ARGON_SUITES"); want != "" {
-		var keep []string
-		for _, s := range suites {
-			for _, w := range strings.Split(want, ",") {
-				if filepath.Base(s) == w {
-					keep = append(keep, s)
-				}
-			}
-		}
-		suites = keep
+	var suites []string
+	for _, root := range roots {
+		m, _ := filepath.Glob(filepath.Join(root, "profile*"))
+		suites = append(suites, m...)
 	}
 	sort.Strings(suites)
 
-	var totExact, totMiss, totErr int
-	skip := os.Getenv("ARGON_SUITES") == ""
+	var totExact, totMiss, totRej int
 	for _, suite := range suites {
-		if skip && strings.Contains(filepath.Base(suite), "large_scale_tile") {
-			continue
-		}
 		streams, _ := filepath.Glob(filepath.Join(suite, "streams", "*.obu"))
 		if len(streams) == 0 {
 			continue
 		}
 		sort.Strings(streams)
 
-		var exact, mismatch, rejected int
-		fails := map[string]int{}
-		for _, p := range streams {
-			name := strings.TrimSuffix(filepath.Base(p), ".obu")
-			ref := ""
-			if b, err := os.ReadFile(filepath.Join(suite, "md5_ref", name+".md5")); err == nil {
-				ref = strings.Fields(string(b))[0]
+		t.Run(filepath.Base(suite), func(t *testing.T) {
+			if strings.Contains(filepath.Base(suite), "large_scale_tile") {
+				t.Skip("needs libaom's lightfield tile list decoder")
 			}
-			res := argonOne(p, ref)
-			switch {
-			case res == "":
-				exact++
-			case ref == "" && !strings.HasPrefix(res, "panic"):
-				// No reference: a corrupt stream may be rejected, so long as
-				// the decoder returns rather than crashing.
-				rejected++
-			default:
-				mismatch++
-				key := res
-				if i := strings.IndexByte(key, '\n'); i >= 0 {
-					key = key[:i]
+
+			var exact, mismatch, rejected int
+			fails := map[string]int{}
+			for _, p := range streams {
+				name := strings.TrimSuffix(filepath.Base(p), ".obu")
+				ref := ""
+				if b, err := os.ReadFile(filepath.Join(suite, "md5_ref", name+".md5")); err == nil {
+					ref = strings.Fields(string(b))[0]
 				}
-				if len(key) > 80 {
-					key = key[:80]
-				}
-				fails[key]++
-				if os.Getenv("ARGON_VERBOSE") != "" || fails[key] <= 2 {
-					t.Logf("%s/%s: %s", filepath.Base(suite), name, key)
+				res := argonOne(p, ref)
+				switch {
+				case res == "":
+					exact++
+				case ref == "" && !strings.HasPrefix(res, "panic"):
+					// No reference: a corrupt stream may be rejected, so long
+					// as the decoder returns rather than crashing.
+					rejected++
+				default:
+					mismatch++
+					key := res
+					if i := strings.IndexByte(key, '\n'); i >= 0 {
+						key = key[:i]
+					}
+					if len(key) > 80 {
+						key = key[:80]
+					}
+					fails[key]++
+					if os.Getenv("CONFORMANCE_VERBOSE") != "" || fails[key] <= 2 {
+						t.Logf("%s: %s", name, key)
+					}
 				}
 			}
-		}
-		totExact, totMiss, totErr = totExact+exact, totMiss+mismatch, totErr+rejected
-		if hasRef := exact+mismatch > 0 && rejected == 0; hasRef {
-			t.Logf("%-32s %4d/%4d bit-exact, %4d mismatch",
-				filepath.Base(suite), exact, len(streams), mismatch)
-		} else {
-			t.Logf("%-32s %4d/%4d decoded, %4d rejected, %4d bad",
-				filepath.Base(suite), exact, len(streams), rejected, mismatch)
-		}
-		keys := make([]string, 0, len(fails))
-		for k := range fails {
-			keys = append(keys, k)
-		}
-		sort.Slice(keys, func(i, j int) bool { return fails[keys[i]] > fails[keys[j]] })
-		for _, k := range keys {
-			t.Logf("    %4d  %s", fails[k], k)
-		}
+			totExact, totMiss, totRej = totExact+exact, totMiss+mismatch, totRej+rejected
+
+			if rejected == 0 {
+				t.Logf("%4d/%4d bit-exact, %4d mismatch", exact, len(streams), mismatch)
+			} else {
+				t.Logf("%4d/%4d decoded, %4d rejected, %4d bad",
+					exact, len(streams), rejected, mismatch)
+			}
+			keys := make([]string, 0, len(fails))
+			for k := range fails {
+				keys = append(keys, k)
+			}
+			sort.Slice(keys, func(i, j int) bool { return fails[keys[i]] > fails[keys[j]] })
+			for _, k := range keys {
+				t.Logf("    %4d  %s", fails[k], k)
+			}
+		})
 	}
 	t.Logf("TOTAL %d bit-exact or decoded, %d mismatch, %d rejected without reference",
-		totExact, totMiss, totErr)
+		totExact, totMiss, totRej)
 }
 
 func argonOne(path, ref string) (res string) {
