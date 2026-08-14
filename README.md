@@ -2,7 +2,7 @@
 [![Status](https://github.com/gen2brain/gav1d/actions/workflows/test.yml/badge.svg)](https://github.com/gen2brain/gav1d/actions)
 [![Go Reference](https://pkg.go.dev/badge/github.com/gen2brain/gav1d.svg)](https://pkg.go.dev/github.com/gen2brain/gav1d)
 
-[AV1](https://en.wikipedia.org/wiki/AV1) video and [AVIF](https://en.wikipedia.org/wiki/AVIF) image decoder in pure Go.
+[AV1](https://en.wikipedia.org/wiki/AV1) video and [AVIF](https://en.wikipedia.org/wiki/AVIF) image decoder and encoder in pure Go.
 
 A port of [dav1d](https://code.videolan.org/videolan/dav1d), bit-exact against it. No CGo, no dependencies.
 
