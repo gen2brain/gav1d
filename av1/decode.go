@@ -119,7 +119,7 @@ func (t *taskContext[P, C]) decodeB(bl, bs, bp int, intraEdgeFlags int) error {
 				diff := ts.msac.symbolAdapt(ts.cdf.m.segID[segCtx][:], maxSegments-1)
 				lastActive := int(f.frameHdr.segmentation.segData.lastActiveSegid)
 				id := negDeinterleave(int(diff), int(predSegID), lastActive+1)
-				if id > lastActive || id >= maxSegments {
+				if id < 0 || id > lastActive || id >= maxSegments {
 					id = 0
 				}
 				b.segID = uint8(id)
@@ -167,7 +167,7 @@ func (t *taskContext[P, C]) decodeB(bl, bs, bp int, intraEdgeFlags int) error {
 				diff := ts.msac.symbolAdapt(ts.cdf.m.segID[segCtx][:], maxSegments-1)
 				lastActive := int(f.frameHdr.segmentation.segData.lastActiveSegid)
 				id := negDeinterleave(int(diff), int(predSegID), lastActive+1)
-				if id > lastActive {
+				if id < 0 || id > lastActive {
 					id = 0
 				}
 				b.segID = uint8(id)
