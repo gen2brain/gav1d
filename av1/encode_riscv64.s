@@ -103,6 +103,40 @@ sstrip:
 	VXORVV m, v, v;   \
 	VSUBVV m, v, v
 
+#define HAD8R(i0, i1, i2, i3, i4, i5, i6, i7) \
+	VADDVV i4, i0, V20; \
+	VADDVV i5, i1, V21; \
+	VADDVV i6, i2, V22; \
+	VADDVV i7, i3, V23; \
+	VSUBVV i4, i0, V24; \
+	VSUBVV i5, i1, V25; \
+	VSUBVV i6, i2, V26; \
+	VSUBVV i7, i3, V27; \
+	VADDVV V22, V20, i0; \
+	VADDVV V23, V21, i1; \
+	VSUBVV V22, V20, i2; \
+	VSUBVV V23, V21, i3; \
+	VADDVV V26, V24, i4; \
+	VADDVV V27, V25, i5; \
+	VSUBVV V26, V24, i6; \
+	VSUBVV V27, V25, i7; \
+	VADDVV i1, i0, V20; \
+	VSUBVV i1, i0, V21; \
+	VADDVV i3, i2, V22; \
+	VSUBVV i3, i2, V23; \
+	VADDVV i5, i4, V24; \
+	VSUBVV i5, i4, V25; \
+	VADDVV i7, i6, V26; \
+	VSUBVV i7, i6, V27; \
+	VMVVV V20, i0; \
+	VMVVV V21, i1; \
+	VMVVV V22, i2; \
+	VMVVV V23, i3; \
+	VMVVV V24, i4; \
+	VMVVV V25, i5; \
+	VMVVV V26, i6; \
+	VMVVV V27, i7
+
 #define HAD4R(i0, i1, i2, i3, t0, t1, t2, t3) \
 	VADDVV i2, i0, t0; \
 	VADDVV i3, i1, t1; \
@@ -165,5 +199,93 @@ TEXT ·satd4RVV(SB), NOSPLIT, $64-20
 	VMVXS     V4, X6
 	ADDW      $2, X6, X6
 	SRAW      $2, X6, X6
+	MOVW      X6, ret+16(FP)
+	RET
+
+// satd8RVV is the sum of absolute 8x8 Hadamard coefficients, transposed the
+// same way satd4RVV is.
+TEXT ·satd8RVV(SB), NOSPLIT, $256-20
+	MOV  res+0(FP), X10
+	MOV  stride+8(FP), X11
+	SLLI $2, X11, X11
+	MOV  $8, X12
+	VSETVLI X12, E32, M1, TA, MA, X5
+
+	VLE32V (X10), V0
+	ADD    X11, X10, X13
+	VLE32V (X13), V1
+	ADD    X11, X13, X13
+	VLE32V (X13), V2
+	ADD    X11, X13, X13
+	VLE32V (X13), V3
+	ADD    X11, X13, X13
+	VLE32V (X13), V4
+	ADD    X11, X13, X13
+	VLE32V (X13), V5
+	ADD    X11, X13, X13
+	VLE32V (X13), V6
+	ADD    X11, X13, X13
+	VLE32V (X13), V7
+
+	HAD8R(V0, V1, V2, V3, V4, V5, V6, V7)
+
+	MOV    $scratch-256(SP), X14
+	MOV    X14, X15
+	VSE32V V0, (X15)
+	ADD    $32, X15, X15
+	VSE32V V1, (X15)
+	ADD    $32, X15, X15
+	VSE32V V2, (X15)
+	ADD    $32, X15, X15
+	VSE32V V3, (X15)
+	ADD    $32, X15, X15
+	VSE32V V4, (X15)
+	ADD    $32, X15, X15
+	VSE32V V5, (X15)
+	ADD    $32, X15, X15
+	VSE32V V6, (X15)
+	ADD    $32, X15, X15
+	VSE32V V7, (X15)
+
+	MOV     $32, X16
+	MOV     X14, X15
+	VLSE32V (X15), X16, V0
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V1
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V2
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V3
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V4
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V5
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V6
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V7
+
+	HAD8R(V0, V1, V2, V3, V4, V5, V6, V7)
+
+	ABSV(V0, V16)
+	ABSV(V1, V16)
+	ABSV(V2, V16)
+	ABSV(V3, V16)
+	ABSV(V4, V16)
+	ABSV(V5, V16)
+	ABSV(V6, V16)
+	ABSV(V7, V16)
+	VADDVV    V1, V0, V0
+	VADDVV    V3, V2, V2
+	VADDVV    V5, V4, V4
+	VADDVV    V7, V6, V6
+	VADDVV    V2, V0, V0
+	VADDVV    V6, V4, V4
+	VADDVV    V4, V0, V0
+	VMVVI     $0, V8
+	VREDSUMVS V8, V0, V8
+	VMVXS     V8, X6
+	ADDW      $4, X6, X6
+	SRAW      $3, X6, X6
 	MOVW      X6, ret+16(FP)
 	RET

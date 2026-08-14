@@ -25,6 +25,11 @@ func satd4Kernel(res []int32, off, stride int) int32 {
 	return satd4RVV(&res[off], stride)
 }
 
-func satd8Kernel(res []int32, off, stride int) int32 { return satd8(res, off, stride) }
+//go:noescape
+func satd8RVV(res *int32, stride int) int32
+
+func satd8Kernel(res []int32, off, stride int) int32 {
+	return satd8RVV(&res[off], stride)
+}
 
 func fwdTxfm4x4(coeff []int32, src []int32, srcStride, txtp int) bool { return false }

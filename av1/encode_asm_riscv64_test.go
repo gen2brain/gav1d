@@ -6,6 +6,6 @@ func hasAsmResidual() bool { return true }
 
 func hasAsmSatd4() bool { return true }
 
-func hasAsmSatd8() bool { return false }
+func hasAsmSatd8() bool { return true }
 
 func hasAsmSse() bool { return true }
