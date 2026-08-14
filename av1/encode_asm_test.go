@@ -224,6 +224,12 @@ func TestFwdTxfmRectAsm(t *testing.T) {
 		{rtx16x8, 16, 8, fwdTxfm16x8},
 		{tx16x16, 16, 16, fwdTxfm16x16},
 	} {
+		probe := make([]int32, c.w*c.h)
+		if !c.kernel(probe, make([]int32, 40*c.h), 40, dctDct) {
+			t.Logf("%dx%d: no kernel", c.w, c.h)
+
+			continue
+		}
 		for _, stride := range []int{c.w, c.w * 2, 40} {
 			src := make([]int32, stride*c.h)
 			for round := range 64 {
@@ -239,9 +245,7 @@ func TestFwdTxfmRectAsm(t *testing.T) {
 				want := make([]int32, c.w*c.h)
 				got := make([]int32, c.w*c.h)
 				fwdTxfmGo(want, src, stride, c.tx, dctDct, tmp)
-				if !c.kernel(got, src, stride, dctDct) {
-					t.Skip("no rectangular transform kernel")
-				}
+				c.kernel(got, src, stride, dctDct)
 				for i := range want {
 					if got[i] != want[i] {
 						t.Fatalf("%dx%d stride=%d round=%d [%d]: got %d, want %d",

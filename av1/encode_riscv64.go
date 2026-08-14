@@ -28,16 +28,40 @@ func satd4Kernel(res []int32, off, stride int) int32 {
 //go:noescape
 func satd8RVV(res *int32, stride int) int32
 
+//go:noescape
+func fwdTxfm8x8RVV(res *int32, src *int32, srcStride int)
+
 func fwdTxfm8x8(coeff []int32, src []int32, srcStride, txtp int) bool {
-	return false
+	if txtp != dctDct {
+		return false
+	}
+	fwdTxfm8x8RVV(&coeff[0], &src[0], srcStride)
+
+	return true
 }
+
+//go:noescape
+func fwdTxfm4x8RVV(res *int32, src *int32, srcStride int)
 
 func fwdTxfm4x8(coeff []int32, src []int32, srcStride, txtp int) bool {
-	return false
+	if txtp != dctDct {
+		return false
+	}
+	fwdTxfm4x8RVV(&coeff[0], &src[0], srcStride)
+
+	return true
 }
 
+//go:noescape
+func fwdTxfm8x4RVV(res *int32, src *int32, srcStride int)
+
 func fwdTxfm8x4(coeff []int32, src []int32, srcStride, txtp int) bool {
-	return false
+	if txtp != dctDct {
+		return false
+	}
+	fwdTxfm8x4RVV(&coeff[0], &src[0], srcStride)
+
+	return true
 }
 
 func fwdTxfm8x16(coeff []int32, src []int32, srcStride, txtp int) bool {

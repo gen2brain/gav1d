@@ -10,6 +10,7 @@
 #define ABS4S(n, d)  WORD $(0x4ea0b800 | ((n) << 5) | (d))
 #define MUL4S(m, n, d)  WORD $(0x4ea09c00 | ((m) << 16) | ((n) << 5) | (d))
 #define SSHR13(n, d)    WORD $(0x4f330400 | ((n) << 5) | (d))
+#define SSHRN(k, n, d)  WORD $(0x4f000400 | ((64 - (k)) << 16) | ((n) << 5) | (d))
 
 #define RSN(v, n) \
 	VADD V19.S4, v.S4, v.S4; \
@@ -442,4 +443,390 @@ nrowadst:
 
 nstore:
 	VST1 [V0.S4, V1.S4, V2.S4, V3.S4], (R0)
+	RET
+
+// The eight point transform needs seven cosines and the rounding term. V16..V19
+// keep the three the four point transform already uses so DCTC still applies;
+// V12..V15 hold the rest.
+#define DCT8C \
+	DCTC; \
+	MOVD $4096, R4; \
+	VDUP R4, V19.S4; \
+	MOVD $1598, R4; \
+	VDUP R4, V12.S4; \
+	MOVD $6811, R4; \
+	VDUP R4, V13.S4; \
+	MOVD $4551, R4; \
+	VDUP R4, V14.S4; \
+	MOVD $8035, R4; \
+	VDUP R4, V15.S4
+
+#define BTF8N(ka, an, kb, bn, tn, tv, dn, dv) \
+	MUL4S(ka, an, dn); \
+	MUL4S(kb, bn, tn); \
+	VADD tv.S4, dv.S4, dv.S4; \
+	VADD V19.S4, dv.S4, dv.S4; \
+	SSHR13(dn, dn)
+
+#define BTFN8N(ka, an, kb, bn, tn, tv, dn, dv) \
+	MUL4S(ka, an, dn); \
+	MUL4S(kb, bn, tn); \
+	VSUB tv.S4, dv.S4, dv.S4; \
+	VADD V19.S4, dv.S4, dv.S4; \
+	SSHR13(dn, dn)
+
+// FDCT8N is an eight point DCT down V0..V7, four lanes wide, with V8..V11 and
+// V20..V31 as temporaries. The final permutation is folded into the destination
+// registers, so V0..V7 come out in frequency order.
+#define FDCT8N \
+	VADD V7.S4, V0.S4, V20.S4; \
+	VADD V6.S4, V1.S4, V21.S4; \
+	VADD V5.S4, V2.S4, V22.S4; \
+	VADD V4.S4, V3.S4, V23.S4; \
+	VSUB V4.S4, V3.S4, V24.S4; \
+	VSUB V5.S4, V2.S4, V25.S4; \
+	VSUB V6.S4, V1.S4, V26.S4; \
+	VSUB V7.S4, V0.S4, V27.S4; \
+	VADD V23.S4, V20.S4, V28.S4; \
+	VADD V22.S4, V21.S4, V29.S4; \
+	VSUB V22.S4, V21.S4, V30.S4; \
+	VSUB V23.S4, V20.S4, V31.S4; \
+	BTFN8N(16, 26, 16, 25, 11, V11, 8, V8); \
+	BTF8N(16, 26, 16, 25, 10, V10, 9, V9); \
+	BTF8N(16, 28, 16, 29, 11, V11, 0, V0); \
+	BTFN8N(16, 28, 16, 29, 11, V11, 4, V4); \
+	BTF8N(17, 30, 18, 31, 11, V11, 2, V2); \
+	BTFN8N(17, 31, 18, 30, 11, V11, 6, V6); \
+	VADD V8.S4, V24.S4, V28.S4; \
+	VSUB V8.S4, V24.S4, V29.S4; \
+	VSUB V9.S4, V27.S4, V30.S4; \
+	VADD V9.S4, V27.S4, V31.S4; \
+	BTF8N(12, 28, 15, 31, 11, V11, 1, V1); \
+	BTF8N(13, 29, 14, 30, 11, V11, 5, V5); \
+	BTFN8N(13, 30, 14, 29, 11, V11, 3, V3); \
+	BTFN8N(12, 31, 15, 28, 11, V11, 7, V7)
+
+// RECT1N is the round shift by one the 4x8 and 8x4 shift schedules ask for,
+// then the rectangular Sqrt2 correction. V13 holds one and V14 holds 2048,
+// reloaded over the cosines the column pass no longer needs.
+#define RECT1N(v, n) \
+	VADD V13.S4, v.S4, v.S4; \
+	SSHRN(1, n, n); \
+	MUL4S(16, n, n); \
+	VADD V14.S4, v.S4, v.S4; \
+	SSHRN(12, n, n)
+
+#define RECTC \
+	MOVD $1, R4; \
+	VDUP R4, V13.S4; \
+	MOVD $2048, R4; \
+	VDUP R4, V14.S4
+
+// fwdTxfm4x8NEON is the 4x8 DCT_DCT forward transform: eight points down the
+// columns over four lanes, then four points along each of the eight rows, run
+// as two groups of four because a NEON register holds four.
+TEXT ·fwdTxfm4x8NEON(SB), NOSPLIT, $0-24
+	MOVD res+0(FP), R0
+	MOVD src+8(FP), R1
+	MOVD srcStride+16(FP), R2
+	LSL  $2, R2, R2
+
+	VLD1 (R1), [V0.S4]
+	ADD  R2, R1, R3
+	VLD1 (R3), [V1.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V2.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V3.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V4.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V5.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V6.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V7.S4]
+
+	VSHL $2, V0.S4, V0.S4
+	VSHL $2, V1.S4, V1.S4
+	VSHL $2, V2.S4, V2.S4
+	VSHL $2, V3.S4, V3.S4
+	VSHL $2, V4.S4, V4.S4
+	VSHL $2, V5.S4, V5.S4
+	VSHL $2, V6.S4, V6.S4
+	VSHL $2, V7.S4, V7.S4
+
+	DCT8C
+	FDCT8N
+
+	TT4(V0, V1, V2, V3, V8, V9, V10, V11, V20, V21, V22, V23)
+	TT4(V4, V5, V6, V7, V0, V1, V2, V3, V20, V21, V22, V23)
+
+	DCTC
+	FDCT4N
+	VMOV V0.B16, V4.B16
+	VMOV V1.B16, V5.B16
+	VMOV V2.B16, V6.B16
+	VMOV V3.B16, V7.B16
+
+	VMOV V8.B16, V0.B16
+	VMOV V9.B16, V1.B16
+	VMOV V10.B16, V2.B16
+	VMOV V11.B16, V3.B16
+	FDCT4N
+
+	RECTC
+	RECT1N(V0, 0)
+	RECT1N(V1, 1)
+	RECT1N(V2, 2)
+	RECT1N(V3, 3)
+	RECT1N(V4, 4)
+	RECT1N(V5, 5)
+	RECT1N(V6, 6)
+	RECT1N(V7, 7)
+
+	VST1 [V0.S4], (R0)
+	ADD  $16, R0, R3
+	VST1 [V4.S4], (R3)
+	ADD  $16, R3, R3
+	VST1 [V1.S4], (R3)
+	ADD  $16, R3, R3
+	VST1 [V5.S4], (R3)
+	ADD  $16, R3, R3
+	VST1 [V2.S4], (R3)
+	ADD  $16, R3, R3
+	VST1 [V6.S4], (R3)
+	ADD  $16, R3, R3
+	VST1 [V3.S4], (R3)
+	ADD  $16, R3, R3
+	VST1 [V7.S4], (R3)
+	RET
+
+// fwdTxfm8x4NEON is the 8x4 DCT_DCT forward transform, the same two passes as
+// fwdTxfm4x8NEON in the other order: four points down each half of the columns,
+// then eight points along the rows.
+TEXT ·fwdTxfm8x4NEON(SB), NOSPLIT, $0-24
+	MOVD res+0(FP), R0
+	MOVD src+8(FP), R1
+	MOVD srcStride+16(FP), R2
+	LSL  $2, R2, R2
+
+	VLD1 (R1), [V0.S4]
+	ADD  $16, R1, R4
+	VLD1 (R4), [V4.S4]
+	ADD  R2, R1, R3
+	VLD1 (R3), [V1.S4]
+	ADD  $16, R3, R4
+	VLD1 (R4), [V5.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V2.S4]
+	ADD  $16, R3, R4
+	VLD1 (R4), [V6.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V3.S4]
+	ADD  $16, R3, R4
+	VLD1 (R4), [V7.S4]
+
+	VSHL $2, V0.S4, V0.S4
+	VSHL $2, V1.S4, V1.S4
+	VSHL $2, V2.S4, V2.S4
+	VSHL $2, V3.S4, V3.S4
+	VSHL $2, V4.S4, V4.S4
+	VSHL $2, V5.S4, V5.S4
+	VSHL $2, V6.S4, V6.S4
+	VSHL $2, V7.S4, V7.S4
+
+	DCT8C
+	FDCT4N
+	VMOV V0.B16, V8.B16
+	VMOV V1.B16, V9.B16
+	VMOV V2.B16, V10.B16
+	VMOV V3.B16, V11.B16
+
+	VMOV V4.B16, V0.B16
+	VMOV V5.B16, V1.B16
+	VMOV V6.B16, V2.B16
+	VMOV V7.B16, V3.B16
+	FDCT4N
+
+	TT4(V0, V1, V2, V3, V4, V5, V6, V7, V20, V21, V22, V23)
+	TT4(V8, V9, V10, V11, V0, V1, V2, V3, V20, V21, V22, V23)
+
+	FDCT8N
+
+	RECTC
+	RECT1N(V0, 0)
+	RECT1N(V1, 1)
+	RECT1N(V2, 2)
+	RECT1N(V3, 3)
+	RECT1N(V4, 4)
+	RECT1N(V5, 5)
+	RECT1N(V6, 6)
+	RECT1N(V7, 7)
+
+	VST1 [V0.S4, V1.S4, V2.S4, V3.S4], (R0)
+	ADD  $64, R0, R3
+	VST1 [V4.S4, V5.S4, V6.S4, V7.S4], (R3)
+	RET
+
+#define DOWN1N(v, n) \
+	VADD V20.S4, v.S4, v.S4; \
+	SSHRN(1, n, n)
+
+// fwdTxfm8x8NEON is the 8x8 DCT_DCT forward transform. A NEON register holds
+// four lanes and the block is eight wide, so each pass runs twice over a
+// scratch buffer rather than keeping sixteen rows live against FDCT8N's
+// temporaries.
+TEXT ·fwdTxfm8x8NEON(SB), NOSPLIT, $256-24
+	MOVD res+0(FP), R0
+	MOVD src+8(FP), R1
+	MOVD srcStride+16(FP), R2
+	LSL  $2, R2, R2
+	MOVD $buf-256(SP), R5
+
+	MOVD R1, R3
+	VLD1 (R3), [V0.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V1.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V2.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V3.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V4.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V5.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V6.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V7.S4]
+
+	VSHL $2, V0.S4, V0.S4
+	VSHL $2, V1.S4, V1.S4
+	VSHL $2, V2.S4, V2.S4
+	VSHL $2, V3.S4, V3.S4
+	VSHL $2, V4.S4, V4.S4
+	VSHL $2, V5.S4, V5.S4
+	VSHL $2, V6.S4, V6.S4
+	VSHL $2, V7.S4, V7.S4
+
+	DCT8C
+	FDCT8N
+
+	MOVD R5, R6
+	VST1 [V0.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V1.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V2.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V3.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V4.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V5.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V6.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V7.S4], (R6)
+
+	ADD  $16, R1, R3
+	VLD1 (R3), [V0.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V1.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V2.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V3.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V4.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V5.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V6.S4]
+	ADD  R2, R3, R3
+	VLD1 (R3), [V7.S4]
+
+	VSHL $2, V0.S4, V0.S4
+	VSHL $2, V1.S4, V1.S4
+	VSHL $2, V2.S4, V2.S4
+	VSHL $2, V3.S4, V3.S4
+	VSHL $2, V4.S4, V4.S4
+	VSHL $2, V5.S4, V5.S4
+	VSHL $2, V6.S4, V6.S4
+	VSHL $2, V7.S4, V7.S4
+
+	FDCT8N
+
+	ADD  $16, R5, R6
+	VST1 [V0.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V1.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V2.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V3.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V4.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V5.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V6.S4], (R6)
+	ADD  $32, R6, R6
+	VST1 [V7.S4], (R6)
+
+	MOVD R5, R6
+	MOVD R0, R7
+	MOVD $2, R8
+
+rowpass8:
+	VLD1 (R6), [V0.S4, V1.S4]
+	ADD  $32, R6, R6
+	VLD1 (R6), [V2.S4, V3.S4]
+	ADD  $32, R6, R6
+	VLD1 (R6), [V4.S4, V5.S4]
+	ADD  $32, R6, R6
+	VLD1 (R6), [V6.S4, V7.S4]
+	ADD  $32, R6, R6
+
+	TT4(V0, V2, V4, V6, V8, V9, V10, V11, V20, V21, V22, V23)
+	TT4(V1, V3, V5, V7, V4, V5, V6, V7, V20, V21, V22, V23)
+	VMOV V8.B16, V0.B16
+	VMOV V9.B16, V1.B16
+	VMOV V10.B16, V2.B16
+	VMOV V11.B16, V3.B16
+
+	FDCT8N
+
+	MOVD $1, R4
+	VDUP R4, V20.S4
+	DOWN1N(V0, 0)
+	DOWN1N(V1, 1)
+	DOWN1N(V2, 2)
+	DOWN1N(V3, 3)
+	DOWN1N(V4, 4)
+	DOWN1N(V5, 5)
+	DOWN1N(V6, 6)
+	DOWN1N(V7, 7)
+
+	MOVD R7, R9
+	VST1 [V0.S4], (R9)
+	ADD  $32, R9, R9
+	VST1 [V1.S4], (R9)
+	ADD  $32, R9, R9
+	VST1 [V2.S4], (R9)
+	ADD  $32, R9, R9
+	VST1 [V3.S4], (R9)
+	ADD  $32, R9, R9
+	VST1 [V4.S4], (R9)
+	ADD  $32, R9, R9
+	VST1 [V5.S4], (R9)
+	ADD  $32, R9, R9
+	VST1 [V6.S4], (R9)
+	ADD  $32, R9, R9
+	VST1 [V7.S4], (R9)
+
+	ADD  $16, R7, R7
+	SUBS $1, R8, R8
+	BNE  rowpass8
 	RET

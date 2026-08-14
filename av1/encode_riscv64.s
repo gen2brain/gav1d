@@ -423,3 +423,353 @@ storer:
 	ADD    $16, X15, X15
 	VSE32V V3, (X15)
 	RET
+
+// FDCT8R is an eight point DCT across eight vectors. Constants are scalars:
+// X17 cospi32, X18 cospi48, X19 cospi16, X20 cospi56, X23 cospi24, X24 cospi40,
+// X25 cospi8, X21 the rounding term. The final permutation is folded into the
+// destination registers, so the inputs come back in frequency order.
+#define FDCT8R(i0, i1, i2, i3, i4, i5, i6, i7) \
+	VADDVV i7, i0, V10; \
+	VADDVV i6, i1, V11; \
+	VADDVV i5, i2, V12; \
+	VADDVV i4, i3, V13; \
+	VSUBVV i4, i3, V14; \
+	VSUBVV i5, i2, V15; \
+	VSUBVV i6, i1, V16; \
+	VSUBVV i7, i0, V17; \
+	VADDVV V13, V10, V18; \
+	VADDVV V12, V11, V19; \
+	VSUBVV V12, V11, V20; \
+	VSUBVV V13, V10, V21; \
+	VSUBVV V15, V16, V22; \
+	VMULVX X17, V22, V22; \
+	RSR(V22); \
+	VADDVV V15, V16, V23; \
+	VMULVX X17, V23, V23; \
+	RSR(V23); \
+	VADDVV V19, V18, V24; \
+	VMULVX X17, V24, i0; \
+	RSR(i0); \
+	VSUBVV V19, V18, V24; \
+	VMULVX X17, V24, i4; \
+	RSR(i4); \
+	VMULVX X18, V20, V24; \
+	VMULVX X19, V21, V25; \
+	VADDVV V25, V24, i2; \
+	RSR(i2); \
+	VMULVX X18, V21, V24; \
+	VMULVX X19, V20, V25; \
+	VSUBVV V25, V24, i6; \
+	RSR(i6); \
+	VADDVV V22, V14, V18; \
+	VSUBVV V22, V14, V19; \
+	VSUBVV V23, V17, V20; \
+	VADDVV V23, V17, V21; \
+	VMULVX X20, V18, V24; \
+	VMULVX X25, V21, V25; \
+	VADDVV V25, V24, i1; \
+	RSR(i1); \
+	VMULVX X23, V19, V24; \
+	VMULVX X24, V20, V25; \
+	VADDVV V25, V24, i5; \
+	RSR(i5); \
+	VMULVX X23, V20, V24; \
+	VMULVX X24, V19, V25; \
+	VSUBVV V25, V24, i3; \
+	RSR(i3); \
+	VMULVX X20, V21, V24; \
+	VMULVX X25, V18, V25; \
+	VSUBVV V25, V24, i7; \
+	RSR(i7)
+
+#define DCT8CR \
+	MOV $5793, X17; \
+	MOV $3135, X18; \
+	MOV $7568, X19; \
+	MOV $1598, X20; \
+	MOV $4096, X21; \
+	MOV $6811, X23; \
+	MOV $4551, X24; \
+	MOV $8035, X25
+
+// RECT1R is the round shift by one the 4x8 and 8x4 shift schedules ask for,
+// then the rectangular Sqrt2 correction, which reuses cospi32 in X17.
+#define RECT1R(v) \
+	VADDVX X29, v, v; \
+	VSRAVI $1, v, v; \
+	VMULVX X17, v, v; \
+	VADDVX X28, v, v; \
+	VSRAVI $12, v, v
+
+#define RECTCR \
+	MOV $1, X29; \
+	MOV $2048, X28
+
+// fwdTxfm4x8RVV is the 4x8 DCT_DCT forward transform. There is no lane shuffle
+// in RVV, so the transpose is a contiguous store followed by strided loads.
+TEXT ·fwdTxfm4x8RVV(SB), NOSPLIT, $128-24
+	MOV  res+0(FP), X10
+	MOV  src+8(FP), X11
+	MOV  srcStride+16(FP), X12
+	SLLI $2, X12, X12
+	MOV  $4, X13
+	VSETVLI X13, E32, M1, TA, MA, X5
+
+	VLE32V (X11), V0
+	ADD    X12, X11, X14
+	VLE32V (X14), V1
+	ADD    X12, X14, X14
+	VLE32V (X14), V2
+	ADD    X12, X14, X14
+	VLE32V (X14), V3
+	ADD    X12, X14, X14
+	VLE32V (X14), V4
+	ADD    X12, X14, X14
+	VLE32V (X14), V5
+	ADD    X12, X14, X14
+	VLE32V (X14), V6
+	ADD    X12, X14, X14
+	VLE32V (X14), V7
+	VSLLVI $2, V0, V0
+	VSLLVI $2, V1, V1
+	VSLLVI $2, V2, V2
+	VSLLVI $2, V3, V3
+	VSLLVI $2, V4, V4
+	VSLLVI $2, V5, V5
+	VSLLVI $2, V6, V6
+	VSLLVI $2, V7, V7
+
+	DCT8CR
+	FDCT8R(V0, V1, V2, V3, V4, V5, V6, V7)
+
+	MOV    $scratch-128(SP), X14
+	VSE32V V0, (X14)
+	ADD    $16, X14, X15
+	VSE32V V1, (X15)
+	ADD    $16, X15, X15
+	VSE32V V2, (X15)
+	ADD    $16, X15, X15
+	VSE32V V3, (X15)
+	ADD    $16, X15, X15
+	VSE32V V4, (X15)
+	ADD    $16, X15, X15
+	VSE32V V5, (X15)
+	ADD    $16, X15, X15
+	VSE32V V6, (X15)
+	ADD    $16, X15, X15
+	VSE32V V7, (X15)
+
+	MOV $8, X13
+	VSETVLI X13, E32, M1, TA, MA, X5
+	MOV     $16, X16
+	VLSE32V (X14), X16, V0
+	ADD     $4, X14, X15
+	VLSE32V (X15), X16, V1
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V2
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V3
+
+	FDCT4R(V0, V1, V2, V3)
+
+	RECTCR
+	RECT1R(V0)
+	RECT1R(V1)
+	RECT1R(V2)
+	RECT1R(V3)
+
+	VSE32V V0, (X10)
+	ADD    $32, X10, X15
+	VSE32V V1, (X15)
+	ADD    $32, X15, X15
+	VSE32V V2, (X15)
+	ADD    $32, X15, X15
+	VSE32V V3, (X15)
+	RET
+
+// fwdTxfm8x4RVV is the 8x4 DCT_DCT forward transform, the same two passes as
+// fwdTxfm4x8RVV in the other order.
+TEXT ·fwdTxfm8x4RVV(SB), NOSPLIT, $128-24
+	MOV  res+0(FP), X10
+	MOV  src+8(FP), X11
+	MOV  srcStride+16(FP), X12
+	SLLI $2, X12, X12
+	MOV  $8, X13
+	VSETVLI X13, E32, M1, TA, MA, X5
+
+	VLE32V (X11), V0
+	ADD    X12, X11, X14
+	VLE32V (X14), V1
+	ADD    X12, X14, X14
+	VLE32V (X14), V2
+	ADD    X12, X14, X14
+	VLE32V (X14), V3
+	VSLLVI $2, V0, V0
+	VSLLVI $2, V1, V1
+	VSLLVI $2, V2, V2
+	VSLLVI $2, V3, V3
+
+	DCT8CR
+	FDCT4R(V0, V1, V2, V3)
+
+	MOV    $scratch-128(SP), X14
+	VSE32V V0, (X14)
+	ADD    $32, X14, X15
+	VSE32V V1, (X15)
+	ADD    $32, X15, X15
+	VSE32V V2, (X15)
+	ADD    $32, X15, X15
+	VSE32V V3, (X15)
+
+	MOV $4, X13
+	VSETVLI X13, E32, M1, TA, MA, X5
+	MOV     $32, X16
+	VLSE32V (X14), X16, V0
+	ADD     $4, X14, X15
+	VLSE32V (X15), X16, V1
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V2
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V3
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V4
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V5
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V6
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V7
+
+	FDCT8R(V0, V1, V2, V3, V4, V5, V6, V7)
+
+	RECTCR
+	RECT1R(V0)
+	RECT1R(V1)
+	RECT1R(V2)
+	RECT1R(V3)
+	RECT1R(V4)
+	RECT1R(V5)
+	RECT1R(V6)
+	RECT1R(V7)
+
+	VSE32V V0, (X10)
+	ADD    $16, X10, X15
+	VSE32V V1, (X15)
+	ADD    $16, X15, X15
+	VSE32V V2, (X15)
+	ADD    $16, X15, X15
+	VSE32V V3, (X15)
+	ADD    $16, X15, X15
+	VSE32V V4, (X15)
+	ADD    $16, X15, X15
+	VSE32V V5, (X15)
+	ADD    $16, X15, X15
+	VSE32V V6, (X15)
+	ADD    $16, X15, X15
+	VSE32V V7, (X15)
+	RET
+
+#define DOWN1R(v) \
+	VADDVX X29, v, v; \
+	VSRAVI $1, v, v
+
+// fwdTxfm8x8RVV is the 8x8 DCT_DCT forward transform. Eight int32 is exactly
+// one 256 bit vector on this core, so both passes run at full width and the
+// only marshalling is the store-and-strided-load transpose.
+TEXT ·fwdTxfm8x8RVV(SB), NOSPLIT, $256-24
+	MOV  res+0(FP), X10
+	MOV  src+8(FP), X11
+	MOV  srcStride+16(FP), X12
+	SLLI $2, X12, X12
+	MOV  $8, X13
+	VSETVLI X13, E32, M1, TA, MA, X5
+
+	VLE32V (X11), V0
+	ADD    X12, X11, X14
+	VLE32V (X14), V1
+	ADD    X12, X14, X14
+	VLE32V (X14), V2
+	ADD    X12, X14, X14
+	VLE32V (X14), V3
+	ADD    X12, X14, X14
+	VLE32V (X14), V4
+	ADD    X12, X14, X14
+	VLE32V (X14), V5
+	ADD    X12, X14, X14
+	VLE32V (X14), V6
+	ADD    X12, X14, X14
+	VLE32V (X14), V7
+	VSLLVI $2, V0, V0
+	VSLLVI $2, V1, V1
+	VSLLVI $2, V2, V2
+	VSLLVI $2, V3, V3
+	VSLLVI $2, V4, V4
+	VSLLVI $2, V5, V5
+	VSLLVI $2, V6, V6
+	VSLLVI $2, V7, V7
+
+	DCT8CR
+	FDCT8R(V0, V1, V2, V3, V4, V5, V6, V7)
+
+	MOV    $scratch-256(SP), X14
+	VSE32V V0, (X14)
+	ADD    $32, X14, X15
+	VSE32V V1, (X15)
+	ADD    $32, X15, X15
+	VSE32V V2, (X15)
+	ADD    $32, X15, X15
+	VSE32V V3, (X15)
+	ADD    $32, X15, X15
+	VSE32V V4, (X15)
+	ADD    $32, X15, X15
+	VSE32V V5, (X15)
+	ADD    $32, X15, X15
+	VSE32V V6, (X15)
+	ADD    $32, X15, X15
+	VSE32V V7, (X15)
+
+	MOV     $32, X16
+	VLSE32V (X14), X16, V0
+	ADD     $4, X14, X15
+	VLSE32V (X15), X16, V1
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V2
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V3
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V4
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V5
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V6
+	ADD     $4, X15, X15
+	VLSE32V (X15), X16, V7
+
+	FDCT8R(V0, V1, V2, V3, V4, V5, V6, V7)
+
+	MOV $1, X29
+	DOWN1R(V0)
+	DOWN1R(V1)
+	DOWN1R(V2)
+	DOWN1R(V3)
+	DOWN1R(V4)
+	DOWN1R(V5)
+	DOWN1R(V6)
+	DOWN1R(V7)
+
+	VSE32V V0, (X10)
+	ADD    $32, X10, X15
+	VSE32V V1, (X15)
+	ADD    $32, X15, X15
+	VSE32V V2, (X15)
+	ADD    $32, X15, X15
+	VSE32V V3, (X15)
+	ADD    $32, X15, X15
+	VSE32V V4, (X15)
+	ADD    $32, X15, X15
+	VSE32V V5, (X15)
+	ADD    $32, X15, X15
+	VSE32V V6, (X15)
+	ADD    $32, X15, X15
+	VSE32V V7, (X15)
+	RET
