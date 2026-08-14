@@ -220,6 +220,8 @@ func TestFwdTxfmRectAsm(t *testing.T) {
 	}{
 		{rtx4x8, 4, 8, fwdTxfm4x8},
 		{rtx8x4, 8, 4, fwdTxfm8x4},
+		{rtx8x16, 8, 16, fwdTxfm8x16},
+		{rtx16x8, 16, 8, fwdTxfm16x8},
 	} {
 		for _, stride := range []int{c.w, c.w * 2, 40} {
 			src := make([]int32, stride*c.h)

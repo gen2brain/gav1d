@@ -787,3 +787,409 @@ TEXT ·fwdTxfm8x4AVX512(SB), NOSPLIT, $0-24
 	VMOVDQU X7, 112(DI)
 	VZEROUPPER
 	RET
+
+DATA fwd16Const<>+0(SB)/4, $5793
+DATA fwd16Const<>+4(SB)/4, $3135
+DATA fwd16Const<>+8(SB)/4, $7568
+DATA fwd16Const<>+12(SB)/4, $1598
+DATA fwd16Const<>+16(SB)/4, $8035
+DATA fwd16Const<>+20(SB)/4, $6811
+DATA fwd16Const<>+24(SB)/4, $4551
+DATA fwd16Const<>+28(SB)/4, $803
+DATA fwd16Const<>+32(SB)/4, $8153
+DATA fwd16Const<>+36(SB)/4, $6333
+DATA fwd16Const<>+40(SB)/4, $5197
+DATA fwd16Const<>+44(SB)/4, $3862
+DATA fwd16Const<>+48(SB)/4, $7225
+DATA fwd16Const<>+52(SB)/4, $7839
+DATA fwd16Const<>+56(SB)/4, $2378
+DATA fwd16Const<>+60(SB)/4, $4096
+DATA fwd16Const<>+64(SB)/4, $2
+DATA fwd16Const<>+68(SB)/4, $2048
+GLOBL fwd16Const<>(SB), RODATA|NOPTR, $80
+
+#define K32  fwd16Const<>+0(SB)
+#define K48  fwd16Const<>+4(SB)
+#define K16  fwd16Const<>+8(SB)
+#define K56  fwd16Const<>+12(SB)
+#define K8   fwd16Const<>+16(SB)
+#define K24  fwd16Const<>+20(SB)
+#define K40  fwd16Const<>+24(SB)
+#define K60  fwd16Const<>+28(SB)
+#define K4   fwd16Const<>+32(SB)
+#define K28  fwd16Const<>+36(SB)
+#define K36  fwd16Const<>+40(SB)
+#define K44  fwd16Const<>+44(SB)
+#define K20  fwd16Const<>+48(SB)
+#define K12  fwd16Const<>+52(SB)
+#define K52  fwd16Const<>+56(SB)
+#define KRND fwd16Const<>+60(SB)
+#define KTWO fwd16Const<>+64(SB)
+#define KSQR fwd16Const<>+68(SB)
+
+// RSB rounds a product down by cos_bit, reading the rounding term as an
+// embedded broadcast so no register has to hold it. Keeping all sixteen
+// constants in memory is what leaves room for sixteen live rows.
+#define RSB(v) \
+	VPADDD.BCST KRND, v, v \
+	VPSRAD      $13, v, v
+
+#define MULK(k, a, dst) \
+	VPMULLD.BCST k, a, dst
+
+#define BTFK(ka, a, kb, b, t, dst) \
+	MULK(ka, a, dst) \
+	MULK(kb, b, t) \
+	VPADDD t, dst, dst \
+	RSB(dst)
+
+#define BTFNK(ka, a, kb, b, t, dst) \
+	MULK(ka, a, dst) \
+	MULK(kb, b, t) \
+	VPSUBD t, dst, dst \
+	RSB(dst)
+
+// BFLY is the in-place pairwise butterfly the 16 point transform is built from:
+// hi becomes lo-hi and lo becomes lo+hi, with one temporary.
+#define BFLY(lo, hi, t) \
+	VPSUBD    hi, lo, t \
+	VPADDD    hi, lo, lo \
+	VMOVDQU32 t, hi
+
+// HALF32 replaces a pair by rs(cospi32*(lo-hi)) and rs(cospi32*(lo+hi)).
+#define HALF32(a, b, dlo, dhi, t0, t1) \
+	VPSUBD  a, b, t0 \
+	VPADDD  a, b, t1 \
+	MULK(K32, t0, dlo) \
+	RSB(dlo) \
+	MULK(K32, t1, dhi) \
+	RSB(dhi)
+
+// FDCT16 runs a 16 point DCT across Y0..Y15 in place, with Y16..Y24 as
+// temporaries. It leaves the coefficients permuted: frequency k is in the
+// register given by fdct16Perm, which costs nothing because the transpose and
+// the store both read the registers in whatever order they are told.
+#define FDCT16 \
+	BFLY(Y0, Y15, Y16) \
+	BFLY(Y1, Y14, Y16) \
+	BFLY(Y2, Y13, Y16) \
+	BFLY(Y3, Y12, Y16) \
+	BFLY(Y4, Y11, Y16) \
+	BFLY(Y5, Y10, Y16) \
+	BFLY(Y6, Y9, Y16) \
+	BFLY(Y7, Y8, Y16) \
+	\
+	BFLY(Y0, Y7, Y16) \
+	BFLY(Y1, Y6, Y16) \
+	BFLY(Y2, Y5, Y16) \
+	BFLY(Y3, Y4, Y16) \
+	HALF32(Y10, Y13, Y10, Y13, Y16, Y17) \
+	HALF32(Y11, Y12, Y11, Y12, Y16, Y17) \
+	\
+	BFLY(Y0, Y3, Y16) \
+	BFLY(Y1, Y2, Y16) \
+	HALF32(Y5, Y6, Y5, Y6, Y16, Y17) \
+	BFLY(Y8, Y11, Y16) \
+	BFLY(Y9, Y10, Y16) \
+	BFLY(Y15, Y12, Y16) \
+	BFLY(Y14, Y13, Y16) \
+	\
+	HALF32(Y1, Y0, Y1, Y0, Y16, Y17) \
+	BTFK(K48, Y2, K16, Y3, Y18, Y16) \
+	BTFNK(K48, Y3, K16, Y2, Y19, Y17) \
+	VMOVDQU32 Y16, Y2 \
+	VMOVDQU32 Y17, Y3 \
+	BFLY(Y4, Y5, Y16) \
+	BFLY(Y7, Y6, Y16) \
+	BTFNK(K48, Y14, K16, Y9, Y18, Y16) \
+	BTFK(K16, Y14, K48, Y9, Y19, Y17) \
+	VMOVDQU32 Y16, Y9 \
+	VMOVDQU32 Y17, Y14 \
+	BTFNK(K48, Y13, K16, Y10, Y18, Y16) \
+	MULK(K48, Y10, Y17) \
+	MULK(K16, Y13, Y18) \
+	VPADDD Y18, Y17, Y17 \
+	VPBROADCASTD KRND, Y19 \
+	VPSUBD Y17, Y19, Y17 \
+	VPSRAD $13, Y17, Y17 \
+	VMOVDQU32 Y16, Y13 \
+	VMOVDQU32 Y17, Y10 \
+	\
+	BTFK(K56, Y4, K8, Y7, Y20, Y16) \
+	BTFK(K24, Y5, K40, Y6, Y21, Y17) \
+	BTFNK(K24, Y6, K40, Y5, Y22, Y18) \
+	BTFNK(K56, Y7, K8, Y4, Y23, Y19) \
+	VMOVDQU32 Y16, Y4 \
+	VMOVDQU32 Y17, Y5 \
+	VMOVDQU32 Y18, Y6 \
+	VMOVDQU32 Y19, Y7 \
+	BFLY(Y8, Y9, Y16) \
+	BFLY(Y11, Y10, Y16) \
+	BFLY(Y12, Y13, Y16) \
+	BFLY(Y15, Y14, Y16) \
+	\
+	BTFK(K60, Y8, K4, Y15, Y24, Y16) \
+	BTFK(K28, Y9, K36, Y14, Y24, Y17) \
+	BTFK(K44, Y10, K20, Y13, Y24, Y18) \
+	BTFK(K12, Y11, K52, Y12, Y24, Y19) \
+	BTFNK(K12, Y12, K52, Y11, Y24, Y20) \
+	BTFNK(K44, Y13, K20, Y10, Y24, Y21) \
+	BTFNK(K28, Y14, K36, Y9, Y24, Y22) \
+	BTFNK(K60, Y15, K4, Y8, Y24, Y23) \
+	VMOVDQU32 Y16, Y8 \
+	VMOVDQU32 Y17, Y9 \
+	VMOVDQU32 Y18, Y10 \
+	VMOVDQU32 Y19, Y11 \
+	VMOVDQU32 Y20, Y12 \
+	VMOVDQU32 Y21, Y13 \
+	VMOVDQU32 Y22, Y14 \
+	VMOVDQU32 Y23, Y15
+
+#define T8(i0, i1, i2, i3, i4, i5, i6, i7, t0, t1, t2, t3, t4, t5, t6, t7, u0, u1, u2, u3, u4, u5, u6, u7) \
+	VPUNPCKLDQ  i1, i0, t0 \
+	VPUNPCKHDQ  i1, i0, t1 \
+	VPUNPCKLDQ  i3, i2, t2 \
+	VPUNPCKHDQ  i3, i2, t3 \
+	VPUNPCKLDQ  i5, i4, t4 \
+	VPUNPCKHDQ  i5, i4, t5 \
+	VPUNPCKLDQ  i7, i6, t6 \
+	VPUNPCKHDQ  i7, i6, t7 \
+	VPUNPCKLQDQ t2, t0, u0 \
+	VPUNPCKHQDQ t2, t0, u1 \
+	VPUNPCKLQDQ t3, t1, u2 \
+	VPUNPCKHQDQ t3, t1, u3 \
+	VPUNPCKLQDQ t6, t4, u4 \
+	VPUNPCKHQDQ t6, t4, u5 \
+	VPUNPCKLQDQ t7, t5, u6 \
+	VPUNPCKHQDQ t7, t5, u7 \
+	VSHUFI32X4  $0x00, u4, u0, i0 \
+	VSHUFI32X4  $0x00, u5, u1, i1 \
+	VSHUFI32X4  $0x00, u6, u2, i2 \
+	VSHUFI32X4  $0x00, u7, u3, i3 \
+	VSHUFI32X4  $0x03, u4, u0, i4 \
+	VSHUFI32X4  $0x03, u5, u1, i5 \
+	VSHUFI32X4  $0x03, u6, u2, i6 \
+	VSHUFI32X4  $0x03, u7, u3, i7
+
+// FDCT8Z is FDCT8 over sixteen lanes: the rows live in Z16..Z23 and Z0..Z15
+// are all temporaries, since the constants are embedded broadcasts.
+#define FDCT8Z \
+	VPADDD Z23, Z16, Z0 \
+	VPADDD Z22, Z17, Z1 \
+	VPADDD Z21, Z18, Z2 \
+	VPADDD Z20, Z19, Z3 \
+	VPSUBD Z20, Z19, Z4 \
+	VPSUBD Z21, Z18, Z5 \
+	VPSUBD Z22, Z17, Z6 \
+	VPSUBD Z23, Z16, Z7 \
+	VPADDD Z3, Z0, Z8 \
+	VPADDD Z2, Z1, Z9 \
+	VPSUBD Z2, Z1, Z10 \
+	VPSUBD Z3, Z0, Z11 \
+	BTFNK(K32, Z6, K32, Z5, Z13, Z12) \
+	BTFK(K32, Z6, K32, Z5, Z14, Z13) \
+	BTFK(K32, Z8, K32, Z9, Z15, Z16) \
+	BTFNK(K32, Z8, K32, Z9, Z15, Z20) \
+	BTFK(K48, Z10, K16, Z11, Z15, Z18) \
+	BTFNK(K48, Z11, K16, Z10, Z15, Z22) \
+	VPADDD Z12, Z4, Z8 \
+	VPSUBD Z12, Z4, Z9 \
+	VPSUBD Z13, Z7, Z10 \
+	VPADDD Z13, Z7, Z11 \
+	BTFK(K56, Z8, K8, Z11, Z15, Z17) \
+	BTFK(K24, Z9, K40, Z10, Z15, Z21) \
+	BTFNK(K24, Z10, K40, Z9, Z15, Z19) \
+	BTFNK(K56, Z11, K8, Z8, Z15, Z23)
+
+// RECT2 is the round shift by two the 8x16 and 16x8 shift schedules ask for,
+// followed by the rectangular Sqrt2 correction.
+#define RECT2(v) \
+	VPADDD.BCST  KTWO, v, v \
+	VPSRAD       $2, v, v \
+	VPMULLD.BCST K32, v, v \
+	VPADDD.BCST  KSQR, v, v \
+	VPSRAD       $12, v, v
+
+// fwdTxfm8x16AVX512 is the 8x16 DCT_DCT forward transform: sixteen points down
+// the columns over eight lanes, then eight points along the rows over sixteen.
+TEXT ·fwdTxfm8x16AVX512(SB), NOSPLIT, $0-24
+	MOVQ res+0(FP), DI
+	MOVQ src+8(FP), SI
+	MOVQ srcStride+16(FP), DX
+	SHLQ $2, DX
+
+	VMOVDQU (SI), Y0
+	VMOVDQU (SI)(DX*1), Y1
+	LEAQ    (SI)(DX*2), AX
+	VMOVDQU (AX), Y2
+	VMOVDQU (AX)(DX*1), Y3
+	LEAQ    (AX)(DX*2), AX
+	VMOVDQU (AX), Y4
+	VMOVDQU (AX)(DX*1), Y5
+	LEAQ    (AX)(DX*2), AX
+	VMOVDQU (AX), Y6
+	VMOVDQU (AX)(DX*1), Y7
+	LEAQ    (AX)(DX*2), AX
+	VMOVDQU (AX), Y8
+	VMOVDQU (AX)(DX*1), Y9
+	LEAQ    (AX)(DX*2), AX
+	VMOVDQU (AX), Y10
+	VMOVDQU (AX)(DX*1), Y11
+	LEAQ    (AX)(DX*2), AX
+	VMOVDQU (AX), Y12
+	VMOVDQU (AX)(DX*1), Y13
+	LEAQ    (AX)(DX*2), AX
+	VMOVDQU (AX), Y14
+	VMOVDQU (AX)(DX*1), Y15
+
+	VPSLLD $2, Y0, Y0
+	VPSLLD $2, Y1, Y1
+	VPSLLD $2, Y2, Y2
+	VPSLLD $2, Y3, Y3
+	VPSLLD $2, Y4, Y4
+	VPSLLD $2, Y5, Y5
+	VPSLLD $2, Y6, Y6
+	VPSLLD $2, Y7, Y7
+	VPSLLD $2, Y8, Y8
+	VPSLLD $2, Y9, Y9
+	VPSLLD $2, Y10, Y10
+	VPSLLD $2, Y11, Y11
+	VPSLLD $2, Y12, Y12
+	VPSLLD $2, Y13, Y13
+	VPSLLD $2, Y14, Y14
+	VPSLLD $2, Y15, Y15
+
+	FDCT16
+
+	T8(Y0, Y8, Y4, Y12, Y2, Y10, Y6, Y14, Y16, Y17, Y18, Y19, Y20, Y21, Y22, Y23, Y24, Y25, Y26, Y27, Y28, Y29, Y30, Y31)
+	T8(Y1, Y9, Y5, Y13, Y3, Y11, Y7, Y15, Y16, Y17, Y18, Y19, Y20, Y21, Y22, Y23, Y24, Y25, Y26, Y27, Y28, Y29, Y30, Y31)
+
+	VINSERTI64X4 $1, Y1, Z0, Z16
+	VINSERTI64X4 $1, Y9, Z8, Z17
+	VINSERTI64X4 $1, Y5, Z4, Z18
+	VINSERTI64X4 $1, Y13, Z12, Z19
+	VINSERTI64X4 $1, Y3, Z2, Z20
+	VINSERTI64X4 $1, Y11, Z10, Z21
+	VINSERTI64X4 $1, Y7, Z6, Z22
+	VINSERTI64X4 $1, Y15, Z14, Z23
+
+	FDCT8Z
+
+	RECT2(Z16)
+	RECT2(Z17)
+	RECT2(Z18)
+	RECT2(Z19)
+	RECT2(Z20)
+	RECT2(Z21)
+	RECT2(Z22)
+	RECT2(Z23)
+
+	VMOVDQU32 Z16, (DI)
+	VMOVDQU32 Z17, 64(DI)
+	VMOVDQU32 Z18, 128(DI)
+	VMOVDQU32 Z19, 192(DI)
+	VMOVDQU32 Z20, 256(DI)
+	VMOVDQU32 Z21, 320(DI)
+	VMOVDQU32 Z22, 384(DI)
+	VMOVDQU32 Z23, 448(DI)
+	VZEROUPPER
+	RET
+
+// fwdTxfm16x8AVX512 is the 16x8 DCT_DCT forward transform: eight points down
+// the columns over sixteen lanes, then sixteen points along the rows over
+// eight. The 16x8 transpose is two 8x8 transposes, one per half of each row.
+TEXT ·fwdTxfm16x8AVX512(SB), NOSPLIT, $0-24
+	MOVQ res+0(FP), DI
+	MOVQ src+8(FP), SI
+	MOVQ srcStride+16(FP), DX
+	SHLQ $2, DX
+
+	VMOVDQU32 (SI), Z16
+	VMOVDQU32 (SI)(DX*1), Z17
+	LEAQ      (SI)(DX*2), AX
+	VMOVDQU32 (AX), Z18
+	VMOVDQU32 (AX)(DX*1), Z19
+	LEAQ      (AX)(DX*2), AX
+	VMOVDQU32 (AX), Z20
+	VMOVDQU32 (AX)(DX*1), Z21
+	LEAQ      (AX)(DX*2), AX
+	VMOVDQU32 (AX), Z22
+	VMOVDQU32 (AX)(DX*1), Z23
+
+	VPSLLD $2, Z16, Z16
+	VPSLLD $2, Z17, Z17
+	VPSLLD $2, Z18, Z18
+	VPSLLD $2, Z19, Z19
+	VPSLLD $2, Z20, Z20
+	VPSLLD $2, Z21, Z21
+	VPSLLD $2, Z22, Z22
+	VPSLLD $2, Z23, Z23
+
+	FDCT8Z
+
+	VEXTRACTI64X4 $1, Z16, Y0
+	VEXTRACTI64X4 $1, Z17, Y1
+	VEXTRACTI64X4 $1, Z18, Y2
+	VEXTRACTI64X4 $1, Z19, Y3
+	VEXTRACTI64X4 $1, Z20, Y4
+	VEXTRACTI64X4 $1, Z21, Y5
+	VEXTRACTI64X4 $1, Z22, Y6
+	VEXTRACTI64X4 $1, Z23, Y7
+
+	T8(Y16, Y17, Y18, Y19, Y20, Y21, Y22, Y23, Y8, Y9, Y10, Y11, Y12, Y13, Y14, Y15, Y24, Y25, Y26, Y27, Y28, Y29, Y30, Y31)
+	T8(Y0, Y1, Y2, Y3, Y4, Y5, Y6, Y7, Y8, Y9, Y10, Y11, Y12, Y13, Y14, Y15, Y24, Y25, Y26, Y27, Y28, Y29, Y30, Y31)
+
+	VMOVDQU32 Y0, Y8
+	VMOVDQU32 Y1, Y9
+	VMOVDQU32 Y2, Y10
+	VMOVDQU32 Y3, Y11
+	VMOVDQU32 Y4, Y12
+	VMOVDQU32 Y5, Y13
+	VMOVDQU32 Y6, Y14
+	VMOVDQU32 Y7, Y15
+	VMOVDQU32 Y16, Y0
+	VMOVDQU32 Y17, Y1
+	VMOVDQU32 Y18, Y2
+	VMOVDQU32 Y19, Y3
+	VMOVDQU32 Y20, Y4
+	VMOVDQU32 Y21, Y5
+	VMOVDQU32 Y22, Y6
+	VMOVDQU32 Y23, Y7
+
+	FDCT16
+
+	RECT2(Y0)
+	RECT2(Y1)
+	RECT2(Y2)
+	RECT2(Y3)
+	RECT2(Y4)
+	RECT2(Y5)
+	RECT2(Y6)
+	RECT2(Y7)
+	RECT2(Y8)
+	RECT2(Y9)
+	RECT2(Y10)
+	RECT2(Y11)
+	RECT2(Y12)
+	RECT2(Y13)
+	RECT2(Y14)
+	RECT2(Y15)
+
+	VMOVDQU Y0, (DI)
+	VMOVDQU Y8, 32(DI)
+	VMOVDQU Y4, 64(DI)
+	VMOVDQU Y12, 96(DI)
+	VMOVDQU Y2, 128(DI)
+	VMOVDQU Y10, 160(DI)
+	VMOVDQU Y6, 192(DI)
+	VMOVDQU Y14, 224(DI)
+	VMOVDQU Y1, 256(DI)
+	VMOVDQU Y9, 288(DI)
+	VMOVDQU Y5, 320(DI)
+	VMOVDQU Y13, 352(DI)
+	VMOVDQU Y3, 384(DI)
+	VMOVDQU Y11, 416(DI)
+	VMOVDQU Y7, 448(DI)
+	VMOVDQU Y15, 480(DI)
+	VZEROUPPER
+	RET
