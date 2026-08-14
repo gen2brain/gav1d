@@ -4,6 +4,8 @@ package av1
 
 func hasAsmResidual() bool { return false }
 
-func hasAsmSatd() bool { return false }
+func hasAsmSatd4() bool { return false }
+
+func hasAsmSatd8() bool { return false }
 
 func hasAsmSse() bool { return false }

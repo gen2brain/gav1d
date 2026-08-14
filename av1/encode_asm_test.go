@@ -33,7 +33,7 @@ func TestSseAsm(t *testing.T) {
 }
 
 func TestSatd4Asm(t *testing.T) {
-	if !hasAsmSatd() {
+	if !hasAsmSatd4() {
 		t.Skip("no assembly")
 	}
 
@@ -100,7 +100,7 @@ func TestFwdTxfm4x4Asm(t *testing.T) {
 }
 
 func TestSatd8Asm(t *testing.T) {
-	if !hasAsmSatd() {
+	if !hasAsmSatd8() {
 		t.Skip("no assembly")
 	}
 

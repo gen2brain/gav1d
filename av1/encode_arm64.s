@@ -5,6 +5,27 @@
 #define SMLAL(m, n, d)  WORD $(0x0e608000 | ((m) << 16) | ((n) << 5) | (d))
 #define SMLAL2(m, n, d) WORD $(0x4e608000 | ((m) << 16) | ((n) << 5) | (d))
 #define ADDV4S(n, d) WORD $(0x4eb1b800 | ((n) << 5) | (d))
+#define ABS4S(n, d)  WORD $(0x4ea0b800 | ((n) << 5) | (d))
+
+#define HAD4N(i0, i1, i2, i3, o0, o1, o2, o3) \
+	VADD i2.S4, i0.S4, V20.S4 \
+	VADD i3.S4, i1.S4, V21.S4 \
+	VSUB i2.S4, i0.S4, V22.S4 \
+	VSUB i3.S4, i1.S4, V23.S4 \
+	VADD V21.S4, V20.S4, o0.S4 \
+	VSUB V21.S4, V20.S4, o1.S4 \
+	VADD V23.S4, V22.S4, o2.S4 \
+	VSUB V23.S4, V22.S4, o3.S4
+
+#define T4N(i0, i1, i2, i3, o0, o1, o2, o3) \
+	VZIP1 i1.S4, i0.S4, V20.S4 \
+	VZIP2 i1.S4, i0.S4, V21.S4 \
+	VZIP1 i3.S4, i2.S4, V22.S4 \
+	VZIP2 i3.S4, i2.S4, V23.S4 \
+	VZIP1 V22.D2, V20.D2, o0.D2 \
+	VZIP2 V22.D2, V20.D2, o1.D2 \
+	VZIP1 V23.D2, V21.D2, o2.D2 \
+	VZIP2 V23.D2, V21.D2, o3.D2
 
 // residualNEON subtracts the prediction from the source, stores the difference
 // and returns its sum of squares. Eight pixels a step: two rows at 4 px wide,
@@ -145,4 +166,36 @@ sdone:
 	VMOV  V0.S[0], R10
 	MOVWU R10, R10
 	MOVD  R10, ret+48(FP)
+	RET
+
+// satd4NEON is the sum of absolute 4x4 Hadamard coefficients.
+TEXT ·satd4NEON(SB), NOSPLIT, $0-20
+	MOVD res+0(FP), R0
+	MOVD stride+8(FP), R1
+	LSL  $2, R1, R1
+
+	VLD1 (R0), [V0.S4]
+	ADD  R1, R0, R2
+	VLD1 (R2), [V1.S4]
+	ADD  R1, R2, R2
+	VLD1 (R2), [V2.S4]
+	ADD  R1, R2, R2
+	VLD1 (R2), [V3.S4]
+
+	HAD4N(V0, V1, V2, V3, V4, V5, V6, V7)
+	T4N(V4, V5, V6, V7, V0, V1, V2, V3)
+	HAD4N(V0, V1, V2, V3, V4, V5, V6, V7)
+
+	ABS4S(4, 4)
+	ABS4S(5, 5)
+	ABS4S(6, 6)
+	ABS4S(7, 7)
+	VADD V5.S4, V4.S4, V4.S4
+	VADD V7.S4, V6.S4, V6.S4
+	VADD V6.S4, V4.S4, V4.S4
+	ADDV4S(4, 0)
+	VMOV V0.S[0], R3
+	ADDW $2, R3, R3
+	ASRW $2, R3, R3
+	MOVW R3, ret+16(FP)
 	RET
