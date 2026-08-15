@@ -331,6 +331,59 @@ func avifSurvives(data []byte) (msg string) {
 	return ""
 }
 
+// TestSniffBrands pins which major brands this package claims through
+// image.RegisterFormat. mif1 is the generic MIAF brand: in a HEIC corpus 128
+// of 168 files carry it as their major brand and no AVIF in four corpora does,
+// so claiming it here takes those files away from a HEIC decoder registered
+// for the same brand. Decode still accepts such a file when called directly,
+// because the parser keys on the compatible brands.
+func TestSniffBrands(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("testdata", "*.avif"))
+	if err != nil || len(files) == 0 {
+		t.Skip("no bundled files")
+	}
+	sort.Strings(files)
+	base, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(base) < 16 || string(base[4:8]) != "ftyp" {
+		t.Skipf("%s has no ftyp", files[0])
+	}
+
+	rebrand := func(brand string) []byte {
+		b := make([]byte, len(base))
+		copy(b, base)
+		copy(b[8:12], brand)
+
+		return b
+	}
+
+	for _, c := range []struct {
+		brand string
+		ours  bool
+	}{
+		{"avif", true},
+		{"avis", true},
+		{"mif1", false},
+		{"msf1", false},
+		{"heic", false},
+	} {
+		_, format, err := image.DecodeConfig(bytes.NewReader(rebrand(c.brand)))
+		got := err == nil && format == "avif"
+		if got != c.ours {
+			t.Errorf("major brand %q: sniffed as avif = %v, want %v (format %q, err %v)",
+				c.brand, got, c.ours, format, err)
+		}
+	}
+
+	// The generic brands are only undecidable to the sniffer. A caller that
+	// knows the file is AVIF still gets it decoded.
+	if _, err := Decode(bytes.NewReader(rebrand("mif1"))); err != nil {
+		t.Errorf("Decode on a mif1 major brand: %v", err)
+	}
+}
+
 // conformanceDirs returns the corpora named by CONFORMANCE_DIR, a colon
 // separated list shared with the av1 package and the sibling codecs. Each test
 // picks the entries it recognises; the rest contribute nothing.
