@@ -674,5 +674,4 @@ func decodeWrapper(r io.Reader) (image.Image, error) {
 func init() {
 	image.RegisterFormat("avif", "????ftypavif", decodeWrapper, DecodeConfig)
 	image.RegisterFormat("avif", "????ftypavis", decodeWrapper, DecodeConfig)
-	image.RegisterFormat("avif", "????ftypmif1", decodeWrapper, DecodeConfig)
 }
