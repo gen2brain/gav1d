@@ -5,9 +5,9 @@ import "math"
 const encEdgeOff = 128
 
 var intraModes = [nIntraPredModes]int{
-	dcPred, vertPred, horPred, diagDownLeftPred, diagDownRightPred,
+	dcPred, smoothPred, paethPred, vertPred, horPred,
+	smoothVPred, smoothHPred, diagDownLeftPred, diagDownRightPred,
 	vertRightPred, horDownPred, horUpPred, vertLeftPred,
-	smoothPred, smoothVPred, smoothHPred, paethPred,
 }
 
 var log2Tab [1<<15 + 1]float32
@@ -302,22 +302,16 @@ func (e *encoder) predIntra(dst []uint8, off, stride, x, y, w, h, tw, th,
 		a|smFl, maxW, maxH, 255)
 }
 
-const (
-	modeShortlist = 5
-	angleSearch   = true
-	extraShapes   = false
-)
-
-func shortlist(cost *[nIntraPredModes]float64, out []int) []int {
+func shortlist(cost *[nIntraPredModes]float64, out []int, n int) []int {
 	out = out[:0]
-	for range modeShortlist {
+	for range n {
 		best, bestCost := -1, math.Inf(1)
 		for i, c := range cost {
 			if c < bestCost {
 				best, bestCost = i, c
 			}
 		}
-		if best < 0 {
+		if best < 0 || math.IsInf(bestCost, 1) {
 			break
 		}
 		cost[best] = math.Inf(1)
@@ -383,12 +377,15 @@ func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int, f
 	}
 
 	var pre [nIntraPredModes]float64
-	for i, m := range intraModes {
+	for i := range pre {
+		pre[i] = math.Inf(1)
+	}
+	for i, m := range intraModes[:e.sp.pre] {
 		pre[i] = cheap(m, 0)
 	}
 
 	var buf [nIntraPredModes]int
-	cands := shortlist(&pre, buf[:])
+	cands := shortlist(&pre, buf[:], e.sp.modes)
 
 	best, bestDelta := dcPred, 0
 	bestCost, bestSkip := math.Inf(1), math.Inf(1)
@@ -398,7 +395,7 @@ func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int, f
 		}
 	}
 
-	if angleSearch && directional(best) && int(bDim[2])+int(bDim[3]) >= 2 {
+	if directional(best) && int(bDim[2])+int(bDim[3]) >= 2 {
 		d, dCost := 0, math.Inf(1)
 		for delta := -3; delta <= 3; delta++ {
 			if delta == 0 {
@@ -632,12 +629,15 @@ func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int,
 	}
 
 	var pre [nIntraPredModes]float64
-	for i, m := range intraModes {
+	for i := range pre {
+		pre[i] = math.Inf(1)
+	}
+	for i, m := range intraModes[:e.sp.pre] {
 		pre[i] = cheap(m, 0)
 	}
 
 	var buf [nIntraPredModes]int
-	cands := shortlist(&pre, buf[:])
+	cands := shortlist(&pre, buf[:], e.sp.modes)
 
 	best, bestDelta := dcPred, 0
 	bestCost, bestSkip := math.Inf(1), math.Inf(1)
@@ -647,7 +647,7 @@ func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int,
 		}
 	}
 
-	if angleSearch && directional(best) && int(bDim[2])+int(bDim[3]) >= 2 {
+	if directional(best) && int(bDim[2])+int(bDim[3]) >= 2 {
 		d, dCost := 0, math.Inf(1)
 		for delta := -3; delta <= 3; delta++ {
 			if delta == 0 {

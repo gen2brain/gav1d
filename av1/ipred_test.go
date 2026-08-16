@@ -267,6 +267,8 @@ func benchIpred[P pixel](b *testing.B, tag string, bitdepthMax int32) {
 		{vertPred, "v", 0}, {horPred, "h", 0}, {dcPred, "dc", 0},
 		{filterPred, "filter", 0},
 		{z1Pred, "z1", 45 | angleUseEdgeFilterFlag},
+		{z2Pred, "z2", 135 | angleUseEdgeFilterFlag},
+		{z3Pred, "z3", 225 | angleUseEdgeFilterFlag},
 	}
 	sizes := []int{4, 8, 16, 32}
 

@@ -17,6 +17,7 @@ type encoder struct {
 	ssVer    int
 	maxBl    int
 	minBl    int
+	sp       speedParams
 	stride   int
 	recon    []uint8
 	reconC   [2][]uint8
@@ -44,7 +45,8 @@ type encoder struct {
 	uvangle  [256]int8
 	bskip    [256]uint8
 	part     [nBlLevels][256]uint8
-	rect     [10]int
+	rect     [4]int
+	split    [2]int
 	entry    [nBlLevels]sbState
 	kept     [nBlLevels]sbState
 	dentry   [nBlLevels]decState
@@ -68,6 +70,27 @@ type decState struct {
 	part    [nBlLevels][256]uint8
 }
 
+type speedParams struct {
+	minBl  int
+	shapes int
+	pre    int
+	modes  int
+}
+
+var speedTable = [11]speedParams{
+	{bl8x8, 3, 13, 5},
+	{bl8x8, 3, 13, 3},
+	{bl8x8, 1, 13, 13},
+	{bl8x8, 1, 13, 8},
+	{bl8x8, 1, 13, 5},
+	{bl8x8, 1, 13, 3},
+	{bl8x8, 1, 6, 3},
+	{bl16x16, 1, 13, 3},
+	{bl16x16, 1, 6, 3},
+	{bl32x32, 1, 13, 3},
+	{bl32x32, 1, 1, 1},
+}
+
 func (e *encoder) init(c *EncodeConfig, seq *sequenceHeader) {
 	e.cfg = *c
 	e.seq = *seq
@@ -81,15 +104,12 @@ func (e *encoder) init(c *EncodeConfig, seq *sequenceHeader) {
 	e.lossless = c.QIndex == 0
 	e.ssHor = b2i(e.layout != pixelLayoutI444)
 	e.ssVer = b2i(e.layout == pixelLayoutI420)
-	e.rect = [10]int{
-		partitionNone, partitionH, partitionV, partitionSplit,
-		partitionTTopSplit, partitionTBottomSplit,
-		partitionTLeftSplit, partitionTRightSplit,
-		partitionH4, partitionV4,
-	}
+	e.rect = [4]int{partitionNone, partitionH, partitionV, partitionSplit}
+	e.split = [2]int{partitionNone, partitionSplit}
+	e.sp = speedTable[min(max(c.Speed, 0), len(speedTable)-1)]
 	e.maxBl, e.minBl = bl64x64, bl64x64
 	if c.Src != nil {
-		e.maxBl, e.minBl = bl32x32, bl8x8
+		e.maxBl, e.minBl = bl32x32, e.sp.minBl
 	}
 	e.stride = (e.bw*4 + 63) &^ 63
 	e.recon = make([]uint8, e.stride*((e.bh*4+63)&^63))
@@ -626,9 +646,9 @@ func (e *encoder) trialSb(bx, by, bl int, node *edgeNode) float64 {
 	case !haveV:
 		cands = e.rect[1:2]
 	case bl >= e.minBl:
-		cands = e.rect[:3]
-	case extraShapes && int(partitionTypeCount[bl]) >= partitionV4:
-		cands = e.rect[:]
+		cands = e.rect[:e.sp.shapes]
+	case e.sp.shapes == 1:
+		cands = e.split[:]
 	default:
 		cands = e.rect[:4]
 	}

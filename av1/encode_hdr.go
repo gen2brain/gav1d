@@ -11,6 +11,9 @@ type EncodeConfig struct {
 	BitDepth int
 	// QIndex is the quantizer, 0 to 255, where 0 is lossless.
 	QIndex int
+	// Speed is the search effort, 0 to 10, where 0 searches the most and 10
+	// the least. Values outside the range are clamped.
+	Speed int
 	// Monochrome encodes luma only, leaving SrcU and SrcV unused.
 	Monochrome bool
 	// FullRange signals that the samples span 0 to 255 rather than the

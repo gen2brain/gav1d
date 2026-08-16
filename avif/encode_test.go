@@ -276,6 +276,37 @@ func TestEncodeAvifdec(t *testing.T) {
 	}
 }
 
+func TestEncodeSpeed(t *testing.T) {
+	src := synthNRGBA(96, 80, true)
+
+	enc := func(o EncodeOptions) []byte {
+		var buf bytes.Buffer
+		if err := Encode(&buf, src, o); err != nil {
+			t.Fatalf("%+v: %v", o, err)
+		}
+		if _, err := Decode(bytes.NewReader(buf.Bytes())); err != nil {
+			t.Fatalf("%+v: decode: %v", o, err)
+		}
+
+		return buf.Bytes()
+	}
+
+	slowest := enc(EncodeOptions{Quality: 60, Speed: 0})
+	fastest := enc(EncodeOptions{Quality: 60, Speed: 10})
+	if bytes.Equal(slowest, fastest) {
+		t.Error("speed 0 and speed 10 coded the same bytes")
+	}
+
+	if got := enc(EncodeOptions{Quality: 60, Speed: -1}); !bytes.Equal(got,
+		enc(EncodeOptions{Quality: 60, Speed: DefaultSpeed})) {
+		t.Error("a negative speed did not select DefaultSpeed")
+	}
+
+	if got := enc(EncodeOptions{Quality: 60}); !bytes.Equal(got, slowest) {
+		t.Error("the zero value did not select speed 0")
+	}
+}
+
 func BenchmarkEncode(b *testing.B) {
 	src := synthNRGBA(512, 512, false)
 

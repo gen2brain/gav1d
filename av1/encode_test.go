@@ -121,36 +121,44 @@ func TestEncodeDav1d(t *testing.T) {
 		{Width: 128, Height: 128, BitDepth: 8, QIndex: 30, FullRange: true,
 			Src: res, SrcStride: 256, SrcU: res[1024:], SrcV: res[2048:], SrcUVStride: 128},
 	} {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "out.obu")
-		data := Encode(c)
-		if err := os.WriteFile(path, data, 0o644); err != nil {
-			t.Fatal(err)
+		for speed := range len(speedTable) {
+			c.Speed = speed
+			encodeDav1d(t, c)
 		}
+	}
+}
 
-		ref, err := exec.Command(dav1dBin, "-i", path, "-o", "-", "--muxer", "md5").Output()
-		if err != nil {
-			t.Fatalf("%dx%d: dav1d: %v", c.Width, c.Height, err)
-		}
+func encodeDav1d(t *testing.T, c EncodeConfig) {
+	t.Helper()
 
-		var d Decoder
-		pics, err := d.DecodeOBUs(data)
-		if err != nil {
-			t.Fatalf("%dx%d: gav1d: %v", c.Width, c.Height, err)
-		}
-		var buf bytes.Buffer
-		for _, p := range pics {
-			planeRows(p, &buf)
-			p.Release()
-		}
-		sum := md5.Sum(buf.Bytes())
-		got := hex.EncodeToString(sum[:])
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.obu")
+	data := Encode(c)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-		if !strings.Contains(string(ref), got) {
-			t.Fatalf("%dx%d: md5 %s, dav1d says %s", c.Width, c.Height, got, strings.TrimSpace(string(ref)))
-		}
-		t.Logf("%dx%d q=%d: %d bytes, gav1d and dav1d agree (%s)",
-			c.Width, c.Height, c.QIndex, len(data), got[:16])
+	ref, err := exec.Command(dav1dBin, "-i", path, "-o", "-", "--muxer", "md5").Output()
+	if err != nil {
+		t.Fatalf("%dx%d s=%d: dav1d: %v", c.Width, c.Height, c.Speed, err)
+	}
+
+	var d Decoder
+	pics, err := d.DecodeOBUs(data)
+	if err != nil {
+		t.Fatalf("%dx%d s=%d: gav1d: %v", c.Width, c.Height, c.Speed, err)
+	}
+	var buf bytes.Buffer
+	for _, p := range pics {
+		planeRows(p, &buf)
+		p.Release()
+	}
+	sum := md5.Sum(buf.Bytes())
+	got := hex.EncodeToString(sum[:])
+
+	if !strings.Contains(string(ref), got) {
+		t.Fatalf("%dx%d q=%d s=%d: md5 %s, dav1d says %s", c.Width, c.Height,
+			c.QIndex, c.Speed, got, strings.TrimSpace(string(ref)))
 	}
 }
 
@@ -349,6 +357,95 @@ func TestEncodeResidual(t *testing.T) {
 				}
 				p.Release()
 			}
+		}
+	}
+}
+
+func TestEncodeSpeed(t *testing.T) {
+	const w, h = 192, 160
+	cw, ch := w/2, h/2
+	y := make([]uint8, w*h)
+	u := make([]uint8, cw*ch)
+	v := make([]uint8, cw*ch)
+	for j := range h {
+		for i := range w {
+			y[j*w+i] = uint8(max(0, min(255, int(128+
+				90*math.Sin(float64(i)/13)*math.Cos(float64(j)/17)+
+				float64((i/4^j/4)&15)))))
+		}
+	}
+	for j := range ch {
+		for i := range cw {
+			u[j*cw+i] = uint8(max(0, min(255, 128+int(50*math.Sin(float64(i)/7)))))
+			v[j*cw+i] = uint8(max(0, min(255, 128+int(50*math.Cos(float64(j)/9)))))
+		}
+	}
+
+	cfg := func(speed int) EncodeConfig {
+		return EncodeConfig{Width: w, Height: h, BitDepth: 8, QIndex: 120, Speed: speed,
+			Src: y, SrcStride: w, SrcU: u, SrcV: v, SrcUVStride: cw}
+	}
+
+	var slowest, fastest []byte
+	for speed := range len(speedTable) {
+		c := cfg(speed)
+		data, e := encodeRecon(t, &c)
+
+		var d Decoder
+		pics, err := d.DecodeOBUs(data)
+		if err != nil {
+			t.Fatalf("speed %d: %v", speed, err)
+		}
+		p := pics[0]
+		if p.Width != w || p.Height != h {
+			t.Fatalf("speed %d: got %dx%d", speed, p.Width, p.Height)
+		}
+
+		for j := range h {
+			for i := range w {
+				if got, want := p.Data[0][j*p.Stride[0]+i], e.recon[j*e.stride+i]; got != want {
+					t.Fatalf("speed %d luma [%d,%d]: decoded %d, encoder reconstructed %d",
+						speed, i, j, got, want)
+				}
+			}
+		}
+		for pl := range 2 {
+			for j := range ch {
+				for i := range cw {
+					got := p.Data[1+pl][j*p.Stride[1]+i]
+					if want := e.reconC[pl][j*e.cstride+i]; got != want {
+						t.Fatalf("speed %d plane %d [%d,%d]: decoded %d, encoder reconstructed %d",
+							speed, 1+pl, i, j, got, want)
+					}
+				}
+			}
+		}
+		p.Release()
+
+		switch speed {
+		case 0:
+			slowest = data
+		case len(speedTable) - 1:
+			fastest = data
+		}
+		t.Logf("speed %2d: %d bytes", speed, len(data))
+	}
+
+	if len(fastest) <= len(slowest) {
+		t.Errorf("speed %d coded %d bytes, not more than speed 0's %d",
+			len(speedTable)-1, len(fastest), len(slowest))
+	}
+
+	for _, c := range []struct {
+		speed int
+		want  []byte
+	}{
+		{-1, slowest}, {-1000, slowest},
+		{len(speedTable), fastest}, {1000, fastest},
+	} {
+		cc := cfg(c.speed)
+		if got := Encode(cc); !bytes.Equal(got, c.want) {
+			t.Errorf("speed %d: %d bytes, want the clamped %d", c.speed, len(got), len(c.want))
 		}
 	}
 }

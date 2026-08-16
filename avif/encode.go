@@ -11,6 +11,9 @@ import (
 // DefaultQuality is used when EncodeOptions.Quality is zero.
 const DefaultQuality = 60
 
+// DefaultSpeed is used when EncodeOptions.Speed is negative.
+const DefaultSpeed = 6
+
 // EncodeOptions holds the encoding parameters.
 type EncodeOptions struct {
 	// Quality runs from 1 to 100, where 100 is lossless. Zero selects
@@ -19,6 +22,9 @@ type EncodeOptions struct {
 	// QualityAlpha runs from 1 to 100 for the alpha plane. Zero follows
 	// Quality.
 	QualityAlpha int
+	// Speed runs from 0 to 10, where 0 searches the most and 10 the least.
+	// A negative value selects DefaultSpeed.
+	Speed int
 	// Lossless encodes at the lowest quantizer. Color conversion and chroma
 	// subsampling still apply, so only a YCbCr or grayscale source is exact.
 	Lossless bool
@@ -50,6 +56,10 @@ func encodeOptions(opts []EncodeOptions) EncodeOptions {
 
 	if o.Lossless {
 		o.Quality, o.QualityAlpha = 100, 100
+	}
+
+	if o.Speed < 0 {
+		o.Speed = DefaultSpeed
 	}
 
 	return o
@@ -297,6 +307,7 @@ func encodePlanes(p *planes, o EncodeOptions) ([]byte, error) {
 		Height:      p.height,
 		BitDepth:    8,
 		QIndex:      qindex(o.Quality),
+		Speed:       o.Speed,
 		Monochrome:  p.mono,
 		FullRange:   true,
 		Src:         p.y,
@@ -325,6 +336,7 @@ func encodePlanes(p *planes, o EncodeOptions) ([]byte, error) {
 			Height:     p.height,
 			BitDepth:   8,
 			QIndex:     qindex(o.QualityAlpha),
+			Speed:      o.Speed,
 			Monochrome: true,
 			FullRange:  true,
 			Src:        p.a,
