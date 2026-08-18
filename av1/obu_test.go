@@ -104,3 +104,25 @@ func TestOBUParity(t *testing.T) {
 	}
 	t.Fatalf("output lengths differ: got %d lines, want %d", len(gotLines), len(wantLines))
 }
+
+func TestRefSizeValid(t *testing.T) {
+	for _, c := range []struct {
+		name           string
+		fw, fh, rw, rh int
+		want           bool
+	}{
+		{"same size", 320, 240, 320, 240, true},
+		{"reference exactly twice", 320, 240, 640, 480, true},
+		{"reference a hair over twice", 320, 240, 641, 480, false},
+		{"reference over twice vertically", 320, 240, 640, 481, false},
+		{"reference exactly a sixteenth", 320, 240, 20, 15, true},
+		{"reference just under a sixteenth", 320, 240, 19, 15, false},
+		{"reference just under vertically", 320, 240, 20, 14, false},
+		{"reference half", 320, 240, 160, 120, true},
+	} {
+		if got := refSizeValid(c.fw, c.fh, c.rw, c.rh); got != c.want {
+			t.Errorf("%s: %dx%d frame, %dx%d reference: got %v, want %v",
+				c.name, c.fw, c.fh, c.rw, c.rh, got, c.want)
+		}
+	}
+}

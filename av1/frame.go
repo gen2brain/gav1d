@@ -975,6 +975,12 @@ func splitTiles(hdr *frameHeader, tiles []tileGroup, nTs int) ([][]byte, error) 
 	return out, nil
 }
 
+// refSizeValid is the spec's reference scaling window: a reference may be at
+// most twice the frame and at least a sixteenth of it.
+func refSizeValid(fw, fh, rw, rh int) bool {
+	return fw*2 >= rw && fh*2 >= rh && fw <= rw*16 && fh <= rh*16
+}
+
 func (f *frameContext[P, C]) setupRefs(d *Decoder) error {
 	hdr := f.frameHdr
 
@@ -993,8 +999,7 @@ func (f *frameContext[P, C]) setupRefs(d *Decoder) error {
 		}
 		f.refp[i] = p
 
-		if p.w<<14 < f.frameHdr.width[0] || p.h<<14 < f.frameHdr.height ||
-			p.w > f.frameHdr.width[0]<<4 || p.h > f.frameHdr.height<<4 {
+		if !refSizeValid(hdr.width[0], hdr.height, p.w, p.h) {
 			return errInvalid
 		}
 		if hdr.width[0] != p.w || hdr.height != p.h {
