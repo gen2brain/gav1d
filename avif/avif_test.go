@@ -2126,3 +2126,109 @@ func TestExtentAmplification(t *testing.T) {
 		t.Fatalf("err = %v, want ErrInvalid", err)
 	}
 }
+
+func TestDecodeThumbnail(t *testing.T) {
+	data, err := os.ReadFile("testdata/thumb.avif")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := DecodeThumbnailConfig(bytes.NewReader(data))
+	if err != nil || cfg.Width != 64 || cfg.Height != 48 {
+		t.Fatalf("config = %v, %v", cfg, err)
+	}
+
+	img, err := DecodeThumbnail(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := img.(*image.NRGBA); !ok || img.Bounds() != image.Rect(0, 0, 64, 48) {
+		t.Fatalf("thumbnail = %T %v", img, img.Bounds())
+	}
+
+	planar, err := DecodeThumbnail(bytes.NewReader(data), Options{ToYCbCr: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := planar.(*image.YCbCr); !ok || planar.Bounds() != img.Bounds() {
+		t.Fatalf("planar thumbnail = %T %v", planar, planar.Bounds())
+	}
+
+	plain, err := os.ReadFile("testdata/yuv420-8.avif")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeThumbnail(bytes.NewReader(plain)); !errors.Is(err, ErrNoThumbnail) {
+		t.Fatalf("DecodeThumbnail without one: %v", err)
+	}
+	if _, err := DecodeThumbnailConfig(bytes.NewReader(plain)); !errors.Is(err, ErrNoThumbnail) {
+		t.Fatalf("DecodeThumbnailConfig without one: %v", err)
+	}
+
+	dav1d, err := exec.LookPath("dav1d")
+	if err != nil {
+		t.Skip("dav1d not found")
+	}
+
+	f, err := parse(memSource(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	it, err := f.thumbnail()
+	if err != nil {
+		t.Fatal(err)
+	}
+	obus, err := f.meta.data(it, f.src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	in := filepath.Join(dir, "thumb.obu")
+	out := filepath.Join(dir, "thumb.y4m")
+	if err := os.WriteFile(in, obus, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(dav1d, "--demuxer", "section5", "-i", in, "-o", out)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("dav1d: %v\n%s", err, b)
+	}
+	y, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := readY4M(y)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pic, err := f.decodeItem(it)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comparePlanes(t, pic, ref)
+}
+
+func TestDecodeAllMaxFrames(t *testing.T) {
+	data, err := os.ReadFile("testdata/anim.avif")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := DecodeAll(bytes.NewReader(data))
+	if err != nil || len(a.Image) < 2 {
+		t.Fatalf("DecodeAll: %v, %d frames", err, len(a.Image))
+	}
+	n := len(a.Image)
+
+	if _, err := DecodeAll(bytes.NewReader(data), Options{MaxFrames: n - 1}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("DecodeAll under a bound of %d: %v", n-1, err)
+	}
+
+	for _, max := range []int{n, -1} {
+		a, err := DecodeAll(bytes.NewReader(data), Options{MaxFrames: max})
+		if err != nil || len(a.Image) != n {
+			t.Fatalf("DecodeAll with MaxFrames %d: %v, %d frames", max, err, len(a.Image))
+		}
+	}
+}

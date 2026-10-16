@@ -88,8 +88,10 @@ what to reach for to decode video rather than images.
 package avif
 
 import (
+	"errors"
 	"image"
 	"io"
+	"slices"
 
 	"github.com/gen2brain/gav1d/av1"
 )
@@ -102,7 +104,26 @@ type file struct {
 	movie *movie
 
 	frameSizeLimit int
+	maxFrames      int
 }
+
+func (f *file) frames() int {
+	switch {
+	case f.maxFrames < 0:
+		return 0
+	case f.maxFrames == 0:
+		return DefaultMaxFrames
+	}
+
+	return f.maxFrames
+}
+
+// ErrNoThumbnail is returned when no item is linked to the primary image as
+// its thumbnail.
+var ErrNoThumbnail = errors.New("avif: no thumbnail")
+
+// DefaultMaxFrames bounds the frames DecodeAll decodes from a sequence.
+const DefaultMaxFrames = 1024
 
 func parse(src *source) (*file, error) {
 	f := &file{src: src}
@@ -175,6 +196,29 @@ func (f *file) primary() *item {
 	}
 
 	return nil
+}
+
+// thumbnail is the item linked to the primary image by a thmb reference.
+func (f *file) thumbnail() (*item, error) {
+	primary := f.primary()
+	if primary == nil {
+		return nil, ErrInvalid
+	}
+
+	for _, r := range f.meta.refs {
+		if r.typ != "thmb" || !slices.Contains(r.to, primary.id) {
+			continue
+		}
+
+		it := f.meta.items[r.from]
+		if it == nil || (it.typ != "av01" && it.typ != "grid") {
+			continue
+		}
+
+		return it, nil
+	}
+
+	return nil, ErrNoThumbnail
 }
 
 // alphaFor finds the auxiliary item carrying alpha for id.
@@ -423,6 +467,12 @@ func (f *file) decodePrimary() (*av1.Picture, *av1.Picture, error) {
 		return nil, nil, ErrInvalid
 	}
 
+	return f.decodePictures(it)
+}
+
+// decodePictures decodes an image item and its alpha, cropped to the size the
+// item declares.
+func (f *file) decodePictures(it *item) (*av1.Picture, *av1.Picture, error) {
 	var pic *av1.Picture
 	var err error
 	if it.typ == "grid" {
@@ -509,6 +559,9 @@ type Options struct {
 	// FrameSizeLimit bounds a frame's area in pixels. Zero means
 	// av1.DefaultFrameSizeLimit; a negative value removes the limit.
 	FrameSizeLimit int
+	// MaxFrames bounds the frames DecodeAll decodes from a sequence. Zero
+	// means DefaultMaxFrames; a negative value removes the limit.
+	MaxFrames int
 	// ToYCbCr forces the image's native color space instead of NRGBA:
 	// *image.YCbCr, *image.NYCbCrA when there is alpha, or *image.Gray when
 	// the image is monochrome. Above 8 bits NRGBA64 is returned anyway.
@@ -567,8 +620,13 @@ func DecodeAll(r io.Reader, opts ...Options) (*AVIF, error) {
 	}
 	o := options(opts)
 	f.frameSizeLimit = o.FrameSizeLimit
+	f.maxFrames = o.MaxFrames
 
 	if f.movie != nil {
+		if err := f.sequenceBound(); err != nil {
+			return nil, err
+		}
+
 		if a, err := f.decodeSequence(o); err == nil && a != nil {
 			return a, nil
 		}
@@ -580,6 +638,54 @@ func DecodeAll(r io.Reader, opts ...Options) (*AVIF, error) {
 	}
 
 	return &AVIF{Image: []image.Image{img}, Delay: []float64{0}, Color: ci}, nil
+}
+
+// DecodeThumbnail reads the thumbnail of an AVIF image as *image.NRGBA, or
+// *image.NRGBA64 above 8 bits. It returns ErrNoThumbnail when the file
+// carries none.
+func DecodeThumbnail(r io.Reader, opts ...Options) (image.Image, error) {
+	src, err := srcFor(r)
+	if err != nil {
+		return nil, err
+	}
+	f, err := parse(src)
+	if err != nil {
+		return nil, err
+	}
+	it, err := f.thumbnail()
+	if err != nil {
+		return nil, err
+	}
+
+	o := options(opts)
+	f.frameSizeLimit = o.FrameSizeLimit
+
+	img, _, err := f.decodeImage(it, o)
+
+	return img, err
+}
+
+// DecodeThumbnailConfig reads the dimensions and color model of the thumbnail
+// without decoding it.
+func DecodeThumbnailConfig(r io.Reader) (image.Config, error) {
+	src, err := srcFor(r)
+	if err != nil {
+		return image.Config{}, err
+	}
+	f, err := parse(src)
+	if err != nil {
+		return image.Config{}, err
+	}
+	it, err := f.thumbnail()
+	if err != nil {
+		return image.Config{}, err
+	}
+	w, h, err := f.dimensions(it)
+	if err != nil {
+		return image.Config{}, err
+	}
+
+	return image.Config{Width: w, Height: h, ColorModel: colorModelFor(f, it)}, nil
 }
 
 // DecodeConfig reads the dimensions and color model without decoding pixels.
@@ -618,11 +724,20 @@ func options(opts []Options) Options {
 }
 
 func (f *file) decodeStill(o Options) (image.Image, ColorInfo, error) {
-	pic, alpha, err := f.decodePrimary()
+	it := f.primary()
+	if it == nil {
+		return nil, ColorInfo{}, ErrInvalid
+	}
+
+	return f.decodeImage(it, o)
+}
+
+// decodeImage decodes one image item with its alpha and converts the result.
+func (f *file) decodeImage(it *item, o Options) (image.Image, ColorInfo, error) {
+	pic, alpha, err := f.decodePictures(it)
 	if err != nil {
 		return nil, ColorInfo{}, err
 	}
-	it := f.primary()
 	ci := f.colorInfo(it, pic)
 	img, err := toImage(f, it, pic, alpha, o.ycbcrFor(f, it))
 	if err != nil {

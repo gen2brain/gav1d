@@ -351,6 +351,29 @@ func (m *movie) alphaTrack(id uint32) *track {
 	return nil
 }
 
+// sequenceBound refuses a picture or alpha track longer than Options.MaxFrames.
+func (f *file) sequenceBound() error {
+	n := f.frames()
+	if n == 0 {
+		return nil
+	}
+
+	t := f.movie.pictTrack()
+	if t == nil {
+		return nil
+	}
+
+	if len(t.samples) > n {
+		return ErrUnsupported
+	}
+
+	if at := f.movie.alphaTrack(t.id); at != nil && len(at.samples) > n {
+		return ErrUnsupported
+	}
+
+	return nil
+}
+
 // decodeSequence decodes an image sequence track.
 func (f *file) decodeSequence(o Options) (*AVIF, error) {
 	t := f.movie.pictTrack()
