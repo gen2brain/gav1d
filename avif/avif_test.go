@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -2229,6 +2230,164 @@ func TestDecodeAllMaxFrames(t *testing.T) {
 		a, err := DecodeAll(bytes.NewReader(data), Options{MaxFrames: max})
 		if err != nil || len(a.Image) != n {
 			t.Fatalf("DecodeAll with MaxFrames %d: %v, %d frames", max, err, len(a.Image))
+		}
+	}
+}
+
+func TestContainerTableAllocations(t *testing.T) {
+	const count = 65536
+	for _, tc := range []struct {
+		name  string
+		table []byte
+	}{
+		{"timing", fullBox("stts", 0, 0, be32(1), be32(count), be32(1))},
+		{"truncated timing", fullBox("stts", 0, 0, be32(0xffffffff))},
+		{"uniform sizes", fullBox("stsz", 0, 0, be32(1), be32(count))},
+		{"truncated sizes", fullBox("stsz", 0, 0, be32(0), be32(count))},
+		{"truncated offsets", fullBox("stco", 0, 0, be32(count))},
+		{"truncated wide offsets", fullBox("co64", 0, 0, be32(count))},
+		{"truncated chunks", fullBox("stsc", 0, 0, be32(0xffffffff))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := buildBox("ftyp", []byte("avif\x00\x00\x00\x00avif"))
+			data = append(data, buildBox("moov", buildBox("trak", buildBox("mdia",
+				buildBox("minf", buildBox("stbl", tc.table)))))...)
+			var before, after runtime.MemStats
+			runtime.ReadMemStats(&before)
+			_, err := DecodeConfig(bytes.NewReader(data))
+			runtime.ReadMemStats(&after)
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("incomplete file: got %v, want ErrInvalid", err)
+			}
+			if n := after.TotalAlloc - before.TotalAlloc; n > 128*1024 {
+				t.Fatalf("allocated %d bytes for a %d-byte header", n, len(data))
+			}
+		})
+	}
+}
+
+func TestGridFrameSizeLimit(t *testing.T) {
+	data, err := os.ReadFile("testdata/grid-2x2.avif")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := parse(memSource(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, tiles, err := f.gridOf(f.primary())
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := g.w*g.h - 1
+	for _, id := range tiles {
+		w, h, err := f.dimensions(f.meta.items[id])
+		if err != nil || w*h > limit {
+			t.Fatalf("fixture must have tiles smaller than its grid: %dx%d, %v", w, h, err)
+		}
+	}
+	if _, err := Decode(bytes.NewReader(data), Options{FrameSizeLimit: limit}); !errors.Is(err, av1.ErrFrameTooLarge) {
+		t.Fatalf("grid over the limit: %v", err)
+	}
+	for _, n := range []int{g.w * g.h, 0, -1} {
+		img, err := Decode(bytes.NewReader(data), Options{FrameSizeLimit: n})
+		if err != nil {
+			t.Fatalf("limit %d: %v", n, err)
+		}
+		if img.Bounds().Dx() != g.w || img.Bounds().Dy() != g.h {
+			t.Fatalf("limit %d changed grid dimensions: %v", n, img.Bounds())
+		}
+	}
+}
+
+func TestGridLimitBeforeTileDecode(t *testing.T) {
+	f := &file{meta: &metaBox{items: map[uint32]*item{}}}
+	_, err := f.decodeTiles(gridInfo{rows: 1, cols: 1, w: 65536, h: 65536}, []uint32{1})
+	if !errors.Is(err, av1.ErrFrameTooLarge) {
+		t.Fatalf("default grid limit was not checked first: %v", err)
+	}
+	f.frameSizeLimit = -1
+	_, err = f.decodeTiles(gridInfo{rows: 1, cols: 1, w: 1 << 30, h: 1 << 30}, []uint32{1})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unrepresentable unlimited grid: %v", err)
+	}
+}
+
+func TestSampleTableLayout(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		track track
+		size  uint64
+		want  []extent
+	}{
+		{"uniform", track{sampleCount: 4, sampleSize: 3, offsets: []uint64{0, 6}, chunks: []chunkRun{{1, 2}}}, 12,
+			[]extent{{0, 3}, {3, 3}, {6, 3}, {9, 3}}},
+		{"variable sizes and chunks", track{sampleCount: 4, sizes: []uint32{1, 2, 3, 6}, offsets: []uint64{0, 6},
+			chunks: []chunkRun{{1, 3}, {2, 1}}}, 12, []extent{{0, 1}, {1, 2}, {3, 3}, {6, 6}}},
+		{"count exceeds file", track{sampleCount: 65536, sampleSize: 1, offsets: []uint64{0}, chunks: []chunkRun{{1, 65536}}}, 12, nil},
+		{"uniform data exceeds file", track{sampleCount: 4, sampleSize: 4, offsets: []uint64{0}, chunks: []chunkRun{{1, 4}}}, 12, nil},
+		{"offset outside file", track{sampleCount: 1, sampleSize: 1, offsets: []uint64{13}, chunks: []chunkRun{{1, 1}}}, 12, nil},
+		{"extent crosses end", track{sampleCount: 1, sampleSize: 2, offsets: []uint64{11}, chunks: []chunkRun{{1, 1}}}, 12, nil},
+		{"chunks cover fewer samples", track{sampleCount: 2, sampleSize: 1, offsets: []uint64{0}, chunks: []chunkRun{{1, 1}}}, 12,
+			[]extent{{0, 1}}},
+		{"missing first chunk", track{sampleCount: 1, sampleSize: 1, offsets: []uint64{0}, chunks: []chunkRun{{2, 1}}}, 12, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.track.layout(tc.size)
+			if tc.want == nil {
+				if !errors.Is(err, ErrInvalid) || tc.track.samples != nil {
+					t.Fatalf("invalid table published samples: %v, %+v", err, tc.track.samples)
+				}
+				return
+			}
+			if err != nil || !slices.Equal(tc.track.samples, tc.want) {
+				t.Fatalf("layout: %v, %+v; want %+v", err, tc.track.samples, tc.want)
+			}
+		})
+	}
+}
+
+func TestSampleTimingRuns(t *testing.T) {
+	var tr track
+	table := fullBox("stts", 0, 0, be32(4),
+		be32(0), be32(99), be32(2), be32(10), be32(0), be32(99), be32(1), be32(20))
+	if err := tr.parseStbl(table); err != nil {
+		t.Fatal(err)
+	}
+	cursor := timeCursor{runs: tr.timing}
+	for i, want := range []uint32{10, 10, 20, 0, 0} {
+		if got := cursor.next(); got != want {
+			t.Fatalf("sample %d delta = %d, want %d", i, got, want)
+		}
+	}
+}
+
+func TestTruncatedSampleTableCounts(t *testing.T) {
+	for _, typ := range []string{"stts", "stsc", "stco", "co64"} {
+		t.Run(typ, func(t *testing.T) {
+			var tr track
+			if err := tr.parseStbl(fullBox(typ, 0, 0, be32(0xffffffff))); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("truncated entries accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestSequenceTimingWithoutReferenceDecoder(t *testing.T) {
+	data, err := os.ReadFile("testdata/anim.avif")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq, err := DecodeAll(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seq.Image) < 2 || len(seq.Delay) != len(seq.Image) {
+		t.Fatalf("incomplete sequence: %d images, %d delays", len(seq.Image), len(seq.Delay))
+	}
+	for i, delay := range seq.Delay {
+		if math.Abs(delay-0.1) > 1e-9 {
+			t.Fatalf("frame %d delay = %v, want 0.1", i, delay)
 		}
 	}
 }

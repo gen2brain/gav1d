@@ -91,6 +91,7 @@ import (
 	"errors"
 	"image"
 	"io"
+	"math"
 	"slices"
 
 	"github.com/gen2brain/gav1d/av1"
@@ -344,35 +345,53 @@ func (f *file) decodeGrid(it *item) (*av1.Picture, error) {
 }
 
 func (f *file) decodeTiles(g gridInfo, tiles []uint32) (*av1.Picture, error) {
-	var err error
-	pics := make([]*av1.Picture, len(tiles))
+	if g.w <= 0 || g.h <= 0 || g.rows <= 0 || g.cols <= 0 || len(tiles) != g.rows*g.cols {
+		return nil, ErrInvalid
+	}
+	limit := f.frameSizeLimit
+	if limit == 0 {
+		limit = av1.DefaultFrameSizeLimit
+	}
+	if limit > 0 && uint64(g.w) > uint64(limit)/uint64(g.h) {
+		return nil, av1.ErrFrameTooLarge
+	}
+	if g.w > math.MaxInt/8/g.h {
+		return nil, ErrInvalid
+	}
+
+	var out *av1.Picture
+	var tw, th int
 	for i, id := range tiles {
 		t := f.meta.items[id]
 		if t == nil || t.typ != "av01" {
 			return nil, ErrInvalid
 		}
-		if pics[i], err = f.decodeItem(t); err != nil {
+		p, err := f.decodeItem(t)
+		if err != nil {
 			return nil, err
 		}
-	}
+		if out == nil {
+			tw, th = p.Width, p.Height
+			if int64(tw)*int64(g.cols) < int64(g.w) || int64(th)*int64(g.rows) < int64(g.h) ||
+				int64(tw)*int64(g.cols-1) >= int64(g.w) || int64(th)*int64(g.rows-1) >= int64(g.h) {
+				p.Release()
 
-	first := pics[0]
-	tw, th := first.Width, first.Height
-	for _, p := range pics {
-		if p.Width != tw || p.Height != th || p.Layout != first.Layout ||
-			p.BitDepth != first.BitDepth {
+				return nil, ErrInvalid
+			}
+			out = newGrid(p, g)
+		} else if p.Width != tw || p.Height != th || p.Layout != out.Layout || p.BitDepth != out.BitDepth {
+			p.Release()
+
 			return nil, ErrInvalid
 		}
-	}
-	if tw*g.cols < g.w || th*g.rows < g.h {
-		return nil, ErrInvalid
+		copyGridTile(out, p, g, i, tw, th)
+		p.Release()
 	}
 
-	return stitch(pics, g, tw, th), nil
+	return out, nil
 }
 
-func stitch(pics []*av1.Picture, g gridInfo, tw, th int) *av1.Picture {
-	first := pics[0]
+func newGrid(first *av1.Picture, g gridInfo) *av1.Picture {
 	ssHor, ssVer := subsampling(first.Layout)
 	bpp := 1
 	if first.BitDepth > 8 {
@@ -401,34 +420,39 @@ func stitch(pics []*av1.Picture, g gridInfo, tw, th int) *av1.Picture {
 		out.Data[pl] = make([]byte, out.Stride[pl]*ph)
 	}
 
-	for i, p := range pics {
-		row, col := i/g.cols, i%g.cols
-		for pl := range 3 {
-			if out.Data[pl] == nil {
-				continue
-			}
-			sx, sy := col*tw, row*th
-			cw, ch := tw, th
-			ow, oh := g.w, g.h
-			if pl != 0 {
-				sx, sy = sx>>ssHor, sy>>ssVer
-				cw, ch = cw>>ssHor, ch>>ssVer
-				ow, oh = (ow+ssHor)>>ssHor, (oh+ssVer)>>ssVer
-			}
-			cw = min(cw, ow-sx)
-			ch = min(ch, oh-sy)
-			if cw <= 0 || ch <= 0 {
-				continue
-			}
-			for y := range ch {
-				dst := (sy+y)*out.Stride[pl] + sx*bpp
-				src := y * p.Stride[pl]
-				copy(out.Data[pl][dst:dst+cw*bpp], p.Data[pl][src:src+cw*bpp])
-			}
+	return out
+}
+
+func copyGridTile(out, p *av1.Picture, g gridInfo, i, tw, th int) {
+	ssHor, ssVer := subsampling(p.Layout)
+	bpp := 1
+	if p.BitDepth > 8 {
+		bpp = 2
+	}
+	row, col := i/g.cols, i%g.cols
+	for pl := range 3 {
+		if out.Data[pl] == nil {
+			continue
+		}
+		sx, sy := col*tw, row*th
+		cw, ch := tw, th
+		ow, oh := g.w, g.h
+		if pl != 0 {
+			sx, sy = sx>>ssHor, sy>>ssVer
+			cw, ch = cw>>ssHor, ch>>ssVer
+			ow, oh = (ow+ssHor)>>ssHor, (oh+ssVer)>>ssVer
+		}
+		cw = min(cw, ow-sx)
+		ch = min(ch, oh-sy)
+		if cw <= 0 || ch <= 0 {
+			continue
+		}
+		for y := range ch {
+			dst := (sy+y)*out.Stride[pl] + sx*bpp
+			src := y * p.Stride[pl]
+			copy(out.Data[pl][dst:dst+cw*bpp], p.Data[pl][src:src+cw*bpp])
 		}
 	}
-
-	return out
 }
 
 func subsampling(layout int) (int, int) {
@@ -558,6 +582,7 @@ type Options struct {
 	AutoRotate bool
 	// FrameSizeLimit bounds a frame's area in pixels. Zero means
 	// av1.DefaultFrameSizeLimit; a negative value removes the limit.
+	// Grids apply the limit to both each coded tile and the assembled image.
 	FrameSizeLimit int
 	// MaxFrames bounds the frames DecodeAll decodes from a sequence. Zero
 	// means DefaultMaxFrames; a negative value removes the limit.
