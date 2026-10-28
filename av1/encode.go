@@ -1,6 +1,10 @@
 package av1
 
-import "math"
+import (
+	"math"
+	"runtime"
+	"sync"
+)
 
 type encoder struct {
 	cfg      EncodeConfig
@@ -18,6 +22,7 @@ type encoder struct {
 	maxBl    int
 	minBl    int
 	sp       speedParams
+	tiling   tileTiling
 	stride   int
 	recon    []uint8
 	reconC   [2][]uint8
@@ -130,9 +135,6 @@ func (e *encoder) init(c *EncodeConfig, seq *sequenceHeader) {
 	e.dsp = newDsp[uint8]()
 	e.itx = make([]int32, 64*64*2+itxDct64Scratch)
 	e.fwd = make([]int32, fwdScratch)
-	e.cdf.initStatic(uint8(c.QIndex))
-	e.msac.precarry = make([]uint16, 0, e.bw*e.bh*4)
-	e.msac.init(false)
 }
 
 func (e *encoder) clearCtx() {
@@ -352,14 +354,16 @@ func (e *encoder) writeSb(bx, by, bl int, node *edgeNode) {
 	setCtx(e.l.partition[:], by8, n, alPartCtx[1][bl][bp])
 }
 
-func (e *encoder) writeTile() []byte {
+func (e *encoder) writeTile(t tileTiling) []byte {
+	e.tiling = t
+	e.cdf.initStatic(uint8(e.cfg.QIndex))
 	e.msac.init(false)
 	e.clearCtx()
 
 	sbStep := 16
-	for by := 0; by < e.bh; by += sbStep {
+	for by := t.rowStart; by < t.rowEnd; by += sbStep {
 		resetContext(&e.l, true)
-		for bx := 0; bx < e.bw; bx += sbStep {
+		for bx := t.colStart; bx < t.colEnd; bx += sbStep {
 			if e.cfg.Src != nil {
 				e.saveState(bx, by, bl64x64, &e.entry[bl128x128])
 				e.trialSb(bx, by, bl64x64, intraEdgeTree[1])
@@ -370,6 +374,84 @@ func (e *encoder) writeTile() []byte {
 	}
 
 	return e.msac.done()
+}
+
+func (e *encoder) worker() *encoder {
+	w := *e
+	w.a = make([]blockContext, len(e.a))
+	w.itx = make([]int32, len(e.itx))
+	w.fwd = make([]int32, len(e.fwd))
+	w.msac.precarry = nil
+
+	return &w
+}
+
+func (e *encoder) writeTiles(tl *encTiling) [][]byte {
+	n := tl.cols() * tl.rows()
+	out := make([][]byte, n)
+	threads := e.cfg.Threads
+	if threads <= 0 {
+		threads = runtime.GOMAXPROCS(0)
+	}
+	threads = min(threads, n)
+
+	if threads == 1 {
+		for i := range n {
+			out[i] = e.writeTile(tl.tile(i, e.bw, e.bh))
+		}
+
+		return out
+	}
+
+	next := make(chan int, n)
+	for i := range n {
+		next <- i
+	}
+	close(next)
+
+	var wg sync.WaitGroup
+	for range threads {
+		w := e.worker()
+		wg.Go(func() {
+			for i := range next {
+				out[i] = w.writeTile(tl.tile(i, e.bw, e.bh))
+			}
+		})
+	}
+	wg.Wait()
+
+	return out
+}
+
+func (e *encoder) writeFrame() []byte {
+	tl := newEncTiling(&e.seq, e.cfg.Width, e.cfg.Height)
+	tiles := e.writeTiles(tl)
+
+	sizeBytes := 1
+	for _, t := range tiles[:len(tiles)-1] {
+		for len(t)-1 >= 1<<(8*sizeBytes) {
+			sizeBytes++
+		}
+	}
+
+	var fp putBits
+	writeFrameHdr(&fp, &e.cfg, tl, sizeBytes)
+	fp.bytealign()
+	if len(tiles) > 1 {
+		fp.bit(0)
+		fp.bytealign()
+	}
+	body := fp.bytes()
+	for i, t := range tiles {
+		if i < len(tiles)-1 {
+			for b := range sizeBytes {
+				body = append(body, byte((len(t)-1)>>(8*b)))
+			}
+		}
+		body = append(body, t...)
+	}
+
+	return body
 }
 
 func encodeConfigValid(c *EncodeConfig) bool {
@@ -407,12 +489,7 @@ func Encode(c EncodeConfig) []byte {
 
 	var e encoder
 	e.init(&c, &sh)
-	tile := e.writeTile()
-
-	var fp putBits
-	writeFrameHdr(&fp, &sh, &c)
-	fp.bytealign()
-	body := append(fp.bytes(), tile...)
+	body := e.writeFrame()
 
 	out := writeObu(nil, obuTd, nil)
 	out = writeObu(out, obuSeqHdr, seq)

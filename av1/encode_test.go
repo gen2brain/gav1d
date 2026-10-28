@@ -234,15 +234,12 @@ func encodeRecon(t *testing.T, c *EncodeConfig) ([]byte, *encoder) {
 
 	var e encoder
 	e.init(c, &sh)
-	tile := e.writeTile()
-	var fp putBits
-	writeFrameHdr(&fp, &sh, c)
-	fp.bytealign()
+	body := e.writeFrame()
 
 	out := writeObu(nil, obuTd, nil)
 	out = writeObu(out, obuSeqHdr, seq)
 
-	return writeObu(out, obuFrame, append(fp.bytes(), tile...)), &e
+	return writeObu(out, obuFrame, body), &e
 }
 
 // TestEncodeChroma checks that a 4:2:0 frame carries all three planes.
@@ -312,11 +309,12 @@ func TestEncodeResidual(t *testing.T) {
 		}
 	}
 
-	for _, sz := range [][2]int{{128, 96}, {97, 33}, {122, 66}, {200, 150}} {
+	for _, sz := range [][3]int{{128, 96, 0}, {97, 33, 0}, {122, 66, 0}, {200, 150, 0},
+		{104, 128, 9}, {97, 33, 9}, {200, 150, 10}} {
 		w, h := sz[0], sz[1]
 		for _, mono := range []bool{true, false} {
 			for _, q := range []int{20, 60, 120, 200} {
-				c := EncodeConfig{Width: w, Height: h, BitDepth: 8, QIndex: q,
+				c := EncodeConfig{Width: w, Height: h, BitDepth: 8, QIndex: q, Speed: sz[2],
 					Monochrome: mono, Src: src, SrcStride: stride}
 				if !mono {
 					c.SrcU, c.SrcV, c.SrcUVStride = src[stride:], src[3*stride:], stride
@@ -446,6 +444,91 @@ func TestEncodeSpeed(t *testing.T) {
 		cc := cfg(c.speed)
 		if got := Encode(cc); !bytes.Equal(got, c.want) {
 			t.Errorf("speed %d: %d bytes, want the clamped %d", c.speed, len(got), len(c.want))
+		}
+	}
+}
+
+func TestEncodeTiles(t *testing.T) {
+	for _, tc := range []struct {
+		w, h       int
+		mono       bool
+		q, speed   int
+		cols, rows int
+	}{
+		{4200, 2200, false, 120, 9, 2, 1},
+		{3648, 2736, false, 60, 9, 1, 2},
+		{4201, 2311, true, 0, 10, 2, 1},
+		{8200, 256, false, 100, 7, 4, 1},
+	} {
+		w, h := tc.w, tc.h
+		cw, ch := (w+1)/2, (h+1)/2
+		y := make([]uint8, w*h)
+		u := make([]uint8, cw*ch)
+		v := make([]uint8, cw*ch)
+		for j := range h {
+			for i := range w {
+				a := float64((i/48+j/40)%8) * math.Pi / 8
+				y[j*w+i] = uint8(128 + 90*math.Sin((float64(i)*math.Cos(a)+float64(j)*math.Sin(a))/3))
+			}
+		}
+		for j := range ch {
+			for i := range cw {
+				l := int(y[min(2*j, h-1)*w+min(2*i, w-1)])
+				u[j*cw+i] = uint8(64 + l/2)
+				v[j*cw+i] = uint8(220 - l*3/5)
+			}
+		}
+
+		c := EncodeConfig{Width: w, Height: h, BitDepth: 8, QIndex: tc.q, Speed: tc.speed,
+			Monochrome: tc.mono, Src: y, SrcStride: w, Threads: 1}
+		if !tc.mono {
+			c.SrcU, c.SrcV, c.SrcUVStride = u, v, cw
+		}
+		data, e := encodeRecon(t, &c)
+		c.Threads = 4
+		if par := Encode(c); !bytes.Equal(par, data) {
+			t.Fatalf("%dx%d: %d bytes on four threads, %d on one", w, h, len(par), len(data))
+		}
+
+		if tl := newEncTiling(&e.seq, w, h); tl.cols() != tc.cols || tl.rows() != tc.rows {
+			t.Fatalf("%dx%d: %dx%d tiles, want %dx%d", w, h, tl.cols(), tl.rows(), tc.cols, tc.rows)
+		}
+
+		var d Decoder
+		pics, err := d.DecodeOBUs(data)
+		if err != nil {
+			t.Fatalf("%dx%d: %v", w, h, err)
+		}
+		p := pics[0]
+		for j := range h {
+			for i := range w {
+				if got, want := p.Data[0][j*p.Stride[0]+i], e.recon[j*e.stride+i]; got != want {
+					t.Fatalf("%dx%d luma [%d,%d]: decoded %d, encoder reconstructed %d",
+						w, h, i, j, got, want)
+				}
+				if tc.q == 0 && p.Data[0][j*p.Stride[0]+i] != y[j*w+i] {
+					t.Fatalf("%dx%d lossless luma [%d,%d] differs from the source", w, h, i, j)
+				}
+			}
+		}
+		for pl := range 2 {
+			if tc.mono {
+				break
+			}
+			for j := range e.ch {
+				for i := range e.cw {
+					got := p.Data[1+pl][j*p.Stride[1]+i]
+					if want := e.reconC[pl][j*e.cstride+i]; got != want {
+						t.Fatalf("%dx%d plane %d [%d,%d]: decoded %d, encoder reconstructed %d",
+							w, h, 1+pl, i, j, got, want)
+					}
+				}
+			}
+		}
+		p.Release()
+
+		if dav1dBin != "" {
+			encodeDav1d(t, c)
 		}
 	}
 }

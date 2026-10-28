@@ -305,6 +305,42 @@ func TestEncodeSpeed(t *testing.T) {
 	if got := enc(EncodeOptions{Quality: 60}); !bytes.Equal(got, slowest) {
 		t.Error("the zero value did not select speed 0")
 	}
+
+	var buf bytes.Buffer
+	if err := Encode(&buf, src); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(buf.Bytes(), enc(EncodeOptions{Speed: DefaultSpeed})) {
+		t.Error("omitted options did not select DefaultSpeed")
+	}
+}
+
+func TestEncodeTiles(t *testing.T) {
+	for _, sz := range [][2]int{{4200, 2200}, {3648, 2736}} {
+		src := synthNRGBA(sz[0], sz[1], true)
+
+		var one, all bytes.Buffer
+		if err := Encode(&one, src, EncodeOptions{Quality: 60, Speed: 10, Threads: 1}); err != nil {
+			t.Fatalf("%v: %v", sz, err)
+		}
+		if err := Encode(&all, src, EncodeOptions{Quality: 60, Speed: 10}); err != nil {
+			t.Fatalf("%v: %v", sz, err)
+		}
+		if !bytes.Equal(one.Bytes(), all.Bytes()) {
+			t.Fatalf("%v: threads changed the output", sz)
+		}
+
+		img, err := Decode(bytes.NewReader(one.Bytes()))
+		if err != nil {
+			t.Fatalf("%v: %v", sz, err)
+		}
+		if b := img.Bounds(); b.Dx() != sz[0] || b.Dy() != sz[1] {
+			t.Fatalf("%v: decoded %v", sz, b)
+		}
+		if p := rgbPSNR(t, src, img); p < 30 {
+			t.Errorf("%v: psnr %.1f dB", sz, p)
+		}
+	}
 }
 
 func BenchmarkEncode(b *testing.B) {

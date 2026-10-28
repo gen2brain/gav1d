@@ -291,11 +291,13 @@ func (e *encoder) txtpFor(tx, plane, mode int) int {
 	return int(txtpFromUvmode[mode])
 }
 
-func (e *encoder) predIntra(dst []uint8, off, stride, x, y, w, h, tw, th,
+func (e *encoder) predIntra(dst []uint8, off, stride, x, y, ssHor, ssVer, tw, th,
 	mode, angle, edgeFlags, smFl, maxW, maxH int,
 ) {
+	t := &e.tiling
 	a := angle
-	m := prepareIntraEdges(x, x > 0, y, y > 0, w, h, edgeFlags,
+	m := prepareIntraEdges(x, x > t.colStart>>ssHor, y, y > t.rowStart>>ssVer,
+		t.colEnd>>ssHor, t.rowEnd>>ssVer, edgeFlags,
 		dst, off, stride, nil, 0, mode, &a, tw, th,
 		e.seq.intraEdgeFilter != 0, e.edge[:], encEdgeOff, 255)
 	e.dsp.ipred[m](dst, off, stride, e.edge[:], encEdgeOff, tw*4, th*4,
@@ -347,7 +349,7 @@ func (e *encoder) pickMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int, f
 	off := 4 * (by*e.stride + bx)
 
 	pred := func(m, delta int) {
-		e.predIntra(e.recon, off, e.stride, bx, by, e.bw, e.bh,
+		e.predIntra(e.recon, off, e.stride, bx, by, 0, 0,
 			int(tDim.w), int(tDim.h), m, delta, ef, smFl,
 			4*e.bw-4*bx, 4*e.bh-4*by)
 	}
@@ -454,7 +456,7 @@ func (e *encoder) cflAcFor(bx, by, bs int) {
 	cw4, ch4 := (w4+ssHor)>>ssHor, (h4+ssVer)>>ssVer
 	cbw4 := (int(bDim[0]) + ssHor) >> ssHor
 	cbh4 := (int(bDim[1]) + ssVer) >> ssVer
-	tDim := &txfmDimensions[e.txOf(bs, 1)]
+	tDim := &txfmDimensions[e.txOf(bs, 0)]
 
 	furthestR := ((cw4 << ssHor) + int(tDim.w) - 1) &^ (int(tDim.w) - 1)
 	furthestB := ((ch4 << ssVer) + int(tDim.h) - 1) &^ (int(tDim.h) - 1)
@@ -466,9 +468,10 @@ func (e *encoder) cflAcFor(bx, by, bs int) {
 }
 
 func (e *encoder) predCfl(pl, off, cbx, cby, tw4, th4, alpha, maxW, maxH int) {
+	t := &e.tiling
 	angle := 0
-	m := prepareIntraEdges(cbx, cbx > 0, cby, cby > 0,
-		e.bw>>e.ssHor, e.bh>>e.ssVer, 0, e.reconC[pl], off, e.cstride, nil, 0,
+	m := prepareIntraEdges(cbx, cbx > t.colStart>>e.ssHor, cby, cby > t.rowStart>>e.ssVer,
+		t.colEnd>>e.ssHor, t.rowEnd>>e.ssVer, 0, e.reconC[pl], off, e.cstride, nil, 0,
 		dcPred, &angle, tw4, th4, false, e.edge[:], encEdgeOff, 255)
 	e.dsp.cflPred[m](e.reconC[pl], off, e.cstride, e.edge[:], encEdgeOff,
 		tw4*4, th4*4, e.ac[:], int32(alpha), 255)
@@ -514,7 +517,7 @@ func (e *encoder) applyCfl(bs, off, cbx, cby, tw4, th4 int, alpha [2]int8, maxW,
 	for pl := range 2 {
 		if alpha[pl] == 0 {
 			e.predIntra(e.reconC[pl], off, e.cstride, cbx, cby,
-				e.bw>>e.ssHor, e.bh>>e.ssVer, tw4, th4, dcPred, 0, 0,
+				e.ssHor, e.ssVer, tw4, th4, dcPred, 0, 0,
 				angleUseEdgeFilterFlag, maxW, maxH)
 
 			continue
@@ -591,7 +594,7 @@ func (e *encoder) pickUvMode(bx, by, bs, edgeFlags int, cdf []uint16) (int, int,
 
 	pred := func(pl, m, delta int) {
 		e.predIntra(e.reconC[pl], off, e.cstride, cbx, cby,
-			e.bw>>ssHor, e.bh>>ssVer, int(tDim.w), int(tDim.h), m, delta, ef, smFl,
+			ssHor, ssVer, int(tDim.w), int(tDim.h), m, delta, ef, smFl,
 			(4*e.bw+ssHor-4*bx)>>ssHor, (4*e.bh+ssVer-4*by)>>ssVer)
 	}
 
@@ -787,7 +790,7 @@ func (e *encoder) reconBlock(bx, by, bs, edgeFlags, mode, delta int, skip bool) 
 						int(tDim.w), int(tDim.h))
 					off := 4 * ((by+y)*e.stride + bx + x)
 
-					e.predIntra(e.recon, off, e.stride, bx+x, by+y, e.bw, e.bh,
+					e.predIntra(e.recon, off, e.stride, bx+x, by+y, 0, 0,
 						int(tDim.w), int(tDim.h), mode, delta, ef, smFl,
 						4*e.bw-4*(bx+x), 4*e.bh-4*(by+y))
 					if skip {
@@ -851,7 +854,7 @@ func (e *encoder) reconChroma(bx, by, bs, edgeFlags, mode, delta int, skip bool)
 								um = dcPred
 							}
 							e.predIntra(dst, off, e.cstride, cbx+x, cby+y,
-								e.bw>>ssHor, e.bh>>ssVer, int(tDim.w), int(tDim.h),
+								ssHor, ssVer, int(tDim.w), int(tDim.h),
 								um, delta, ef, smFl, maxW, maxH)
 						}
 						if skip {

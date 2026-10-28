@@ -14,6 +14,9 @@ type EncodeConfig struct {
 	// Speed is the search effort, 0 to 10, where 0 searches the most and 10
 	// the least. Values outside the range are clamped.
 	Speed int
+	// Threads bounds the goroutines a frame's tiles are coded over. Zero
+	// means GOMAXPROCS, one runs serially. Output is identical either way.
+	Threads int
 	// Monochrome encodes luma only, leaving SrcU and SrcV unused.
 	Monochrome bool
 	// FullRange signals that the samples span 0 to 255 rather than the
@@ -98,42 +101,82 @@ func bitsFor(v int) int {
 	return n
 }
 
-func tileLog2Bits(seq *sequenceHeader, w, h int) (int, int) {
-	sbszMin1 := (64 << seq.sb128) - 1
-	sbszLog2 := 6 + int(seq.sb128)
-	sbw := (w + sbszMin1) >> sbszLog2
-	sbh := (h + sbszMin1) >> sbszLog2
-	minCols := tileLog2(4096>>sbszLog2, sbw)
-	maxCols := tileLog2(1, min(sbw, maxTileCols))
-	maxRows := tileLog2(1, min(sbh, maxTileRows))
-	minTiles := max(tileLog2(4096*2304>>(2*sbszLog2), sbw*sbh), minCols)
-	minRows := max(minTiles-minCols, 0)
-
-	nCols := 0
-	if minCols < maxCols {
-		nCols = 1
-	}
-	nRows := 0
-	if minRows < maxRows {
-		nRows = 1
-	}
-
-	return nCols, nRows
+type encTiling struct {
+	sbw, sbh   int
+	log2Cols   int
+	log2Rows   int
+	moreCols   bool
+	moreRows   bool
+	colStartSb []int
+	rowStartSb []int
 }
 
-func writeFrameHdr(p *putBits, seq *sequenceHeader, c *EncodeConfig) {
+func newEncTiling(seq *sequenceHeader, w, h int) *encTiling {
+	sbszMin1 := (64 << seq.sb128) - 1
+	sbszLog2 := 6 + int(seq.sb128)
+	t := &encTiling{
+		sbw: (w + sbszMin1) >> sbszLog2,
+		sbh: (h + sbszMin1) >> sbszLog2,
+	}
+	maxCols := tileLog2(1, min(t.sbw, maxTileCols))
+	maxRows := tileLog2(1, min(t.sbh, maxTileRows))
+	t.log2Cols = tileLog2(4096>>sbszLog2, t.sbw)
+	minTiles := max(tileLog2(4096*2304>>(2*sbszLog2), t.sbw*t.sbh), t.log2Cols)
+	t.log2Rows = max(minTiles-t.log2Cols, 0)
+	t.moreCols = t.log2Cols < maxCols
+	t.moreRows = t.log2Rows < maxRows
+
+	tileW := 1 + (t.sbw-1)>>t.log2Cols
+	for sbx := 0; sbx < t.sbw; sbx += tileW {
+		t.colStartSb = append(t.colStartSb, sbx)
+	}
+	t.colStartSb = append(t.colStartSb, t.sbw)
+	tileH := 1 + (t.sbh-1)>>t.log2Rows
+	for sby := 0; sby < t.sbh; sby += tileH {
+		t.rowStartSb = append(t.rowStartSb, sby)
+	}
+	t.rowStartSb = append(t.rowStartSb, t.sbh)
+
+	return t
+}
+
+func (t *encTiling) cols() int {
+	return len(t.colStartSb) - 1
+}
+
+func (t *encTiling) rows() int {
+	return len(t.rowStartSb) - 1
+}
+
+func (t *encTiling) tile(i, bw, bh int) tileTiling {
+	row, col := i/t.cols(), i%t.cols()
+
+	return tileTiling{
+		colStart: t.colStartSb[col] << 4,
+		colEnd:   min(t.colStartSb[col+1]<<4, bw),
+		rowStart: t.rowStartSb[row] << 4,
+		rowEnd:   min(t.rowStartSb[row+1]<<4, bh),
+		col:      col,
+		row:      row,
+	}
+}
+
+func writeFrameHdr(p *putBits, c *EncodeConfig, t *encTiling, tileSizeBytes int) {
 	p.bit(0)
 	p.bit(0)
 
 	p.bit(0)
 
-	nCols, nRows := tileLog2Bits(seq, c.Width, c.Height)
 	p.bit(1)
-	for range nCols {
+	if t.moreCols {
 		p.bit(0)
 	}
-	for range nRows {
+	if t.moreRows {
 		p.bit(0)
+	}
+	if t.log2Cols != 0 || t.log2Rows != 0 {
+		p.bits32(0, t.log2Cols+t.log2Rows)
+		p.bits32(uint32(tileSizeBytes-1), 2)
 	}
 
 	p.bits32(uint32(c.QIndex), 8)

@@ -11,7 +11,8 @@ import (
 // DefaultQuality is used when EncodeOptions.Quality is zero.
 const DefaultQuality = 60
 
-// DefaultSpeed is used when EncodeOptions.Speed is negative.
+// DefaultSpeed is used when EncodeOptions.Speed is negative or the options
+// are omitted.
 const DefaultSpeed = 6
 
 // EncodeOptions holds the encoding parameters.
@@ -22,12 +23,15 @@ type EncodeOptions struct {
 	// QualityAlpha runs from 1 to 100 for the alpha plane. Zero follows
 	// Quality.
 	QualityAlpha int
-	// Speed runs from 0 to 10, where 0 searches the most and 10 the least.
-	// A negative value selects DefaultSpeed.
+	// Speed runs from 0, searching the most, to 10, searching the least. A
+	// negative value or an omitted EncodeOptions selects DefaultSpeed.
 	Speed int
 	// Lossless encodes at the lowest quantizer. Color conversion and chroma
 	// subsampling still apply, so only a YCbCr or grayscale source is exact.
 	Lossless bool
+	// Threads bounds the goroutines an image's tiles are coded over. Zero
+	// means GOMAXPROCS, one runs serially. Output is identical either way.
+	Threads int
 }
 
 func qindex(quality int) int {
@@ -41,7 +45,7 @@ func qindex(quality int) int {
 }
 
 func encodeOptions(opts []EncodeOptions) EncodeOptions {
-	var o EncodeOptions
+	o := EncodeOptions{Speed: DefaultSpeed}
 	if len(opts) > 0 {
 		o = opts[0]
 	}
@@ -308,6 +312,7 @@ func encodePlanes(p *planes, o EncodeOptions) ([]byte, error) {
 		BitDepth:    8,
 		QIndex:      qindex(o.Quality),
 		Speed:       o.Speed,
+		Threads:     o.Threads,
 		Monochrome:  p.mono,
 		FullRange:   true,
 		Src:         p.y,
@@ -337,6 +342,7 @@ func encodePlanes(p *planes, o EncodeOptions) ([]byte, error) {
 			BitDepth:   8,
 			QIndex:     qindex(o.QualityAlpha),
 			Speed:      o.Speed,
+			Threads:    o.Threads,
 			Monochrome: true,
 			FullRange:  true,
 			Src:        p.a,
