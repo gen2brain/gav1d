@@ -116,7 +116,7 @@ func clamp8(v float32) byte {
 
 func (p *planes) setRGB(x, y int, r, g, b byte, cb, cr []float32) {
 	fr, fg, fb := float32(r), float32(g), float32(b)
-	yf := kr*fr + kg*fg + kb*fb
+	yf := float32(kr*fr) + float32(kg*fg) + float32(kb*fb)
 
 	p.y[y*p.yStride+x] = clamp8(yf)
 

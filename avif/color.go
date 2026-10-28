@@ -168,7 +168,7 @@ func (s *colorState) derive() {
 
 	s.pixLUT = make([]uint16, len(s.tableY))
 	for i := range s.tableY {
-		s.pixLUT[i] = uint16(0.5 + clampF(s.tableY[i])*s.outMax)
+		s.pixLUT[i] = uint16(0.5 + float32(clampF(s.tableY[i])*s.outMax))
 	}
 
 	s.crCoef, s.cbCoef = 2*(1-s.kr), 2*(1-s.kb)
@@ -306,15 +306,15 @@ func (s *colorState) rgbRow(pic *av1.Picture, y int, dst []uint16) {
 			t := yy - cb
 			g, b, r = yy+cb, t-cr, t+cr
 		default:
-			r = yy + s.crCoef*cr
-			b = yy + s.cbCoef*cb
-			g = yy - (2*((s.gcr*cr)+(s.gcb*cb)))/s.kg
+			r = yy + float32(s.crCoef*cr)
+			b = yy + float32(s.cbCoef*cb)
+			g = yy - (2*(float32(s.gcr*cr)+float32(s.gcb*cb)))/s.kg
 		}
 
 		o := dst[3*x : 3*x+3 : 3*x+3]
-		o[0] = uint16(0.5 + clampF(r)*outMax)
-		o[1] = uint16(0.5 + clampF(g)*outMax)
-		o[2] = uint16(0.5 + clampF(b)*outMax)
+		o[0] = uint16(0.5 + float32(clampF(r)*outMax))
+		o[1] = uint16(0.5 + float32(clampF(g)*outMax))
+		o[2] = uint16(0.5 + float32(clampF(b)*outMax))
 	}
 }
 

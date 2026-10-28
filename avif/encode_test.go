@@ -2,6 +2,8 @@ package avif
 
 import (
 	"bytes"
+	"crypto/md5"
+	"encoding/hex"
 	"image"
 	"image/color"
 	"math"
@@ -354,5 +356,25 @@ func BenchmarkEncode(b *testing.B) {
 		if err := Encode(&buf, src, EncodeOptions{Quality: 60}); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func TestFromImageGolden(t *testing.T) {
+	m := image.NewNRGBA(image.Rect(0, 0, 4096, 4096))
+	for c := range 1 << 24 {
+		copy(m.Pix[4*c:], []uint8{uint8(c >> 16), uint8(c >> 8), uint8(c), 0xff})
+	}
+
+	p, err := fromImage(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := md5.New()
+	sum.Write(p.y)
+	sum.Write(p.u)
+	sum.Write(p.v)
+
+	if got, want := hex.EncodeToString(sum.Sum(nil)), "4e5a55c3077209f5cc1f9ee04930c296"; got != want {
+		t.Fatalf("converted planes hash to %s, want %s", got, want)
 	}
 }

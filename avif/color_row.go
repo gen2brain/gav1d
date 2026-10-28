@@ -69,13 +69,13 @@ func convertRow444Go(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
 		yy := yf[x]
 		cb, cr := u0[x+1], v0[x+1]
 
-		r := yy + c.crCoef*cr
-		b := yy + c.cbCoef*cb
-		g := yy - (2*((c.gcr*cr)+(c.gcb*cb)))/c.kg
+		r := yy + float32(c.crCoef*cr)
+		b := yy + float32(c.cbCoef*cb)
+		g := yy - (2*(float32(c.gcr*cr)+float32(c.gcb*cb)))/c.kg
 
-		dst[4*x] = uint8(0.5 + clampF(r)*c.outMax)
-		dst[4*x+1] = uint8(0.5 + clampF(g)*c.outMax)
-		dst[4*x+2] = uint8(0.5 + clampF(b)*c.outMax)
+		dst[4*x] = uint8(0.5 + float32(clampF(r)*c.outMax))
+		dst[4*x+1] = uint8(0.5 + float32(clampF(g)*c.outMax))
+		dst[4*x+2] = uint8(0.5 + float32(clampF(b)*c.outMax))
 		dst[4*x+3] = a[x]
 	}
 }
@@ -87,14 +87,14 @@ func convertRow16x444Go(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
 		yy := yf[x]
 		cb, cr := u0[x+1], v0[x+1]
 
-		r := yy + c.crCoef*cr
-		b := yy + c.cbCoef*cb
-		g := yy - (2*((c.gcr*cr)+(c.gcb*cb)))/c.kg
+		r := yy + float32(c.crCoef*cr)
+		b := yy + float32(c.cbCoef*cb)
+		g := yy - (2*(float32(c.gcr*cr)+float32(c.gcb*cb)))/c.kg
 
 		o := dst[8*x : 8*x+8 : 8*x+8]
-		binary.BigEndian.PutUint16(o[0:], uint16(0.5+clampF(r)*c.outMax))
-		binary.BigEndian.PutUint16(o[2:], uint16(0.5+clampF(g)*c.outMax))
-		binary.BigEndian.PutUint16(o[4:], uint16(0.5+clampF(b)*c.outMax))
+		binary.BigEndian.PutUint16(o[0:], uint16(0.5+float32(clampF(r)*c.outMax)))
+		binary.BigEndian.PutUint16(o[2:], uint16(0.5+float32(clampF(g)*c.outMax)))
+		binary.BigEndian.PutUint16(o[4:], uint16(0.5+float32(clampF(b)*c.outMax)))
 		binary.BigEndian.PutUint16(o[6:], a[x])
 	}
 }
@@ -111,17 +111,17 @@ func convertRow16Go(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint16,
 		k++
 
 		yy := yf[x]
-		cb := u0[k]*c.w0 + u0[j]*c.w1 + u1[k]*c.w1 + u1[j]*c.w2
-		cr := v0[k]*c.w0 + v0[j]*c.w1 + v1[k]*c.w1 + v1[j]*c.w2
+		cb := float32(u0[k]*c.w0) + float32(u0[j]*c.w1) + float32(u1[k]*c.w1) + float32(u1[j]*c.w2)
+		cr := float32(v0[k]*c.w0) + float32(v0[j]*c.w1) + float32(v1[k]*c.w1) + float32(v1[j]*c.w2)
 
-		r := yy + c.crCoef*cr
-		b := yy + c.cbCoef*cb
-		g := yy - (2*((c.gcr*cr)+(c.gcb*cb)))/c.kg
+		r := yy + float32(c.crCoef*cr)
+		b := yy + float32(c.cbCoef*cb)
+		g := yy - (2*(float32(c.gcr*cr)+float32(c.gcb*cb)))/c.kg
 
 		o := dst[8*x : 8*x+8 : 8*x+8]
-		binary.BigEndian.PutUint16(o[0:], uint16(0.5+clampF(r)*c.outMax))
-		binary.BigEndian.PutUint16(o[2:], uint16(0.5+clampF(g)*c.outMax))
-		binary.BigEndian.PutUint16(o[4:], uint16(0.5+clampF(b)*c.outMax))
+		binary.BigEndian.PutUint16(o[0:], uint16(0.5+float32(clampF(r)*c.outMax)))
+		binary.BigEndian.PutUint16(o[2:], uint16(0.5+float32(clampF(g)*c.outMax)))
+		binary.BigEndian.PutUint16(o[4:], uint16(0.5+float32(clampF(b)*c.outMax)))
 		binary.BigEndian.PutUint16(o[6:], a[x])
 	}
 }
@@ -138,16 +138,16 @@ func convertRowGo(dst []uint8, yf, u0, u1, v0, v1 []float32, a []uint8,
 		k++
 
 		yy := yf[x]
-		cb := u0[k]*c.w0 + u0[j]*c.w1 + u1[k]*c.w1 + u1[j]*c.w2
-		cr := v0[k]*c.w0 + v0[j]*c.w1 + v1[k]*c.w1 + v1[j]*c.w2
+		cb := float32(u0[k]*c.w0) + float32(u0[j]*c.w1) + float32(u1[k]*c.w1) + float32(u1[j]*c.w2)
+		cr := float32(v0[k]*c.w0) + float32(v0[j]*c.w1) + float32(v1[k]*c.w1) + float32(v1[j]*c.w2)
 
-		r := yy + c.crCoef*cr
-		b := yy + c.cbCoef*cb
-		g := yy - (2*((c.gcr*cr)+(c.gcb*cb)))/c.kg
+		r := yy + float32(c.crCoef*cr)
+		b := yy + float32(c.cbCoef*cb)
+		g := yy - (2*(float32(c.gcr*cr)+float32(c.gcb*cb)))/c.kg
 
-		dst[4*x] = uint8(0.5 + clampF(r)*c.outMax)
-		dst[4*x+1] = uint8(0.5 + clampF(g)*c.outMax)
-		dst[4*x+2] = uint8(0.5 + clampF(b)*c.outMax)
+		dst[4*x] = uint8(0.5 + float32(clampF(r)*c.outMax))
+		dst[4*x+1] = uint8(0.5 + float32(clampF(g)*c.outMax))
+		dst[4*x+2] = uint8(0.5 + float32(clampF(b)*c.outMax))
 		dst[4*x+3] = a[x]
 	}
 }

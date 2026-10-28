@@ -1,6 +1,8 @@
 package avif
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"testing"
 )
 
@@ -183,4 +185,60 @@ func TestNormRowAsm(t *testing.T) {
 	}
 
 	t.Logf("%d cases", cases)
+}
+
+func TestConvertRowGoldens(t *testing.T) {
+	h := md5.New()
+	for iter := range 64 {
+		for _, matrix := range []int{mcBT601, mcBT709, mcBT2020NCL} {
+			for _, depth := range []int{8, 10, 12} {
+				for ssHor := range 2 {
+					s := &colorState{matrix: matrix, fullRange: iter&1 != 0, depth: depth, ssHor: ssHor}
+					s.maxChannel = 1<<depth - 1
+					s.outMax = 255
+					if depth > 8 {
+						s.outMax = 65535
+					}
+					s.kr, s.kg, s.kb = yuvCoefficients(matrix)
+					s.crCoef, s.cbCoef = 2*(1-s.kr), 2*(1-s.kb)
+					s.gcr, s.gcb = s.kr*(1-s.kr), s.kb*(1-s.kb)
+					c := s.rowConsts()
+
+					const n = 67
+					yf := make([]float32, n)
+					a8 := make([]uint8, n)
+					a16 := make([]uint16, n)
+					for i := range yf {
+						yf[i] = float32(rowGen(iter, 0, i)%1400)/1000 - 0.2
+						a16[i] = uint16(rowGen(iter, 1, i))
+						a8[i] = uint8(a16[i])
+					}
+					rows := make([][]float32, 4)
+					for r := range rows {
+						rows[r] = make([]float32, n+8)
+						for i := range rows[r] {
+							rows[r][i] = float32(rowGen(iter, 2+r, i)%1200)/1000 - 0.6
+						}
+					}
+
+					out := make([]uint8, 8*n)
+					switch {
+					case depth == 8 && ssHor == 0:
+						convertRow444Go(out, yf, rows[0], rows[1], rows[2], rows[3], a8, n, &c)
+					case depth == 8:
+						convertRowGo(out, yf, rows[0], rows[1], rows[2], rows[3], a8, n, &c)
+					case ssHor == 0:
+						convertRow16x444Go(out, yf, rows[0], rows[1], rows[2], rows[3], a16, n, &c)
+					default:
+						convertRow16Go(out, yf, rows[0], rows[1], rows[2], rows[3], a16, n, &c)
+					}
+					h.Write(out)
+				}
+			}
+		}
+	}
+
+	if got, want := hex.EncodeToString(h.Sum(nil)), "de3990442224fa55ac529ff36ba03dbd"; got != want {
+		t.Fatalf("Go row converters hash to %s, want %s", got, want)
+	}
 }
