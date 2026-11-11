@@ -168,6 +168,7 @@ type frameContext[P pixel, C coef] struct {
 
 	nThreads  int
 	lfEnabled bool
+	skipGrain bool
 	progress  *frameProgress
 	tileData  [][]byte
 	dsp       *dspContext[P]

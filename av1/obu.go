@@ -164,6 +164,10 @@ type Decoder struct {
 	// DefaultFrameSizeLimit; a negative value removes the limit.
 	FrameSizeLimit int
 
+	// SkipFilmGrain returns frames without film grain synthesis. Grain is
+	// applied to output only, so later frames decode the same either way.
+	SkipFilmGrain bool
+
 	seqHdr   *sequenceHeader
 	frameHdr *frameHeader
 	refs     [numRefFrames]refState

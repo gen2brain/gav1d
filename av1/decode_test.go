@@ -467,7 +467,7 @@ func TestConformance(t *testing.T) {
 
 	for _, p := range streams {
 		name := filepath.Base(p)
-		res := conformanceOne(p)
+		res := conformanceOne(p, false)
 		switch res {
 		case "":
 			exact++
@@ -496,6 +496,40 @@ func TestConformance(t *testing.T) {
 	for _, k := range keys {
 		t.Logf("%4d  %s", fails[k], k)
 	}
+}
+
+// TestSkipFilmGrain decodes the corpus's film grain streams with grain
+// synthesis off and on, against dav1d's --filmgrain 0 and 1.
+func TestSkipFilmGrain(t *testing.T) {
+	dirs := conformanceDirs(t)
+	if dav1dBin == "" {
+		t.Skip("dav1d not found (set DAV1D_BIN)")
+	}
+
+	var streams []string
+	for _, dir := range dirs {
+		filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
+			name := strings.ToLower(filepath.Base(p))
+			if err == nil && !fi.IsDir() && strings.Contains(name, "grain") &&
+				(strings.HasSuffix(name, ".ivf") || strings.HasSuffix(name, ".obu")) {
+				streams = append(streams, p)
+			}
+
+			return nil
+		})
+	}
+	if len(streams) == 0 {
+		t.Skip("no film grain streams in CONFORMANCE_DIR")
+	}
+
+	for _, p := range streams {
+		for _, skip := range []bool{true, false} {
+			if res := conformanceOne(p, skip); res != "" {
+				t.Errorf("%s skip=%v: %s", filepath.Base(p), skip, res)
+			}
+		}
+	}
+	t.Logf("%d streams", len(streams))
 }
 
 // TestArgon decodes the Argon Streams conformance suite against its own md5
@@ -745,7 +779,7 @@ func decodeStreaming(d *Decoder, chunks [][]byte, emit func(*Picture)) error {
 	}
 }
 
-func conformanceOne(path string) (res string) {
+func conformanceOne(path string, skipGrain bool) (res string) {
 	defer func() {
 		if r := recover(); r != nil {
 			res = "panic: " + firstLine(r)
@@ -765,7 +799,7 @@ func conformanceOne(path string) (res string) {
 	}
 
 	var out bytes.Buffer
-	var d Decoder
+	d := Decoder{SkipFilmGrain: skipGrain}
 	if n, _ := strconv.Atoi(os.Getenv("FRAME_THREADS")); n != 0 {
 		d.FrameThreads = n
 		emit := func(pic *Picture) { planeRows(pic, &out) }
@@ -784,7 +818,11 @@ func conformanceOne(path string) (res string) {
 		}
 	}
 
-	cmd := exec.Command(dav1dBin, "-i", path, "-o", "-", "--muxer", "md5", "--filmgrain", "1")
+	grain := "1"
+	if skipGrain {
+		grain = "0"
+	}
+	cmd := exec.Command(dav1dBin, "-i", path, "-o", "-", "--muxer", "md5", "--filmgrain", grain)
 	ref, err := cmd.Output()
 	if err != nil {
 		return "dav1d: " + err.Error()

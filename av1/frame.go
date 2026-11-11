@@ -189,6 +189,7 @@ func setupFrame[P pixel, C coef](d *Decoder, tiles []tileGroup, p *pendingFrame)
 	}
 
 	f.nThreads = d.Threads
+	f.skipGrain = d.SkipFilmGrain
 	if f.nThreads <= 0 {
 		f.nThreads = runtime.GOMAXPROCS(0)
 	}
@@ -433,7 +434,7 @@ func (f *frameContext[P, C]) decode(in, out *cdfPromise) (*Picture, error) {
 	}
 
 	pic := f.picture()
-	if hasFilmGrain(frameHdr) {
+	if hasFilmGrain(frameHdr) && !f.skipGrain {
 		pic = f.grainPicture()
 	}
 
