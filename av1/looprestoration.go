@@ -85,6 +85,43 @@ func wienerVRnd(bitdepthMax int32) (rnd int32, shift int) {
 // lrScratch is the wiener filter's row buffer, held per task so that a stripe
 // does not allocate one. Every row is written by wienerFilterH before the
 // vertical pass reads it.
+type sgr3Scratch[C coef] struct {
+	sumsq, a                         [lrBufStride*3 + 16]int32
+	sum, b                           [lrBufStride*3 + 16]C
+	sumsqPtrs, sumPtrs, aPtrs, bPtrs [3]int
+}
+
+type sgr5Scratch[C coef] struct {
+	sumsq              [lrBufStride*5 + 16]int32
+	sum                [lrBufStride*5 + 16]C
+	a                  [lrBufStride*2 + 16]int32
+	b                  [lrBufStride*2 + 16]C
+	sumsqPtrs, sumPtrs [5]int
+	aPtrs, bPtrs       [2]int
+}
+
+type sgrMixScratch[C coef] struct {
+	sumsq5               [lrBufStride*5 + 16]int32
+	sum5                 [lrBufStride*5 + 16]C
+	sumsq3               [lrBufStride*3 + 16]int32
+	sum3                 [lrBufStride*3 + 16]C
+	a5                   [lrBufStride*2 + 16]int32
+	b5                   [lrBufStride*2 + 16]C
+	a3                   [lrBufStride*4 + 16]int32
+	b3                   [lrBufStride*4 + 16]C
+	sumsq5Ptrs, sum5Ptrs [5]int
+	sumsq3Ptrs, sum3Ptrs [3]int
+	a5Ptrs, b5Ptrs       [2]int
+	a3Ptrs, b3Ptrs       [4]int
+}
+
+type sgrScratch[C coef] struct {
+	s3         sgr3Scratch[C]
+	s5         sgr5Scratch[C]
+	mix        sgrMixScratch[C]
+	tmp5, tmp3 [2 * filterOutStride]C
+}
+
 type lrScratch struct {
 	hor  [7 * restUnitStride]uint16
 	ptrs [7]int
@@ -629,11 +666,9 @@ func sgrWeighted2[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, dstStri
 	}
 }
 
-func sgrFinish1[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff *int, stride int,
+func sgrFinish1[P pixel, C coef](lr *lrContext[P, C], tmp []C, dst []P, dstOff *int, stride int,
 	a []int32, aPtrs []int, b []C, bPtrs []int, w int, w1 int32, bitdepthMax int32,
 ) {
-	var tmpBuf [384]C
-	tmp := tmpBuf[:]
 
 	lr.finish1(tmp, 0, dst, *dstOff, a, aPtrs, b, bPtrs, w)
 	lr.weight1(dst, *dstOff, tmp, 0, w, w1, bitdepthMax)
@@ -641,11 +676,9 @@ func sgrFinish1[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff *int, stri
 	rotate(aPtrs, bPtrs, 3)
 }
 
-func sgrFinish2[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff *int, stride int,
+func sgrFinish2[P pixel, C coef](lr *lrContext[P, C], tmp []C, dst []P, dstOff *int, stride int,
 	a []int32, aPtrs []int, b []C, bPtrs []int, w, h int, w1 int32, bitdepthMax int32,
 ) {
-	var tmpBuf [2 * filterOutStride]C
-	tmp := tmpBuf[:]
 
 	lr.finish2(tmp, 0, dst, *dstOff, stride, a, aPtrs, b, bPtrs, w, h)
 	lr.weight1(dst, *dstOff, tmp, 0, w, w1, bitdepthMax)
@@ -657,13 +690,11 @@ func sgrFinish2[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff *int, stri
 	rotate(aPtrs, bPtrs, 2)
 }
 
-func sgrFinishMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff *int, stride int,
+func sgrFinishMix[P pixel, C coef](lr *lrContext[P, C], tmp5, tmp3 []C, dst []P, dstOff *int, stride int,
 	a5 []int32, a5Ptrs []int, b5 []C, b5Ptrs []int,
 	a3 []int32, a3Ptrs []int, b3 []C, b3Ptrs []int,
 	w, h int, w0, w1 int32, bitdepthMax int32,
 ) {
-	var tmp5Buf, tmp3Buf [2 * filterOutStride]C
-	tmp5, tmp3 := tmp5Buf[:], tmp3Buf[:]
 
 	lr.finish2(tmp5, 0, dst, *dstOff, stride, a5, a5Ptrs, b5, b5Ptrs, w, h)
 	lr.finish1(tmp3, 0, dst, *dstOff, a3, a3Ptrs, b3, b3Ptrs, w)
@@ -677,16 +708,17 @@ func sgrFinishMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff *int, st
 	rotate(a3Ptrs, b3Ptrs, 4)
 }
 
-func lrSgr3x3[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
+func lrSgr3x3[P pixel, C coef](lr *lrContext[P, C], sc *sgrScratch[C], dst []P, dstOff, stride int,
 	left []P, leftOff int, lpf []P, lpfOff, w, h int,
 	params *looprestorationParams, edges int, bitdepthMax int32,
 ) {
-	var sumsqBuf, aBuf [lrBufStride*3 + 16]int32
-	var sumBuf, bBuf [lrBufStride*3 + 16]C
-	sumsq, sum := sumsqBuf[:], sumBuf[:]
-	a, b := aBuf[:], bBuf[:]
+	s := &sc.s3
+	sumsq, sum := s.sumsq[:], s.sum[:]
+	a, b := s.a[:], s.b[:]
+	tmp := sc.tmp3[:]
 
-	var sumsqPtrs, sumPtrs, aPtrs, bPtrs, rows [3]int
+	sumsqPtrs, sumPtrs, aPtrs, bPtrs := &s.sumsqPtrs, &s.sumPtrs, &s.aPtrs, &s.bPtrs
+	var rows [3]int
 	for i := range 3 {
 		rows[i] = i * lrBufStride
 		aPtrs[i] = i * lrBufStride
@@ -699,8 +731,8 @@ func lrSgr3x3[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 	w1 := int32(params.sgr.w1)
 
 	if edges&lrHaveTop != 0 {
-		sumsqPtrs = [3]int{rows[0], rows[1], rows[2]}
-		sumPtrs = sumsqPtrs
+		*sumsqPtrs = [3]int{rows[0], rows[1], rows[2]}
+		*sumPtrs = *sumsqPtrs
 
 		sgrBox3RowH(lr, sumsq, rows[0], sum, rows[0], left, 0, false, lpf, lpfOff, w, edges)
 		lpfOff += stride
@@ -728,8 +760,8 @@ func lrSgr3x3[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 			goto vert2
 		}
 	} else {
-		sumsqPtrs = [3]int{rows[0], rows[0], rows[0]}
-		sumPtrs = sumsqPtrs
+		*sumsqPtrs = [3]int{rows[0], rows[0], rows[0]}
+		*sumPtrs = *sumsqPtrs
 
 		sgrBox3RowH(lr, sumsq, rows[0], sum, rows[0], left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
@@ -766,7 +798,7 @@ func lrSgr3x3[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		leftOff += 4
 		srcOff += stride
 
-		sgrFinish1(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
+		sgrFinish1(lr, tmp, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
 
 		h--
 		if h <= 0 {
@@ -782,12 +814,12 @@ func lrSgr3x3[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 		left, 0, false, lpf, lpfBottom, w, s1, edges, bitdepthMax)
 	lpfBottom += stride
 
-	sgrFinish1(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
+	sgrFinish1(lr, tmp, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
 
 	sgrBox3HV(lr, sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[2], b, bPtrs[2],
 		left, 0, false, lpf, lpfBottom, w, s1, edges, bitdepthMax)
 
-	sgrFinish1(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
+	sgrFinish1(lr, tmp, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
 
 	return
 
@@ -796,7 +828,7 @@ vert2:
 	sgrBox3Vert(lr, sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[2], b, bPtrs[2],
 		w, s1, bitdepthMax)
 
-	sgrFinish1(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
+	sgrFinish1(lr, tmp, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
 
 	goto output1
 
@@ -811,22 +843,20 @@ output1:
 	sgrBox3Vert(lr, sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[2], b, bPtrs[2],
 		w, s1, bitdepthMax)
 
-	sgrFinish1(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
+	sgrFinish1(lr, tmp, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, w1, bitdepthMax)
 }
 
-func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
+func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], sc *sgrScratch[C], dst []P, dstOff, stride int,
 	left []P, leftOff int, lpf []P, lpfOff, w, h int,
 	params *looprestorationParams, edges int, bitdepthMax int32,
 ) {
-	var sumsqBuf [lrBufStride*5 + 16]int32
-	var sumBuf [lrBufStride*5 + 16]C
-	var aBuf [lrBufStride*2 + 16]int32
-	var bBuf [lrBufStride*2 + 16]C
-	sumsq, sum := sumsqBuf[:], sumBuf[:]
-	a, b := aBuf[:], bBuf[:]
+	s := &sc.s5
+	sumsq, sum := s.sumsq[:], s.sum[:]
+	a, b := s.a[:], s.b[:]
+	tmp := sc.tmp5[:]
 
-	var sumsqPtrs, sumPtrs, rows [5]int
-	var aPtrs, bPtrs [2]int
+	sumsqPtrs, sumPtrs, aPtrs, bPtrs := &s.sumsqPtrs, &s.sumPtrs, &s.aPtrs, &s.bPtrs
+	var rows [5]int
 	for i := range 5 {
 		rows[i] = i * lrBufStride
 	}
@@ -841,8 +871,8 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 	w0 := int32(params.sgr.w0)
 
 	if edges&lrHaveTop != 0 {
-		sumsqPtrs = [5]int{rows[0], rows[0], rows[1], rows[2], rows[3]}
-		sumPtrs = sumsqPtrs
+		*sumsqPtrs = [5]int{rows[0], rows[0], rows[1], rows[2], rows[3]}
+		*sumPtrs = *sumsqPtrs
 
 		sgrBox5RowH(lr, sumsq, rows[0], sum, rows[0], left, 0, false, lpf, lpfOff, w, edges)
 		lpfOff += stride
@@ -871,8 +901,8 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 
 		sumsqPtrs[3], sumPtrs[3] = rows[4], rows[4]
 	} else {
-		sumsqPtrs = [5]int{rows[0], rows[0], rows[0], rows[0], rows[0]}
-		sumPtrs = sumsqPtrs
+		*sumsqPtrs = [5]int{rows[0], rows[0], rows[0], rows[0], rows[0]}
+		*sumPtrs = *sumsqPtrs
 
 		sgrBox5RowH(lr, sumsq, rows[0], sum, rows[0], left, leftOff, true, src, srcOff, w, edges)
 		leftOff += 4
@@ -916,7 +946,7 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 
 		sgrBox5Vert(lr, sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[1], b, bPtrs[1],
 			w, s0, bitdepthMax)
-		sgrFinish2(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
+		sgrFinish2(lr, tmp, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
 
 		h--
 		if h <= 0 {
@@ -944,7 +974,7 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 
 		sgrBox5Vert(lr, sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[1], b, bPtrs[1],
 			w, s0, bitdepthMax)
-		sgrFinish2(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
+		sgrFinish2(lr, tmp, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
 
 		h--
 		if h <= 0 {
@@ -963,7 +993,7 @@ func lrSgr5x5[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 output2:
 	sgrBox5Vert(lr, sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[1], b, bPtrs[1],
 		w, s0, bitdepthMax)
-	sgrFinish2(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
+	sgrFinish2(lr, tmp, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
 
 	return
 
@@ -978,7 +1008,7 @@ odd:
 
 	sgrBox5Vert(lr, sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[1], b, bPtrs[1],
 		w, s0, bitdepthMax)
-	sgrFinish2(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
+	sgrFinish2(lr, tmp, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 2, w0, bitdepthMax)
 
 	goto output1
 
@@ -995,30 +1025,26 @@ output1:
 
 	sgrBox5Vert(lr, sumsq, sumsqPtrs[:], sum, sumPtrs[:], a, aPtrs[1], b, bPtrs[1],
 		w, s0, bitdepthMax)
-	sgrFinish2(lr, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 1, w0, bitdepthMax)
+	sgrFinish2(lr, tmp, dst, &dstOff, stride, a, aPtrs[:], b, bPtrs[:], w, 1, w0, bitdepthMax)
 }
 
-func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
+func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], sc *sgrScratch[C], dst []P, dstOff, stride int,
 	left []P, leftOff int, lpf []P, lpfOff, w, h int,
 	params *looprestorationParams, edges int, bitdepthMax int32,
 ) {
-	var sumsq5Buf [lrBufStride*5 + 16]int32
-	var sum5Buf [lrBufStride*5 + 16]C
-	var sumsq3Buf [lrBufStride*3 + 16]int32
-	var sum3Buf [lrBufStride*3 + 16]C
-	var a5Buf [lrBufStride*2 + 16]int32
-	var b5Buf [lrBufStride*2 + 16]C
-	var a3Buf [lrBufStride*4 + 16]int32
-	var b3Buf [lrBufStride*4 + 16]C
-	sumsq5, sum5 := sumsq5Buf[:], sum5Buf[:]
-	sumsq3, sum3 := sumsq3Buf[:], sum3Buf[:]
-	a5, b5 := a5Buf[:], b5Buf[:]
-	a3, b3 := a3Buf[:], b3Buf[:]
+	s := &sc.mix
+	sumsq5, sum5 := s.sumsq5[:], s.sum5[:]
+	sumsq3, sum3 := s.sumsq3[:], s.sum3[:]
+	a5, b5 := s.a5[:], s.b5[:]
+	a3, b3 := s.a3[:], s.b3[:]
+	tmp5, tmp3 := sc.tmp5[:], sc.tmp3[:]
 
-	var sumsq5Ptrs, sum5Ptrs, rows5 [5]int
-	var sumsq3Ptrs, sum3Ptrs, rows3 [3]int
-	var a5Ptrs, b5Ptrs [2]int
-	var a3Ptrs, b3Ptrs [4]int
+	sumsq5Ptrs, sum5Ptrs := &s.sumsq5Ptrs, &s.sum5Ptrs
+	sumsq3Ptrs, sum3Ptrs := &s.sumsq3Ptrs, &s.sum3Ptrs
+	a5Ptrs, b5Ptrs := &s.a5Ptrs, &s.b5Ptrs
+	a3Ptrs, b3Ptrs := &s.a3Ptrs, &s.b3Ptrs
+	var rows5 [5]int
+	var rows3 [3]int
 	for i := range 5 {
 		rows5[i] = i * lrBufStride
 	}
@@ -1040,10 +1066,10 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 	w0, w1 := int32(params.sgr.w0), int32(params.sgr.w1)
 
 	if edges&lrHaveTop != 0 {
-		sumsq5Ptrs = [5]int{rows5[0], rows5[0], rows5[1], rows5[2], rows5[3]}
-		sum5Ptrs = sumsq5Ptrs
-		sumsq3Ptrs = [3]int{rows3[0], rows3[1], rows3[2]}
-		sum3Ptrs = sumsq3Ptrs
+		*sumsq5Ptrs = [5]int{rows5[0], rows5[0], rows5[1], rows5[2], rows5[3]}
+		*sum5Ptrs = *sumsq5Ptrs
+		*sumsq3Ptrs = [3]int{rows3[0], rows3[1], rows3[2]}
+		*sum3Ptrs = *sumsq3Ptrs
 
 		sgrBox35RowH(lr, sumsq3, rows3[0], sum3, rows3[0], sumsq5, rows5[0], sum5, rows5[0],
 			left, 0, false, lpf, lpfOff, w, edges)
@@ -1083,10 +1109,10 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 
 		sumsq5Ptrs[3], sum5Ptrs[3] = rows5[4], rows5[4]
 	} else {
-		sumsq5Ptrs = [5]int{rows5[0], rows5[0], rows5[0], rows5[0], rows5[0]}
-		sum5Ptrs = sumsq5Ptrs
-		sumsq3Ptrs = [3]int{rows3[0], rows3[0], rows3[0]}
-		sum3Ptrs = sumsq3Ptrs
+		*sumsq5Ptrs = [5]int{rows5[0], rows5[0], rows5[0], rows5[0], rows5[0]}
+		*sum5Ptrs = *sumsq5Ptrs
+		*sumsq3Ptrs = [3]int{rows3[0], rows3[0], rows3[0]}
+		*sum3Ptrs = *sumsq3Ptrs
 
 		sgrBox35RowH(lr, sumsq3, rows3[0], sum3, rows3[0], sumsq5, rows5[0], sum5, rows5[0],
 			left, leftOff, true, src, srcOff, w, edges)
@@ -1149,7 +1175,7 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 			w, s0, bitdepthMax)
 		sgrBox3Vert(lr, sumsq3, sumsq3Ptrs[:], sum3, sum3Ptrs[:], a3, a3Ptrs[3], b3, b3Ptrs[3],
 			w, s1, bitdepthMax)
-		sgrFinishMix(lr, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
+		sgrFinishMix(lr, tmp5, tmp3, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
 			a3, a3Ptrs[:], b3, b3Ptrs[:], w, 2, w0, w1, bitdepthMax)
 
 		h--
@@ -1186,7 +1212,7 @@ func lrSgrMix[P pixel, C coef](lr *lrContext[P, C], dst []P, dstOff, stride int,
 			w, s0, bitdepthMax)
 		sgrBox3Vert(lr, sumsq3, sumsq3Ptrs[:], sum3, sum3Ptrs[:], a3, a3Ptrs[3], b3, b3Ptrs[3],
 			w, s1, bitdepthMax)
-		sgrFinishMix(lr, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
+		sgrFinishMix(lr, tmp5, tmp3, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
 			a3, a3Ptrs[:], b3, b3Ptrs[:], w, 2, w0, w1, bitdepthMax)
 
 		h--
@@ -1216,7 +1242,7 @@ output2:
 		w, s0, bitdepthMax)
 	sgrBox3Vert(lr, sumsq3, sumsq3Ptrs[:], sum3, sum3Ptrs[:], a3, a3Ptrs[3], b3, b3Ptrs[3],
 		w, s1, bitdepthMax)
-	sgrFinishMix(lr, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
+	sgrFinishMix(lr, tmp5, tmp3, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
 		a3, a3Ptrs[:], b3, b3Ptrs[:], w, 2, w0, w1, bitdepthMax)
 
 	return
@@ -1242,7 +1268,7 @@ odd:
 		w, s0, bitdepthMax)
 	sgrBox3Vert(lr, sumsq3, sumsq3Ptrs[:], sum3, sum3Ptrs[:], a3, a3Ptrs[3], b3, b3Ptrs[3],
 		w, s1, bitdepthMax)
-	sgrFinishMix(lr, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
+	sgrFinishMix(lr, tmp5, tmp3, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
 		a3, a3Ptrs[:], b3, b3Ptrs[:], w, 2, w0, w1, bitdepthMax)
 
 	goto output1
@@ -1270,6 +1296,6 @@ output1:
 		w, s1, bitdepthMax)
 	rotate(a3Ptrs[:], b3Ptrs[:], 4)
 
-	sgrFinishMix(lr, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
+	sgrFinishMix(lr, tmp5, tmp3, dst, &dstOff, stride, a5, a5Ptrs[:], b5, b5Ptrs[:],
 		a3, a3Ptrs[:], b3, b3Ptrs[:], w, 1, w0, w1, bitdepthMax)
 }

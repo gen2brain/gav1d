@@ -14,7 +14,7 @@ func lrStripe[P pixel, C coef](t *taskContext[P, C], p []P, pOff int,
 
 	params := &t.scratch.lrParams
 	*params = looprestorationParams{}
-	var fn func(lr *lrContext[P, C], dst []P, dstOff, stride int,
+	var fn func(lr *lrContext[P, C], sc *sgrScratch[C], dst []P, dstOff, stride int,
 		left []P, leftOff int, lpf []P, lpfOff, w, h int,
 		params *looprestorationParams, edges int, bitdepthMax int32)
 
@@ -33,7 +33,7 @@ func lrStripe[P pixel, C coef](t *taskContext[P, C], p []P, pOff int,
 		flt[1][2], flt[1][4] = int16(lr.filterV[2]), int16(lr.filterV[2])
 		flt[1][3] = 128 - (flt[1][0]+flt[1][1]+flt[1][2])*2
 
-		fn = func(lr *lrContext[P, C], dst []P, dstOff, stride int,
+		fn = func(lr *lrContext[P, C], _ *sgrScratch[C], dst []P, dstOff, stride int,
 			left []P, leftOff int, lpf []P, lpfOff, w, h int,
 			params *looprestorationParams, edges int, bitdepthMax int32,
 		) {
@@ -47,6 +47,9 @@ func lrStripe[P pixel, C coef](t *taskContext[P, C], p []P, pOff int,
 		params.sgr.s1 = uint32(sp[1])
 		params.sgr.w0 = int16(lr.sgrWeights[0])
 		params.sgr.w1 = 128 - int16(lr.sgrWeights[0]+lr.sgrWeights[1])
+		if t.sgr == nil {
+			t.sgr = new(sgrScratch[C])
+		}
 
 		switch b2i(sp[0] != 0) + b2i(sp[1] != 0)*2 - 1 {
 		case 0:
@@ -65,7 +68,7 @@ func lrStripe[P pixel, C coef](t *taskContext[P, C], p []P, pOff int,
 			edges &^= lrHaveBottom
 		}
 
-		fn(f.lr, p, pOff, stride, left, leftOff, f.lf.lrLineBuf, lpfOff,
+		fn(f.lr, t.sgr, p, pOff, stride, left, leftOff, f.lf.lrLineBuf, lpfOff,
 			unitW, stripeH, params, edges, f.bitdepthMax)
 
 		leftOff += stripeH * 4

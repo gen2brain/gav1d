@@ -8,10 +8,13 @@ func cdefSums8AVX2(img *uint8, stride int, s *cdefSums)
 //go:noescape
 func cdefDirCostsAVX2(s *cdefSums, cost *[8]uint32)
 
-func init() {
+func cdefDirCosts(s *cdefSums, cost *[8]uint32) {
 	if hasAVX2 {
-		cdefDirCosts = cdefDirCostsAVX2
+		cdefDirCostsAVX2(s, cost)
+
+		return
 	}
+	cdefDirCostsGo(s, cost)
 }
 
 //go:noescape

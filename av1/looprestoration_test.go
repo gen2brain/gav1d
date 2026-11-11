@@ -51,6 +51,32 @@ func dirtyLrScratch(iter int) *lrScratch {
 	return sc
 }
 
+func dirtySgrScratch[C coef](iter int) *sgrScratch[C] {
+	sc := &sgrScratch[C]{}
+	for _, v := range [][]int32{sc.s3.sumsq[:], sc.s3.a[:], sc.s5.sumsq[:], sc.s5.a[:],
+		sc.mix.sumsq5[:], sc.mix.sumsq3[:], sc.mix.a5[:], sc.mix.a3[:]} {
+		for i := range v {
+			v[i] = int32(1000 + iter*37 + i%7)
+		}
+	}
+	for _, v := range [][]C{sc.s3.sum[:], sc.s3.b[:], sc.s5.sum[:], sc.s5.b[:],
+		sc.mix.sum5[:], sc.mix.sum3[:], sc.mix.b5[:], sc.mix.b3[:], sc.tmp5[:], sc.tmp3[:]} {
+		for i := range v {
+			v[i] = C(200 + iter*13 + i%5)
+		}
+	}
+	for _, v := range [][]int{sc.s3.sumsqPtrs[:], sc.s3.sumPtrs[:], sc.s3.aPtrs[:], sc.s3.bPtrs[:],
+		sc.s5.sumsqPtrs[:], sc.s5.sumPtrs[:], sc.s5.aPtrs[:], sc.s5.bPtrs[:],
+		sc.mix.sumsq5Ptrs[:], sc.mix.sum5Ptrs[:], sc.mix.sumsq3Ptrs[:], sc.mix.sum3Ptrs[:],
+		sc.mix.a5Ptrs[:], sc.mix.b5Ptrs[:], sc.mix.a3Ptrs[:], sc.mix.b3Ptrs[:]} {
+		for i := range v {
+			v[i] = lrBufStride * ((i + iter) % len(v))
+		}
+	}
+
+	return sc
+}
+
 func runLR[P pixel, C coef](b, iter, kind, w, h, edges int,
 	params *looprestorationParams, bitdepthMax int32,
 ) []int {
@@ -59,19 +85,20 @@ func runLR[P pixel, C coef](b, iter, kind, w, h, edges int,
 	base := lrPad*lrStride + lrPad
 	lpfBase := 2*lrStride + lrPad
 	d := newLr[P, C]()
+	sc := dirtySgrScratch[C](iter)
 
 	switch kind {
 	case 0:
 		lrWiener[P, C](d, dirtyLrScratch(iter), dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
 			params, edges, bitdepthMax)
 	case 1:
-		lrSgr5x5[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+		lrSgr5x5[P, C](d, sc, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
 			params, edges, bitdepthMax)
 	case 2:
-		lrSgr3x3[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+		lrSgr3x3[P, C](d, sc, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
 			params, edges, bitdepthMax)
 	default:
-		lrSgrMix[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+		lrSgrMix[P, C](d, sc, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
 			params, edges, bitdepthMax)
 	}
 
@@ -249,7 +276,7 @@ func wienerAsmDepth[P pixel, C coef](t *testing.T, bitdepthMax int32) int {
 	return cases
 }
 
-func runSgr[P pixel, C coef](d *lrContext[P, C], b, iter, kind, w, h, edges int,
+func runSgr[P pixel, C coef](d *lrContext[P, C], sc *sgrScratch[C], b, iter, kind, w, h, edges int,
 	params *looprestorationParams, bitdepthMax int32,
 ) []P {
 	dst, lpf, left := lrBuffers[P](b, iter, bitdepthMax)
@@ -259,13 +286,13 @@ func runSgr[P pixel, C coef](d *lrContext[P, C], b, iter, kind, w, h, edges int,
 
 	switch kind {
 	case 0:
-		lrSgr5x5[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+		lrSgr5x5[P, C](d, sc, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
 			params, edges, bitdepthMax)
 	case 1:
-		lrSgr3x3[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+		lrSgr3x3[P, C](d, sc, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
 			params, edges, bitdepthMax)
 	default:
-		lrSgrMix[P, C](d, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
+		lrSgrMix[P, C](d, sc, dst, base, lrStride, left, 0, lpf, lpfBase, w, h,
 			params, edges, bitdepthMax)
 	}
 
@@ -312,12 +339,14 @@ func sgrAsmDepth[P pixel, C coef](t *testing.T, bitdepthMax int32) int {
 			params.sgr.s1 = uint32(sp[1])
 			params.sgr.w0 = int16(lrGen(iter, 11, idx) % 97)
 			params.sgr.w1 = 128 - params.sgr.w0 - int16(lrGen(iter, 12, idx)%97)
+			dirty := dirtySgrScratch[C](iter)
 
 			for k, w := range widths {
 				h := heights[k%len(heights)]
 				for edges := range 16 {
-					want := runSgr[P, C](ref, b, iter, kind, w, h, edges, &params, bitdepthMax)
-					have := runSgr[P, C](got, b, iter, kind, w, h, edges, &params, bitdepthMax)
+					want := runSgr[P, C](ref, new(sgrScratch[C]), b, iter, kind, w, h, edges,
+						&params, bitdepthMax)
+					have := runSgr[P, C](got, dirty, b, iter, kind, w, h, edges, &params, bitdepthMax)
 					for i := range want {
 						if have[i] == want[i] {
 							continue

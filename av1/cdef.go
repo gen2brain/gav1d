@@ -229,18 +229,9 @@ func cdefBlockSums[P pixel](s *cdefSums, img []P, imgOff, stride int, bitdepthMi
 	}
 }
 
-// cdefDirCosts fills in the eight direction costs. The assembly form folds the
-// divide table into one weight per lane, so it is selected here rather than
-// through the dsp table, which is typed on the pixel and these are not.
-var cdefDirCosts func(s *cdefSums, cost *[8]uint32)
-
 func cdefDirCost(s *cdefSums) (int, uint32) {
 	var cost [8]uint32
-	if cdefDirCosts != nil {
-		cdefDirCosts(s, &cost)
-	} else {
-		cdefDirCostsGo(s, &cost)
-	}
+	cdefDirCosts(s, &cost)
 
 	return cdefBestDir(&cost)
 }

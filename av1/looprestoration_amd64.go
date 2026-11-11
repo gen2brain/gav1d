@@ -30,12 +30,45 @@ func wienerV8AVX512(p *uint8, hor *uint16, rows *[7]int, c *[8]int16, n int, rnd
 func wienerV16AVX512(p *uint16, hor *uint16, rows *[7]int, c *[8]int16, n int, rnd int32,
 	shift int, limit int32)
 
-var (
-	wienerH8Asm  = wienerH8AVX2
-	wienerH16Asm = wienerH16AVX2
-	wienerV8Asm  = wienerV8AVX2
-	wienerV16Asm = wienerV16AVX2
-)
+func wienerH8Asm(dst *uint16, src *uint8, n int, c *[8]int16, rnd int32, shift int, limit int32) {
+	if hasAVX512 {
+		wienerH8AVX512(dst, src, n, c, rnd, shift, limit)
+
+		return
+	}
+	wienerH8AVX2(dst, src, n, c, rnd, shift, limit)
+}
+
+func wienerH16Asm(dst *uint16, src *uint16, n int, c *[8]int16, rnd int32, shift int, limit int32) {
+	if hasAVX512 {
+		wienerH16AVX512(dst, src, n, c, rnd, shift, limit)
+
+		return
+	}
+	wienerH16AVX2(dst, src, n, c, rnd, shift, limit)
+}
+
+func wienerV8Asm(p *uint8, hor *uint16, rows *[7]int, c *[8]int16, n int, rnd int32,
+	shift int, limit int32,
+) {
+	if hasAVX512 {
+		wienerV8AVX512(p, hor, rows, c, n, rnd, shift, limit)
+
+		return
+	}
+	wienerV8AVX2(p, hor, rows, c, n, rnd, shift, limit)
+}
+
+func wienerV16Asm(p *uint16, hor *uint16, rows *[7]int, c *[8]int16, n int, rnd int32,
+	shift int, limit int32,
+) {
+	if hasAVX512 {
+		wienerV16AVX512(p, hor, rows, c, n, rnd, shift, limit)
+
+		return
+	}
+	wienerV16AVX2(p, hor, rows, c, n, rnd, shift, limit)
+}
 
 // wienerPairs reorders the taps into the four multiply-add pairs the kernels
 // consume, with the lone seventh tap in the high half so no load reaches
