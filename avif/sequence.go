@@ -420,55 +420,49 @@ func (f *file) decodeSequence(o Options) (*AVIF, error) {
 	if t == nil || t.timescale == 0 {
 		return nil, nil
 	}
-	alphaTrack := f.movie.alphaTrack(t.id)
 
-	colors, err := f.decodeTrack(t)
+	colors, err := f.trackReader(t)
 	if err != nil {
 		return nil, err
 	}
-	var alphas []*av1.Picture
-	if alphaTrack != nil {
-		if alphas, err = f.decodeTrack(alphaTrack); err != nil {
+	var alphas *trackReader
+	if at := f.movie.alphaTrack(t.id); at != nil {
+		if alphas, err = f.trackReader(at); err != nil {
 			return nil, err
 		}
 	}
 
 	out := &AVIF{LoopCount: t.loopCount()}
-	if len(colors) > 0 {
-		out.Color = f.colorInfo(f.primary(), colors[0])
-	}
-	// A track can show the same picture more than once, so nothing may go back
-	// to the pool until every frame referencing it has been converted, and a
-	// picture an image still aliases may never go back at all.
-	var distinct []*av1.Picture
-	seen := map[*av1.Picture]bool{}
-	kept := map[*av1.Picture]bool{}
-	note := func(p *av1.Picture, alias bool) {
-		if p == nil {
-			return
-		}
-		if !seen[p] {
-			seen[p] = true
-			distinct = append(distinct, p)
-		}
-		if alias {
-			kept[p] = true
-		}
-	}
-
+	ycbcr := o.ycbcrFor(f, f.primary())
 	timing := timeCursor{runs: t.timing}
-	for i, pic := range colors {
-		var alpha *av1.Picture
-		if i < len(alphas) {
-			alpha = alphas[i]
-		}
-		img, err := toImage(f, f.primary(), pic, alpha, o.ycbcrFor(f, f.primary()))
+	for {
+		pic, err := colors.next()
 		if err != nil {
 			return nil, err
 		}
-		alias := aliasesPicture(img)
-		note(pic, alias)
-		note(alpha, alias)
+		if pic == nil {
+			break
+		}
+		var alpha *av1.Picture
+		if alphas != nil {
+			if alpha, err = alphas.next(); err != nil {
+				return nil, err
+			}
+		}
+		if len(out.Image) == 0 {
+			out.Color = f.colorInfo(f.primary(), pic)
+		}
+
+		img, err := toImage(f, f.primary(), pic, alpha, ycbcr)
+		if err != nil {
+			return nil, err
+		}
+		if !aliasesPicture(img) {
+			pic.Release()
+			if alpha != nil {
+				alpha.Release()
+			}
+		}
 		if o.AutoRotate {
 			if img, err = f.applyTransforms(img, f.primary()); err != nil {
 				return nil, err
@@ -479,11 +473,6 @@ func (f *file) decodeSequence(o Options) (*AVIF, error) {
 		d := float64(timing.next()) / float64(t.timescale)
 		out.Delay = append(out.Delay, d)
 	}
-	for _, p := range distinct {
-		if !kept[p] {
-			p.Release()
-		}
-	}
 
 	if len(out.Image) == 0 {
 		return nil, nil
@@ -492,28 +481,45 @@ func (f *file) decodeSequence(o Options) (*AVIF, error) {
 	return out, nil
 }
 
-func (f *file) decodeTrack(t *track) ([]*av1.Picture, error) {
+type trackReader struct {
+	f       *file
+	samples []extent
+	d       av1.Decoder
+	pending []*av1.Picture
+}
+
+func (f *file) trackReader(t *track) (*trackReader, error) {
 	if err := t.layout(f.src.size); err != nil {
 		return nil, err
 	}
-	var d av1.Decoder
-	d.FrameSizeLimit = f.frameSizeLimit
-	var out []*av1.Picture
+	r := &trackReader{f: f, samples: t.samples}
+	r.d.FrameSizeLimit = f.frameSizeLimit
 
-	for _, s := range t.samples {
+	return r, nil
+}
+
+func (r *trackReader) next() (*av1.Picture, error) {
+	for len(r.pending) == 0 {
+		if len(r.samples) == 0 {
+			return nil, nil
+		}
+		s := r.samples[0]
+		r.samples = r.samples[1:]
 		if s.len == 0 {
 			return nil, ErrInvalid
 		}
-		b, err := f.src.at(s.off, s.len)
+		b, err := r.f.src.at(s.off, s.len)
 		if err != nil {
 			return nil, err
 		}
-		pics, err := d.DecodeOBUs(b)
+		pics, err := r.d.DecodeOBUs(b)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, pics...)
+		r.pending = append(r.pending[:0], pics...)
 	}
+	p := r.pending[0]
+	r.pending = r.pending[1:]
 
-	return out, nil
+	return p, nil
 }

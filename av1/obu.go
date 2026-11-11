@@ -105,12 +105,14 @@ type picHolder interface {
 
 // setRef replaces one reference slot, counting the memory in and out.
 func (d *Decoder) setRef(i int, s refState) {
-	if h, ok := d.refs[i].pic.(picHolder); ok {
-		h.mem().release()
-	}
 	if h, ok := s.pic.(picHolder); ok {
 		h.mem().acquire()
 	}
+	s.out.hold()
+	if h, ok := d.refs[i].pic.(picHolder); ok {
+		h.mem().release()
+	}
+	d.refs[i].out.drop()
 	d.refs[i] = s
 }
 
@@ -129,6 +131,32 @@ type pendingFrame struct {
 	done chan struct{}
 	pic  *Picture
 	err  error
+
+	mu       sync.Mutex
+	holds    int
+	finished bool
+}
+
+func (p *pendingFrame) hold() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.holds++
+	p.mu.Unlock()
+}
+
+func (p *pendingFrame) drop() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.holds--
+	free := p.holds == 0 && p.finished
+	p.mu.Unlock()
+	if free && p.pic != nil {
+		p.pic.Release()
+	}
 }
 
 func newPendingFrame() *pendingFrame {
@@ -136,8 +164,15 @@ func newPendingFrame() *pendingFrame {
 }
 
 func (p *pendingFrame) finish(pic *Picture, err error) {
+	p.mu.Lock()
 	p.pic, p.err = pic, err
+	p.finished = true
+	free := p.holds == 0
+	p.mu.Unlock()
 	close(p.done)
+	if free && pic != nil {
+		pic.Release()
+	}
 }
 
 func (p *pendingFrame) wait() (*Picture, error) {
@@ -1616,6 +1651,7 @@ func (d *Decoder) showExistingFrame() error {
 		if ref.out == nil {
 			return errInvalid
 		}
+		ref.out.hold()
 		d.queue = append(d.queue, ref.out)
 	}
 
@@ -1721,6 +1757,7 @@ func (d *Decoder) submitFrame() error {
 	}
 
 	if hdr.showFrame != 0 {
+		p.hold()
 		d.queue = append(d.queue, p)
 	}
 
@@ -1801,15 +1838,30 @@ func (d *Decoder) Receive() (*Picture, error) {
 
 	p := d.queue[0]
 	d.queue = d.queue[1:]
+	pic, err := p.wait()
+	var out *Picture
+	if pic != nil {
+		c := *pic
+		c.mem.acquire()
+		out = &c
+	}
+	p.drop()
 
-	return p.wait()
+	return out, err
+}
+
+func (d *Decoder) dropQueue() {
+	for _, p := range d.queue {
+		p.drop()
+	}
+	d.queue = nil
 }
 
 // Flush drops every queued picture and forgets the reference frames, so that
 // decoding can resume at the next keyframe.
 func (d *Decoder) Flush() {
 	d.wg.Wait()
-	d.queue = nil
+	d.dropQueue()
 
 	d.seqHdr = nil
 	d.frameHdr = nil
@@ -1830,7 +1882,7 @@ func (d *Decoder) DecodeOBUs(data []byte) ([]*Picture, error) {
 	for {
 		pic, err := d.Receive()
 		if err != nil {
-			d.queue = nil
+			d.dropQueue()
 
 			return nil, err
 		}

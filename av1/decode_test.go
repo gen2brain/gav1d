@@ -802,7 +802,10 @@ func conformanceOne(path string, skipGrain bool) (res string) {
 	d := Decoder{SkipFilmGrain: skipGrain}
 	if n, _ := strconv.Atoi(os.Getenv("FRAME_THREADS")); n != 0 {
 		d.FrameThreads = n
-		emit := func(pic *Picture) { planeRows(pic, &out) }
+		emit := func(pic *Picture) {
+			planeRows(pic, &out)
+			pic.Release()
+		}
 		if err := decodeStreaming(&d, chunks, emit); err != nil {
 			return "decode: " + err.Error()
 		}
@@ -814,6 +817,7 @@ func conformanceOne(path string, skipGrain bool) (res string) {
 			}
 			for _, pic := range pics {
 				planeRows(pic, &out)
+				pic.Release()
 			}
 		}
 	}

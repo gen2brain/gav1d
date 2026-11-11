@@ -433,12 +433,11 @@ func (f *frameContext[P, C]) decode(in, out *cdfPromise) (*Picture, error) {
 		return nil, err
 	}
 
-	pic := f.picture()
 	if hasFilmGrain(frameHdr) && !f.skipGrain {
-		pic = f.grainPicture()
+		return f.grainPicture(), nil
 	}
 
-	return pic, nil
+	return f.picture(), nil
 }
 
 func (f *frameContext[P, C]) saveRefs(d *Decoder, out *pendingFrame) {
@@ -525,6 +524,12 @@ func (f *frameContext[P, C]) releasePlanes() {
 	}
 	f.mem.release()
 	f.mem, f.srMem = nil, nil
+	for i, p := range f.refp {
+		if p != nil {
+			p.m.release()
+			f.refp[i] = nil
+		}
+	}
 
 	if f.bufs != nil {
 		f.fb.Put(f.bufs)
@@ -999,6 +1004,7 @@ func (f *frameContext[P, C]) setupRefs(d *Decoder) error {
 			return errInvalid
 		}
 		f.refp[i] = p
+		p.m.acquire()
 
 		if !refSizeValid(hdr.width[0], hdr.height, p.w, p.h) {
 			return errInvalid
